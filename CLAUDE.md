@@ -891,21 +891,38 @@ EMBEDDER_MODEL_NAME=text-embedding-3-small
 
 ## Testing
 
-Use Vitest. Cover:
+Uses Vitest 4.x. All tests run via `npm test` (171 tests across 10 files).
 
-**Governance tests:**
-- `conflict.test.js` — no conflict, soft conflict, hard conflict, authority comparison
-- `authority.test.js` — scoring, auto-supersede, human escalation
+**Commands:**
+```bash
+npm test                          # all tests
+npm run test:constitutional       # constitutional tests only (blocks CI)
+npm run test:governance           # governance layer tests
+npm run test:tools                # MCP tool tests
+npm run test:coverage             # full coverage report (lcov + html)
+npm run test:coverage:constitutional  # constitutional coverage (must be 100%)
+npx vitest run tests/constitutional/no-hard-delete.test.js  # single file
+```
 
-**Tool tests:**
-- `remember.test.js` — happy path, duplicate, conflict triggered
-- `recall.test.js` — found, not found, superseded
-- `search.test.js` — semantic results, domain filter, ranked output
+**Constitutional tests** (`tests/constitutional/` — 129 tests, 100% coverage required):
+- `no-hard-delete.test.js` — Rule 1: enforceNoHardDelete, validateManifestHasNoDeleteTools, BLOCKED_METHODS
+- `append-only-audit.test.js` — Rule 2: enforceAppendOnlyAudit, updateEntry/deleteEntry unconditional throw, SHA256 chain
+- `reason-required.test.js` — Rule 3: all invalid reason variants (null, empty, placeholder strings, <10 chars)
+- `no-self-approval.test.js` — Rule 4: identity normalization (trim+lowercase), conflict party self-resolve
+- `multi-party-config.test.js` — Rule 5: approver count, team diversity, 48h cooling period
+- `meta.test.js` — tests the test suite itself: all 5 files present, no `.skip`, source integrity
 
-- `reflect.test.js` — extraction from task summary, remember triggered
-- `export.test.js` — markdown structure, conflict section, audit trail
+**Governance tests** (`tests/governance/`):
+- `authority.test.js` — score formula, recency decay, access scaling, shouldAutoSupersede
+- `conflict.test.js` — resolveConflict (pure), detectConflict (mocked graph client)
 
-Mock Graphiti client for unit tests. Integration tests run against local FalkorDB.
+**Tool tests** (`tests/tools/`):
+- `remember.test.js` — v1 creation, DRAFT for claude/reflect, supersession, conflict_detected shape
+- `recall.test.js` — all 4 modes (default, history, at-date, specific version), XML format, freshness flag
+
+**Mocking approach:** `vi.mock()` at top-level of each test file (hoisted by Vitest). Mock at `src/graph/client.js` and `src/graph/queries.js` boundaries. `src/audit/pipeline.js` mocked to pass-through (`withAuditPipeline` calls the operation directly).
+
+**CI:** Constitutional guard job blocks all other jobs. `constitutional-guard-meta` job runs with `if: always()` to verify the guard was not skipped.
 
 ---
 
