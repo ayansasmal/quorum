@@ -1,4 +1,4 @@
-# Engram — Audit Architecture
+# Quorum — Audit Architecture
 
 ## Core Philosophy: Audit by Architecture
 
@@ -18,7 +18,7 @@ Audit by architecture:  The pipeline IS the audit trail
                         Impossible to forget — impossible to disable
 ```
 
-Engram uses audit by architecture. The audit trail is not a feature. It is the system.
+Quorum uses audit by architecture. The audit trail is not a feature. It is the system.
 
 ---
 
@@ -29,7 +29,7 @@ Every MCP tool call flows through a single mandatory pipeline. There is no code 
 ```
 Any tool call (remember, recall, forget, review, search, export...)
         ↓
-Engram Pipeline — structurally impossible to bypass
+Quorum Pipeline — structurally impossible to bypass
         ↓
 ┌────────────────────────────────────────┐
 │  1. Input validation                   │
@@ -250,11 +250,11 @@ At configurable intervals (default: daily, on every significant write), a snapsh
 }
 ```
 
-Answers: **What did Engram know at any point in time?**
+Answers: **What did Quorum know at any point in time?**
 
 Useful for incident retrospectives:
 ```
-"What did Engram know when PR #847 was merged on Nov 30th?"
+"What did Quorum know when PR #847 was merged on Nov 30th?"
 → Load snapshot_20241130
 → Reconstruct exact knowledge state at that moment
 → Trace which knowledge influenced that PR
@@ -381,9 +381,9 @@ CREATE TABLE version_audit_links (
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE version_audit_links ENABLE ROW LEVEL SECURITY;
-CREATE POLICY audit_insert_only ON audit_log FOR INSERT TO engram_app;
-CREATE POLICY versions_insert_only ON knowledge_versions FOR INSERT TO engram_app;
-CREATE POLICY links_insert_only ON version_audit_links FOR INSERT TO engram_app;
+CREATE POLICY audit_insert_only ON audit_log FOR INSERT TO quorum_app;
+CREATE POLICY versions_insert_only ON knowledge_versions FOR INSERT TO quorum_app;
+CREATE POLICY links_insert_only ON version_audit_links FOR INSERT TO quorum_app;
 ```
 
 The secondary store is now a complete independent reconstruction of both the knowledge state and its full version history — without needing the graph DB at all.
@@ -565,7 +565,7 @@ describe('Audit Pipeline Integrity', () => {
 - name: Check Graphiti delete methods are blocked
   run: npm run audit:scan-graphiti-deletes
   # Ensures no new Graphiti version exposes delete methods
-  # that aren't wrapped and blocked by Engram's pipeline
+  # that aren't wrapped and blocked by Quorum's pipeline
 ```
 
 ---
@@ -587,16 +587,16 @@ On every application start:
 ### On Demand
 ```bash
 # Verify audit chain integrity
-engram audit verify
+quorum audit verify
 
 # Generate lineage report for a knowledge node
-engram audit lineage auth:token-strategy
+quorum audit lineage auth:token-strategy
 
 # Export audit log for a time range (compliance)
-engram audit export --from 2024-11-01 --to 2024-12-01 --format jsonl
+quorum audit export --from 2024-11-01 --to 2024-12-01 --format jsonl
 
 # Show audit stats
-engram audit stats
+quorum audit stats
 ```
 
 ---
@@ -609,16 +609,16 @@ Format: JSONL (one JSON object per line, universally parseable)
 
 ```bash
 # Export everything
-engram audit export --format jsonl > audit_2024.jsonl
+quorum audit export --format jsonl > audit_2024.jsonl
 
 # Export for specific domain
-engram audit export --domain auth --format jsonl > audit_auth.jsonl
+quorum audit export --domain auth --format jsonl > audit_auth.jsonl
 
 # Export for specific time range
-engram audit export --from 2024-Q4 --format jsonl > audit_q4.jsonl
+quorum audit export --from 2024-Q4 --format jsonl > audit_q4.jsonl
 
 # Verify export integrity
-engram audit verify-export audit_2024.jsonl
+quorum audit verify-export audit_2024.jsonl
 ```
 
 The export includes chain hashes so the recipient can verify the export hasn't been tampered with after export.
@@ -631,7 +631,7 @@ The export includes chain hashes so the recipient can verify the export hasn't b
 ```
 Production incident: payment auth failing after deploy
 
-Engram audit trace:
+Quorum audit trace:
   → PR #847 merged 2024-11-30 14:30
   → auth:token-strategy recalled at 14:22 during PR #847
   → auth:token-strategy was ACTIVE with "JWT for Lambda services"
@@ -684,7 +684,7 @@ The audit log stores hashes of content, not content itself. However:
 - Governance decisions are stored — conflict detection results, authority scores
 - Timestamps are stored — when things happened
 
-The audit log is not private. It is readable by all team members. This is intentional — transparency is a governance property, not a bug. If you need to store sensitive knowledge, consider whether it belongs in Engram at all.
+The audit log is not private. It is readable by all team members. This is intentional — transparency is a governance property, not a bug. If you need to store sensitive knowledge, consider whether it belongs in Quorum at all.
 
 ---
 

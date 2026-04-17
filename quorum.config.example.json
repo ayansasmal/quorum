@@ -1,0 +1,58 @@
+{
+  "project": "my-team",
+  "group_id": "my-team",
+  "members": [
+    {
+      "name": "ayan",
+      "team": "platform",
+      "role": "principal_architect",
+      "github_username": "ayansasmal",
+      "git_email": "ayan@company.com"
+    },
+    {
+      "name": "alice",
+      "team": "security",
+      "role": "senior_engineer",
+      "github_username": "alice-sec",
+      "git_email": "alice@company.com"
+    },
+    {
+      "name": "bob",
+      "team": "platform",
+      "role": "engineer",
+      "github_username": "bobsmith",
+      "git_email": "bob@company.com"
+    },
+    {
+      "name": "carol",
+      "team": "backend",
+      "role": "junior",
+      "github_username": "carol-dev",
+      "git_email": "carol@company.com"
+    }
+  ],
+  "roles": {
+    "principal_architect": { "base_confidence": 0.90 },
+    "senior_engineer":     { "base_confidence": 0.80 },
+    "engineer":            { "base_confidence": 0.70 },
+    "junior":              { "base_confidence": 0.60 }
+  },
+  "domains": {
+    "auth": {
+      "conflict_threshold": 0.90,
+      "required_reviewer_teams": ["security"]
+    },
+    "infra": {
+      "conflict_threshold": 0.88,
+      "required_reviewer_teams": ["platform"]
+    },
+    "payments": {
+      "conflict_threshold": 0.92,
+      "required_reviewer_teams": ["security", "platform"]
+    }
+  },
+  "thresholds": {
+    "conflict_threshold": 0.85,
+    "authority_threshold": 0.20
+  }
+}

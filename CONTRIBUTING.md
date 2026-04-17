@@ -1,6 +1,6 @@
-# Contributing to Engram
+# Contributing to Quorum
 
-Welcome. Engram is early-stage OSS and contributions are very welcome — especially around the governance layer, which is the hard part nobody has solved well.
+Welcome. Quorum is early-stage OSS and contributions are very welcome — especially around the governance layer, which is the hard part nobody has solved well.
 
 ---
 
@@ -48,8 +48,8 @@ If a contribution violates any of these, it won't be merged regardless of how we
 ## Getting Started
 
 ```bash
-git clone https://github.com/yourusername/engram
-cd engram
+git clone https://github.com/yourusername/quorum
+cd quorum
 npm install
 
 # Start local stack
@@ -85,7 +85,7 @@ tests/
 
 ## Testing Requirements
 
-Engram has three testing layers. Each has different rules.
+Quorum has three testing layers. Each has different rules.
 
 **Layer 1 — Constitutional Tests (non-negotiable):**
 - 100% coverage required — no exceptions
@@ -119,7 +119,7 @@ See TESTING.md for full specifications.
 
 ## Governance Logic Contributions
 
-The governance layer is the most important and most sensitive part of Engram. When contributing here:
+The governance layer is the most important and most sensitive part of Quorum. When contributing here:
 
 - Every conflict detection change needs test cases covering: no conflict, soft conflict, hard conflict, edge cases
 - Authority weighting changes need clear rationale — why does this produce better outcomes?

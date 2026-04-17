@@ -1,0 +1,18 @@
+{{- if .Values.gateway.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "quorum.gateway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quorum.gateway.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.gateway.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "quorum.gateway.selectorLabels" . | nindent 4 }}
+{{- end -}}

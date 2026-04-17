@@ -1,4 +1,4 @@
-# Engram — Roadmap
+# Quorum — Roadmap
 
 ## North Star
 
@@ -46,7 +46,7 @@ Versioning (fundamental — ships with v0.1)
     created_by_audit reference (bidirectional with audit entry)
   → triggered_by: conflict_resolution | engineer_decision | pr_merge |
                   atlassian_sync | confidence_decay | reflect
-  → CLI: engram history topic:key — full version timeline
+  → CLI: quorum history topic:key — full version timeline
 
 Knowledge States
   → DRAFT / ACTIVE / SUPERSEDED / REJECTED / DEPRECATED
@@ -71,7 +71,7 @@ Graph
   → Basic conflict detection via semantic similarity + LLM check
 
 Infrastructure
-  → Docker Compose: FalkorDB + Engram in single command
+  → Docker Compose: FalkorDB + Quorum in single command
   → Seed data with deliberate contradictions for demo
   → README and 5-minute quick start
 
@@ -116,7 +116,7 @@ Decision Brief Generation
   → Impact statement: what breaks if this decision is wrong
   → Usage data: how often this knowledge is currently relied on
   → Related context: graph traversal surfaces what else says something relevant
-  → Engram's analysis: observation not recommendation
+  → Quorum's analysis: observation not recommendation
   → Structured options: A/B/C/D — never open-ended, never binary
   → Readable in under 2 minutes
   → Minimum engagement gate: brief open > 30 seconds before decision accepted
@@ -128,7 +128,7 @@ Right Moment Assessment
   → Urgency override: DRAFT about to be used, decision > 48h old
 
 Authority Model
-  → Role-based baseline (engram.config.yml):
+  → Role-based baseline (quorum.config.yml):
       principal_architect: 1.0
       senior_engineer:     0.8
       engineer:            0.6
@@ -306,8 +306,8 @@ Bidirectional Loop (complete knowledge lifecycle)
   Jira closed → confidence increased
   Claude Code session → all of above available as context
   Engineer implements → new knowledge via reflect()
-  Engram exports → Confluence updated
-  Confluence change → Engram sync detects, flags for review
+  Quorum exports → Confluence updated
+  Confluence change → Quorum sync detects, flags for review
 
 Scale
   → AWS Neptune support (enterprise)
@@ -318,7 +318,7 @@ Scale
 Success criteria:
   → Multiple teams using isolated but connected graphs
   → Confluence ingestion working end-to-end
-  → Diagram ingestion flow working (image → Mermaid → Engram)
+  → Diagram ingestion flow working (image → Mermaid → Quorum)
   → RFC process has processed at least 1 community constitutional proposal
 ```
 
@@ -334,7 +334,7 @@ Reliability
   → Zero data loss guarantee on write
 
 Distribution
-  → npm package: npx engram start (zero-config)
+  → npm package: npx quorum start (zero-config)
   → Docker Hub official image
   → Hosted documentation site
   → External security audit
@@ -364,7 +364,7 @@ Bidirectional Confluence Sync
   → Webhook real-time sync, supersede detection across Confluence edits
 
 Multi-Agent Orchestration
-  → Engram as shared memory for LangGraph, CrewAI, AutoGen agents
+  → Quorum as shared memory for LangGraph, CrewAI, AutoGen agents
   → Constitutional rules apply to agents too — no agent resolves silently
   → Fork-in-road interface for complex multi-agent decisions
 
@@ -380,9 +380,9 @@ Governance Analytics
   → What knowledge is never recalled (prune candidates)
 
 Autonomous Delivery
-  → BA agent: reads requirements, documents acceptance criteria into Engram
+  → BA agent: reads requirements, documents acceptance criteria into Quorum
   → QA agent: pulls known edge cases, generates test strategies
-  → Engineer agent: implements against Engram-verified patterns
+  → Engineer agent: implements against Quorum-verified patterns
   → Human only at genuine forks — not at every step
 ```
 
@@ -401,7 +401,7 @@ v1.0 → Full (200+ cases, load/chaos testing, external security audit)
 
 ## Non-Goals
 
-- Replacing Graphiti — Engram builds on it, not against it
+- Replacing Graphiti — Quorum builds on it, not against it
 - General-purpose memory for non-engineering domains
 - Consumer-facing product — this is a developer tool
 - Vendor lock-in — must work with any LLM, any graph DB

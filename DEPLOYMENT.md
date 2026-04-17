@@ -1,8 +1,8 @@
-# Engram — Deployment Guide
+# Quorum — Deployment Guide
 
 ## Overview
 
-Engram supports three deployment targets. This document covers the first two in detail. Production deployment is documented at a high level — implementation comes later.
+Quorum supports three deployment targets. This document covers the first two in detail. Production deployment is documented at a high level — implementation comes later.
 
 ```
 1. Docker Compose     → simplest, zero K8s, good for first run
@@ -53,7 +53,7 @@ Simplest path. No K8s required. Good for first-time setup and local development.
 ┌─────────────────────────────────────────┐
 │  Docker Compose Stack                   │
 │                                         │
-│  engram        → MCP server  :8000      │
+│  quorum        → MCP server  :8000      │
 │  falkordb      → graph DB    :6379      │
 │  falkordb-ui   → browser UI  :3000      │
 │  postgresql    → audit store :5432      │
@@ -61,20 +61,20 @@ Simplest path. No K8s required. Good for first-time setup and local development.
 ```
 
 **Stack includes 4 services:**
-- `engram` — the Node.js MCP server (port 8000)
-- `graphiti` — Python sidecar, Engram calls it via HTTP (port 8001)
+- `quorum` — the Node.js MCP server (port 8000)
+- `graphiti` — Python sidecar, Quorum calls it via HTTP (port 8001)
 - `falkordb` — graph database (port 6379, browser UI port 3000)
 - `postgresql` — audit secondary store (port 5432)
 
 Graphiti is Python-only — it has no npm package. It runs as a Docker sidecar.
-Engram never imports Graphiti — it calls it over HTTP.
+Quorum never imports Graphiti — it calls it over HTTP.
 
 ### Setup
 
 ```bash
 # Clone the repo
-git clone https://github.com/ayansasmal/engram
-cd engram
+git clone https://github.com/ayansasmal/quorum
+cd quorum
 
 # Copy environment file
 cp .env.example .env
@@ -89,7 +89,7 @@ docker compose up -d
 docker compose ps
 
 # NAME         STATUS    PORTS
-# engram       running   0.0.0.0:8000->8000/tcp
+# quorum       running   0.0.0.0:8000->8000/tcp
 # graphiti     running   0.0.0.0:8001->8000/tcp
 # falkordb     running   0.0.0.0:6379->6379/tcp
 #                        0.0.0.0:3000->3000/tcp
@@ -102,7 +102,7 @@ docker compose ps
 # .env.example
 
 # ─────────────────────────────────────────────
-# Graphiti sidecar LLM config (Python — not Engram Node.js)
+# Graphiti sidecar LLM config (Python — not Quorum Node.js)
 # ─────────────────────────────────────────────
 
 # LOCAL DEV: OpenAI (recommended — proven stable with Graphiti)
@@ -119,7 +119,7 @@ EMBEDDER_MODEL_NAME=text-embedding-3-small
 # EMBEDDER_MODEL_NAME=amazon.titan-embed-text-v2
 
 # ─────────────────────────────────────────────
-# Engram MCP Server (Node.js)
+# Quorum MCP Server (Node.js)
 # ─────────────────────────────────────────────
 
 # Graphiti sidecar URL (set automatically in docker-compose)
@@ -131,15 +131,15 @@ FALKORDB_URI=redis://falkordb:6379
 # Audit secondary store — PostgreSQL
 POSTGRES_HOST=postgresql
 POSTGRES_PORT=5432
-POSTGRES_DB=engram_audit
-POSTGRES_USER=engram
-POSTGRES_PASSWORD=engram_local
+POSTGRES_DB=quorum_audit
+POSTGRES_USER=quorum
+POSTGRES_PASSWORD=quorum_local
 
-# Engram config
-ENGRAM_PORT=8000
-ENGRAM_GROUP_ID=default
-ENGRAM_CONFLICT_THRESHOLD=0.85
-ENGRAM_AUTHORITY_THRESHOLD=0.20
+# Quorum config
+QUORUM_PORT=8000
+QUORUM_GROUP_ID=default
+QUORUM_CONFLICT_THRESHOLD=0.85
+QUORUM_AUTHORITY_THRESHOLD=0.20
 NODE_ENV=development
 ```
 
@@ -169,20 +169,20 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: engram_audit
-      POSTGRES_USER: engram
-      POSTGRES_PASSWORD: engram_local
+      POSTGRES_DB: quorum_audit
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum_local
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U engram"]
+      test: ["CMD-SHELL", "pg_isready -U quorum"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  engram:
+  quorum:
     build: .
     ports:
       - "8000:8000"
@@ -219,14 +219,14 @@ curl http://localhost:8000/health
 ### Connect to Claude Code
 
 ```bash
-# Add Engram as an MCP server
-claude mcp add engram -- node /path/to/engram/src/server.js
+# Add Quorum as an MCP server
+claude mcp add quorum -- node /path/to/quorum/src/server.js
 
 # Or via HTTP if MCP server is running
-claude mcp add engram --url http://localhost:8000/mcp
+claude mcp add quorum --url http://localhost:8000/mcp
 
 # Verify connection
-claude "What does Engram know about auth?"
+claude "What does Quorum know about auth?"
 ```
 
 ### FalkorDB Browser UI
@@ -246,20 +246,20 @@ docker compose down
 docker compose down -v
 
 # View logs
-docker compose logs -f engram
+docker compose logs -f quorum
 docker compose logs -f falkordb
 
-# Restart just Engram (after code changes)
-docker compose restart engram
+# Restart just Quorum (after code changes)
+docker compose restart quorum
 
-# Shell into Engram container
-docker compose exec engram sh
+# Shell into Quorum container
+docker compose exec quorum sh
 
 # Verify audit chain integrity
-docker compose exec engram node cli.js audit verify
+docker compose exec quorum node cli.js audit verify
 
 # Export audit log
-docker compose exec engram node cli.js audit export > audit.jsonl
+docker compose exec quorum node cli.js audit export > audit.jsonl
 ```
 
 ---
@@ -290,7 +290,7 @@ Docker Desktop → Settings → Kubernetes:
 16GB Mac:
   Allocate to Docker Desktop: 8GB
   FalkorDB limit:  2GB
-  Engram limit:    1GB
+  Quorum limit:    1GB
   PostgreSQL:      512MB
   OS + apps:       8GB
   → Workable, close other heavy apps while running
@@ -298,7 +298,7 @@ Docker Desktop → Settings → Kubernetes:
 32GB Mac:
   Allocate to Docker Desktop: 16GB
   FalkorDB limit:  4GB
-  Engram limit:    1GB
+  Quorum limit:    1GB
   PostgreSQL:      512MB
   → Comfortable, no constraints
 
@@ -307,7 +307,7 @@ Docker Desktop → Settings → Kubernetes:
   → No constraints at all
 ```
 
-**Honest note on FalkorDB memory:** For realistic Engram usage (500-2000 knowledge nodes for an engineering team), FalkorDB uses ~200-500MB. The 2-4GB limits are headroom, not requirements. You won't hit them during development.
+**Honest note on FalkorDB memory:** For realistic Quorum usage (500-2000 knowledge nodes for an engineering team), FalkorDB uses ~200-500MB. The 2-4GB limits are headroom, not requirements. You won't hit them during development.
 
 ### Verify Cluster
 
@@ -341,25 +341,25 @@ kubectl get storageclass
 
 ```bash
 # Create namespace
-kubectl create namespace engram
+kubectl create namespace quorum
 
 # Create secret for API keys
-kubectl create secret generic engram-secrets \
-  --namespace engram \
+kubectl create secret generic quorum-secrets \
+  --namespace quorum \
   --from-literal=anthropic-api-key=$ANTHROPIC_API_KEY \
-  --from-literal=postgres-password=engram_local \
+  --from-literal=postgres-password=quorum_local \
   --from-literal=falkordb-password=""
 ```
 
 ### Helm Chart Structure
 
 ```
-helm/engram/
+helm/quorum/
   Chart.yaml            ← chart metadata
   values.yaml           ← production defaults
   values-local.yaml     ← local overrides (lower resources)
   templates/
-    engram/
+    quorum/
       deployment.yaml
       service.yaml
       configmap.yaml
@@ -379,7 +379,7 @@ helm/engram/
 ### values-local.yaml
 
 ```yaml
-# helm/engram/values-local.yaml
+# helm/quorum/values-local.yaml
 # Local Docker Desktop overrides — lower resource limits
 
 global:
@@ -387,9 +387,9 @@ global:
   imageTag: latest
   imagePullPolicy: Always  # always pull latest in dev
 
-engram:
+quorum:
   replicas: 1
-  image: engram:local      # built locally
+  image: quorum:local      # built locally
   port: 8000
   resources:
     requests:
@@ -423,8 +423,8 @@ falkordb:
 postgresql:
   image: postgres:16-alpine
   port: 5432
-  database: engram_audit
-  username: engram
+  database: quorum_audit
+  username: quorum
   resources:
     requests:
       memory: "256Mi"
@@ -451,23 +451,23 @@ autoscaling:
 
 ```bash
 # Build local Docker image
-docker build -t engram:local .
+docker build -t quorum:local .
 
 # Install via Helm
-helm install engram ./helm/engram \
-  --namespace engram \
-  --values helm/engram/values-local.yaml \
-  --set secrets.existingSecret=engram-secrets
+helm install quorum ./helm/quorum \
+  --namespace quorum \
+  --values helm/quorum/values-local.yaml \
+  --set secrets.existingSecret=quorum-secrets
 
 # Watch pods come up
-kubectl get pods -n engram --watch
+kubectl get pods -n quorum --watch
 
 # NAME                    READY   STATUS    RESTARTS   AGE
-# engram-xxx-yyy          0/1     Init:0/1  0          5s
+# quorum-xxx-yyy          0/1     Init:0/1  0          5s
 # falkordb-0              0/1     Pending   0          5s
 # postgresql-0            0/1     Pending   0          5s
 # ...
-# engram-xxx-yyy          1/1     Running   0          45s
+# quorum-xxx-yyy          1/1     Running   0          45s
 # falkordb-0              1/1     Running   0          30s
 # postgresql-0            1/1     Running   0          25s
 ```
@@ -476,21 +476,21 @@ kubectl get pods -n engram --watch
 
 ```bash
 # Check all pods running
-kubectl get pods -n engram
+kubectl get pods -n quorum
 # All should show 1/1 Running
 
 # Check services
-kubectl get services -n engram
+kubectl get services -n quorum
 # NAME         TYPE        CLUSTER-IP    PORT(S)
-# engram       ClusterIP   10.x.x.x      8000/TCP
+# quorum       ClusterIP   10.x.x.x      8000/TCP
 # falkordb     ClusterIP   10.x.x.x      6379/TCP, 3000/TCP
 # postgresql   ClusterIP   10.x.x.x      5432/TCP
 
-# Port-forward Engram to localhost
-kubectl port-forward -n engram service/engram 8000:8000 &
+# Port-forward Quorum to localhost
+kubectl port-forward -n quorum service/quorum 8000:8000 &
 
 # Port-forward FalkorDB UI
-kubectl port-forward -n engram service/falkordb 3000:3000 &
+kubectl port-forward -n quorum service/falkordb 3000:3000 &
 
 # Health check
 curl http://localhost:8000/health
@@ -500,60 +500,60 @@ curl http://localhost:8000/health
 ### Connect to Claude Code
 
 ```bash
-# Engram is now available at localhost:8000 via port-forward
-claude mcp add engram --url http://localhost:8000/mcp
+# Quorum is now available at localhost:8000 via port-forward
+claude mcp add quorum --url http://localhost:8000/mcp
 
 # Verify
-claude "What does Engram know about auth?"
+claude "What does Quorum know about auth?"
 ```
 
 ### Seed Data on K8s
 
 ```bash
 # Run seed job
-kubectl apply -f helm/engram/templates/jobs/seed.yaml
+kubectl apply -f helm/quorum/templates/jobs/seed.yaml
 
 # Or exec into pod
-kubectl exec -it -n engram deployment/engram -- node cli.js seed
+kubectl exec -it -n quorum deployment/quorum -- node cli.js seed
 
 # Verify
-kubectl exec -it -n engram deployment/engram -- node cli.js audit verify
+kubectl exec -it -n quorum deployment/quorum -- node cli.js audit verify
 ```
 
 ### Useful K8s Commands
 
 ```bash
 # Get all resources in namespace
-kubectl get all -n engram
+kubectl get all -n quorum
 
-# View Engram logs
-kubectl logs -n engram deployment/engram -f
+# View Quorum logs
+kubectl logs -n quorum deployment/quorum -f
 
 # View FalkorDB logs
-kubectl logs -n engram statefulset/falkordb -f
+kubectl logs -n quorum statefulset/falkordb -f
 
-# Shell into Engram pod
-kubectl exec -it -n engram deployment/engram -- sh
+# Shell into Quorum pod
+kubectl exec -it -n quorum deployment/quorum -- sh
 
-# Restart Engram (after image rebuild)
-docker build -t engram:local .
-kubectl rollout restart -n engram deployment/engram
+# Restart Quorum (after image rebuild)
+docker build -t quorum:local .
+kubectl rollout restart -n quorum deployment/quorum
 
 # Upgrade Helm release (after values change)
-helm upgrade engram ./helm/engram \
-  --namespace engram \
-  --values helm/engram/values-local.yaml \
-  --set secrets.existingSecret=engram-secrets
+helm upgrade quorum ./helm/quorum \
+  --namespace quorum \
+  --values helm/quorum/values-local.yaml \
+  --set secrets.existingSecret=quorum-secrets
 
 # Uninstall (keeps PVCs — data survives)
-helm uninstall engram --namespace engram
+helm uninstall quorum --namespace quorum
 
 # Uninstall and wipe all data
-helm uninstall engram --namespace engram
-kubectl delete pvc --all -n engram
+helm uninstall quorum --namespace quorum
+kubectl delete pvc --all -n quorum
 
 # Check resource usage
-kubectl top pods -n engram
+kubectl top pods -n quorum
 ```
 
 ### Development Workflow on K8s
@@ -565,13 +565,13 @@ kubectl top pods -n engram
 vim src/tools/remember.js
 
 # 2. Rebuild image
-docker build -t engram:local .
+docker build -t quorum:local .
 
 # 3. Restart pod (picks up new image)
-kubectl rollout restart -n engram deployment/engram
+kubectl rollout restart -n quorum deployment/quorum
 
 # 4. Watch pod restart
-kubectl get pods -n engram --watch
+kubectl get pods -n quorum --watch
 
 # 5. Test
 curl http://localhost:8000/health
@@ -584,7 +584,7 @@ claude "Test remember and recall"
 
 ```
 Use Docker Compose if:
-  → First time setting up Engram
+  → First time setting up Quorum
   → You just want to try it quickly
   → You don't need K8s for anything else
   → You're building/testing the MCP tools themselves
@@ -596,7 +596,7 @@ Use Local K8s if:
   → You already have Docker Desktop K8s running for other projects
 ```
 
-Both run the exact same Engram code. The difference is purely operational — how the containers are orchestrated.
+Both run the exact same Quorum code. The difference is purely operational — how the containers are orchestrated.
 
 ---
 
@@ -614,10 +614,10 @@ Kubernetes (any cloud):
   → Ingress controller (nginx or cloud-native)
   → TLS via cert-manager
   → Secrets via External Secrets Operator (AWS Secrets Manager)
-  → HPA for Engram pods (FalkorDB and PostgreSQL are StatefulSets)
+  → HPA for Quorum pods (FalkorDB and PostgreSQL are StatefulSets)
 
 AWS Native:
-  → Engram on ECS Fargate
+  → Quorum on ECS Fargate
   → FalkorDB on ECS Fargate + EFS persistent volume
   → PostgreSQL on RDS (managed, backups handled)
   → Amazon Neptune (optional — only at very large graph scale)
@@ -632,17 +632,17 @@ AWS Native:
 ```
 Small team (< 20 engineers):
   FalkorDB:   2GB RAM, 1 CPU
-  Engram:     512MB RAM, 0.5 CPU, 2 replicas
+  Quorum:     512MB RAM, 0.5 CPU, 2 replicas
   PostgreSQL: 1GB RAM, 0.5 CPU
 
 Medium team (20-100 engineers):
   FalkorDB:   4GB RAM, 2 CPU
-  Engram:     1GB RAM, 1 CPU, 3 replicas
+  Quorum:     1GB RAM, 1 CPU, 3 replicas
   PostgreSQL: 2GB RAM, 1 CPU
 
 Large org (100+ engineers, multiple teams):
   FalkorDB:   8GB RAM, 4 CPU, primary + replica
-  Engram:     2GB RAM, 2 CPU, 5+ replicas
+  Quorum:     2GB RAM, 2 CPU, 5+ replicas
   PostgreSQL: 4GB RAM, 2 CPU (or RDS)
   Consider:   Amazon Neptune at this scale
 ```
@@ -653,7 +653,7 @@ Large org (100+ engineers, multiple teams):
 v0.2 → Helm chart production values + AWS Terraform
 v0.3 → CI/CD pipeline (GitHub Actions → ECR → ECS/K8s)
 v0.4 → Monitoring stack (Prometheus + Grafana dashboards)
-v1.0 → One-command production deploy via npx engram deploy
+v1.0 → One-command production deploy via npx quorum deploy
 ```
 
 ---
@@ -664,16 +664,16 @@ v1.0 → One-command production deploy via npx engram deploy
 
 ```bash
 # Container not starting — check logs
-docker compose logs engram
+docker compose logs quorum
 
 # FalkorDB connection refused
 docker compose logs falkordb
 # Wait for "Ready to accept connections" in logs
-# Engram has health check dependency — will retry
+# Quorum has health check dependency — will retry
 
 # Port already in use
 lsof -i :8000  # find what's using the port
-# Change port in .env: ENGRAM_PORT=8001
+# Change port in .env: QUORUM_PORT=8001
 
 # Fresh start — wipe everything
 docker compose down -v
@@ -684,20 +684,20 @@ docker compose up -d
 
 ```bash
 # Pod stuck in Pending
-kubectl describe pod -n engram <pod-name>
+kubectl describe pod -n quorum <pod-name>
 # Usually: PVC not bound, insufficient resources, image pull issue
 
 # PVC not binding
-kubectl get pvc -n engram
-kubectl describe pvc -n engram <pvc-name>
+kubectl get pvc -n quorum
+kubectl describe pvc -n quorum <pvc-name>
 # Check storageClass is correct: local-path
 
-# Image pull error (engram:local)
-# Must build image first: docker build -t engram:local .
+# Image pull error (quorum:local)
+# Must build image first: docker build -t quorum:local .
 # Docker Desktop K8s shares the local Docker daemon — no push needed
 
 # Port-forward died
-kubectl port-forward -n engram service/engram 8000:8000 &
+kubectl port-forward -n quorum service/quorum 8000:8000 &
 # Add & to background it, or run in a separate terminal
 
 # K8s not enabled in Docker Desktop
@@ -709,7 +709,7 @@ kubectl describe node docker-desktop
 # Usually resolves itself — Docker Desktop K8s can take 2-3 min to start
 
 # Resource limits hit (OOMKilled)
-kubectl describe pod -n engram <pod-name>
+kubectl describe pod -n quorum <pod-name>
 # Increase memory limits in values-local.yaml
 # Or allocate more RAM to Docker Desktop
 ```
@@ -727,7 +727,7 @@ redis-cli -p 6379 GRAPH.LIST
 # Check memory usage
 redis-cli -p 6379 INFO memory
 # used_memory_human: shows actual usage
-# For Engram dev usage, expect < 100MB
+# For Quorum dev usage, expect < 100MB
 ```
 
 ### Audit Chain
@@ -741,3 +741,267 @@ node cli.js audit verify
 node cli.js audit diagnose
 # Shows which entry broke the chain and when
 ```
+
+---
+
+## Production Secrets Management (GAP-03)
+
+`.env` files are fine for local development. In production, secrets must come from
+a secrets manager — never from a file on disk inside the container.
+
+### Why not `.env` in production
+
+- A file on disk can be read by anyone with container exec access
+- Secrets in environment variables injected from a file survive container restarts but
+  are visible in `docker inspect` output
+- AWS Secrets Manager and Vault provide rotation, audit trails, and fine-grained access control
+
+### Option A — AWS Secrets Manager (recommended for EKS)
+
+Store all Quorum Gateway secrets as a single JSON secret:
+
+```bash
+# Create the secret
+aws secretsmanager create-secret \
+  --name "quorum/production/gateway" \
+  --description "Quorum Gateway production secrets" \
+  --secret-string '{
+    "POSTGRES_PASSWORD": "...",
+    "QUORUM_JWT_PRIVATE_KEY": "...",
+    "QUORUM_JWT_PUBLIC_KEY": "...",
+    "OPENAI_API_KEY": "..."
+  }'
+```
+
+In EKS, use the **AWS Secrets Store CSI Driver** to mount secrets as environment variables:
+
+```yaml
+# helm/quorum/values-aws.yaml (already includes this pattern)
+gateway:
+  secretsManager:
+    enabled: true
+    secretName: "quorum/production/gateway"
+    region: "ap-southeast-2"
+
+# The Helm chart mounts the secret via SecretProviderClass.
+# No secret values appear in values.yaml or Kubernetes Secret objects.
+```
+
+The gateway pod's IRSA role (provisioned by the Terraform in `terraform/`) must have
+`secretsmanager:GetSecretValue` permission. Add to `terraform/main.tf`:
+
+```hcl
+# Add to aws_iam_role_policy.quorum_gateway_s3 (or a separate policy)
+{
+  Sid    = "ReadGatewaySecrets"
+  Effect = "Allow"
+  Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+  Resource = "arn:aws:iam::<account>:secret:quorum/production/*"
+}
+```
+
+### Option B — Kubernetes Secrets (simpler, less secure)
+
+If you are not on EKS or do not want Secrets Manager:
+
+```bash
+# Create the Kubernetes secret
+kubectl create secret generic quorum-gateway-secrets \
+  --namespace quorum \
+  --from-literal=POSTGRES_PASSWORD='...' \
+  --from-literal=QUORUM_JWT_PRIVATE_KEY='...' \
+  --from-literal=QUORUM_JWT_PUBLIC_KEY='...' \
+  --from-literal=OPENAI_API_KEY='...'
+```
+
+Reference in Helm `values-aws.yaml`:
+
+```yaml
+gateway:
+  existingSecret: "quorum-gateway-secrets"
+```
+
+The Helm chart reads `existingSecret` and injects the keys as environment variables
+via `envFrom.secretRef`. No plaintext values appear in the chart.
+
+**Limitation:** Kubernetes Secrets are base64-encoded, not encrypted by default.
+Enable [KMS envelope encryption](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+for the etcd data store to encrypt secrets at rest.
+
+### Option C — HashiCorp Vault
+
+If your organisation runs Vault:
+
+```bash
+# Write secrets to Vault
+vault kv put secret/quorum/production \
+  POSTGRES_PASSWORD="..." \
+  QUORUM_JWT_PRIVATE_KEY="..." \
+  QUORUM_JWT_PUBLIC_KEY="..."
+```
+
+Use the [Vault Agent Sidecar Injector](https://developer.hashicorp.com/vault/docs/platform/k8s/injector)
+or [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/platform/k8s/vso) to
+inject secrets into the gateway pod at startup.
+
+### Local dev with LocalStack
+
+The `scripts/setup_env.sh local` script writes dummy credentials to `.env`:
+
+```
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_ENDPOINT_URL=http://localhost:4566
+```
+
+These are only written for local environments. The `prod` path never touches `.env`.
+
+### What never goes in git
+
+```
+.env                          # gitignored
+terraform/terraform.tfvars    # gitignored — contains team lead ARNs
+*.pem                         # any certificate private keys
+*_private_key*                # JWT signing keys
+```
+
+---
+
+## TLS / HTTPS (GAP-04)
+
+The Quorum Gateway (`src/gateway/server.js`) serves plain HTTP on port 3001.
+TLS must be terminated at the layer in front of it. The gateway never needs to
+handle TLS directly — this is standard practice for internal microservices.
+
+### Production — AWS ALB (EKS)
+
+The Helm chart (`helm/quorum/values-aws.yaml`) already includes an ALB Ingress
+annotation for ACM certificate termination:
+
+```yaml
+# helm/quorum/values-aws.yaml
+gateway:
+  ingress:
+    enabled: true
+    className: alb
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-southeast-2:ACCOUNT:certificate/CERT-ID"
+      alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+    hosts:
+      - host: quorum.your-company.internal
+        paths:
+          - path: /
+            pathType: Prefix
+```
+
+Traffic flow:
+```
+Engineer → HTTPS :443 → ALB (TLS termination, ACM cert) → HTTP :3001 → Gateway pod
+```
+
+The ALB handles the certificate — no cert files inside the pod.
+
+### Local dev — Caddy reverse proxy
+
+Caddy is the simplest local TLS option. It auto-generates a self-signed certificate
+trusted by your local machine:
+
+```bash
+# Install
+brew install caddy
+
+# Create Caddyfile in the quorum root
+cat > Caddyfile <<'EOF'
+quorum.localhost {
+  reverse_proxy localhost:3001
+}
+EOF
+
+# Start
+caddy run
+
+# Now the gateway is available at https://quorum.localhost
+# Caddy auto-generates a certificate trusted by your OS keychain
+```
+
+Update `.quorum` to use HTTPS:
+```json
+{
+  "gateway_url": "https://quorum.localhost",
+  "project_id": "platform-team"
+}
+```
+
+### Local dev — nginx reverse proxy
+
+If you prefer nginx:
+
+```nginx
+# /usr/local/etc/nginx/servers/quorum.conf
+server {
+    listen 443 ssl;
+    server_name quorum.localhost;
+
+    ssl_certificate     /path/to/quorum.localhost+1.pem;
+    ssl_certificate_key /path/to/quorum.localhost+1-key.pem;
+
+    location / {
+        proxy_pass         http://localhost:3001;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Generate a locally-trusted certificate with [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+brew install mkcert
+mkcert -install                           # installs local CA into OS keychain
+mkcert quorum.localhost 127.0.0.1         # generates the cert + key pair
+# → quorum.localhost+1.pem and quorum.localhost+1-key.pem
+```
+
+### Docker Compose — Caddy sidecar
+
+Add Caddy as a sidecar in `docker-compose.yml` for a fully containerised local TLS setup:
+
+```yaml
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+
+volumes:
+  caddy_data:
+  caddy_config:
+```
+
+```
+# Caddyfile
+quorum.localhost {
+  reverse_proxy gateway:3001
+}
+```
+
+### Checklist before going to production
+
+- [ ] TLS terminated at ALB (ACM cert) or ingress controller (cert-manager)
+- [ ] Gateway pod only listens on HTTP internally — no TLS config in `src/gateway/server.js`
+- [ ] `QUORUM_GATEWAY_URL` in all `.quorum` files uses `https://`
+- [ ] `alb.ingress.kubernetes.io/ssl-redirect: "443"` forces HTTP → HTTPS redirect
+- [ ] Certificate auto-renews (ACM manages this automatically; cert-manager handles it for nginx ingress)

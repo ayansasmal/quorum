@@ -1,0 +1,131 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+      - "3000:3000"  # FalkorDB browser UI
+    volumes:
+      - falkordb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quorum_audit
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quorum"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP.
+  # Graphiti has no npm package — do NOT try to import it into Node.js.
+  graphiti:
+    image: zep/graphiti-mcp:latest
+    ports:
+      - "8001:8000"  # host:container — inside Docker network use http://graphiti:8000
+    environment:
+      - FALKORDB_URI=redis://falkordb:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o-mini}
+      - EMBEDDER_MODEL_NAME=${EMBEDDER_MODEL_NAME:-text-embedding-3-small}
+      - GROUP_ID=${QUORUM_GROUP_ID:-default}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    depends_on:
+      falkordb:
+        condition: service_healthy
+
+  # Quorum Gateway — central microservice, holds all infrastructure credentials.
+  # Engineers only need QUORUM_GATEWAY_URL + their GitHub token.
+  # Exposes port 3001. In production, place behind a TLS-terminating load balancer.
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    ports:
+      - "3001:3001"
+    environment:
+      # Infrastructure (only the gateway holds these — never on engineer machines)
+      - GRAPHITI_URL=http://graphiti:8000
+      - POSTGRES_HOST=postgresql
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=quorum
+      - POSTGRES_PASSWORD=quorum_local
+      - POSTGRES_DB=quorum_audit
+      - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-company-quorum-configs}
+      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      # JWT signing keys — generate with openssl, store in secrets manager for production
+      # Leave unset in dev: gateway generates an ephemeral key pair automatically
+      - QUORUM_JWT_PRIVATE_KEY=${QUORUM_JWT_PRIVATE_KEY:-}
+      - QUORUM_JWT_PUBLIC_KEY=${QUORUM_JWT_PUBLIC_KEY:-}
+      - QUORUM_GATEWAY_PORT=3001
+      # Local dev only — skip S3, load config from this path inside the container
+      - QUORUM_CONFIG_PATH=${QUORUM_CONFIG_PATH:-}
+      - NODE_ENV=${NODE_ENV:-development}
+    volumes:
+      - ./quorum.config.example.json:/app/quorum.config.example.json:ro
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # Quorum MCP — runs on engineer machines via Claude Code MCP config, not Docker.
+  # Kept here for local integration testing of the full central stack.
+  # In production, engineers run this locally: node src/server.js
+  quorum:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # When QUORUM_GATEWAY_URL is set, Quorum routes all DB + Graphiti calls
+      # through the gateway instead of connecting directly.
+      - QUORUM_GATEWAY_URL=http://gateway:3001
+      - QUORUM_GROUP_ID=${QUORUM_GROUP_ID:-default}
+      - QUORUM_CONFLICT_THRESHOLD=${QUORUM_CONFLICT_THRESHOLD:-0.85}
+      - QUORUM_AUTHORITY_THRESHOLD=${QUORUM_AUTHORITY_THRESHOLD:-0.20}
+      - QUORUM_PORT=8000
+      - NODE_ENV=${NODE_ENV:-development}
+      # For local dev without gateway: direct connections
+      - GRAPHITI_URL=http://graphiti:8000
+      - POSTGRES_HOST=postgresql
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=quorum
+      - POSTGRES_PASSWORD=quorum_local
+      - POSTGRES_DB=quorum_audit
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+volumes:
+  falkordb_data:
+  postgres_data:

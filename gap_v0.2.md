@@ -1,4 +1,4 @@
-# Engram — Gap Analysis v0.2
+# Quorum — Gap Analysis v0.2
 
 > Reviewed after v0.2 implementation. Gaps identified by tracing the full end-to-end
 > journey: central stack setup → project config → engineer install → daily use.
@@ -15,8 +15,8 @@
 `src/server.js` uses `StdioServerTransport` only. For central deployment where engineers
 connect remotely, a `StreamableHTTPServerTransport` endpoint is required.
 
-**Implemented architecture:** Engram MCP stays stdio on the engineer's machine.
-A separate **Engram Gateway** microservice (`src/gateway/`) runs centrally, handling:
+**Implemented architecture:** Quorum MCP stays stdio on the engineer's machine.
+A separate **Quorum Gateway** microservice (`src/gateway/`) runs centrally, handling:
 - `POST /auth/token` — GitHub token → short-lived ES256 JWT (1-hour TTL)
 - `POST /graphiti/*` — JWT-authenticated proxy to internal Graphiti
 - `GET|POST|PATCH /pg/*` — JWT-authenticated PostgreSQL REST API (project-scoped)
@@ -24,14 +24,14 @@ A separate **Engram Gateway** microservice (`src/gateway/`) runs centrally, hand
 - `GET /projects` — list projects the engineer is a member of
 - `GET /.well-known/jwks.json` — public key for local JWT verification
 
-Local Engram's `src/graph/client.js` routes Graphiti calls through the gateway when
-`ENGRAM_GATEWAY_URL` is set. Tool handlers receive either a `pg.Pool` (direct mode)
+Local Quorum's `src/graph/client.js` routes Graphiti calls through the gateway when
+`QUORUM_GATEWAY_URL` is set. Tool handlers receive either a `pg.Pool` (direct mode)
 or a `GatewayClient` (gateway mode) — both implement the same interface.
 
 **Files added:**
 - `src/gateway/server.js` — Express gateway entry point (port 3001)
 - `src/gateway/keys.js` — ES256 key management (ephemeral in dev, env vars in prod)
-- `src/gateway/client.js` — gateway HTTP client used by local Engram MCP
+- `src/gateway/client.js` — gateway HTTP client used by local Quorum MCP
 - `src/gateway/config-cache.js` — S3 config cache with ETag conditional refresh
 - `src/gateway/middleware/verify-jwt.js` — ES256 JWT verification middleware
 - `src/gateway/routes/auth.js` — GitHub token → JWT exchange
@@ -42,11 +42,11 @@ or a `GatewayClient` (gateway mode) — both implement the same interface.
 - `src/gateway/routes/projects.js` — project membership list
 
 **Files updated:**
-- `src/graph/client.js` — gateway-mode routing when `ENGRAM_GATEWAY_URL` is set
+- `src/graph/client.js` — gateway-mode routing when `QUORUM_GATEWAY_URL` is set
 - `src/server.js` — gateway client created at startup; identity from JWT in gateway mode
 - `Dockerfile.gateway` — gateway Docker image
 - `docker-compose.yml` — gateway service added
-- `.env.example` — `ENGRAM_GATEWAY_URL`, `ENGRAM_GATEWAY_PORT`, JWT key vars
+- `.env.example` — `QUORUM_GATEWAY_URL`, `QUORUM_GATEWAY_PORT`, JWT key vars
 
 ---
 
@@ -76,7 +76,7 @@ AWS-based deployments. The AWS pattern is partially documented in `values-aws.ya
 
 ### GAP-04 · TLS / HTTPS not addressed `MEDIUM` ⏳ PENDING
 
-The Engram Gateway (GAP-01) is plain HTTP internally. TLS must be terminated
+The Quorum Gateway (GAP-01) is plain HTTP internally. TLS must be terminated
 at the ingress layer:
 - **Helm:** `values-aws.yaml` includes ALB ingress with ACM certificate annotation
 - **Local:** NGINX / Caddy reverse proxy in front of gateway on port 3001
@@ -86,11 +86,11 @@ at the ingress layer:
 
 ## Act 2 — Project Config Setup
 
-### GAP-05 · No `engram config validate` command `HIGH` ✅ RESOLVED
+### GAP-05 · No `quorum config validate` command `HIGH` ✅ RESOLVED
 
 **Implemented:**
 - `POST /config/validate` gateway endpoint (no auth required — useful for CI)
-- `engram config validate <file>` CLI command — reads local JSON file, calls the gateway endpoint, prints member count / role / domain summary on success or Zod validation errors on failure.
+- `quorum config validate <file>` CLI command — reads local JSON file, calls the gateway endpoint, prints member count / role / domain summary on success or Zod validation errors on failure.
 
 ---
 
@@ -103,7 +103,7 @@ at the ingress layer:
   - **KMS key** with annual rotation, scoped to gateway role + team leads; bucket bucket_key_enabled (reduces KMS API cost)
   - **S3 bucket** with versioning, SSE-KMS, public access block, `prevent_destroy` lifecycle rule
   - **S3 bucket policy** — denies non-HTTPS, denies unencrypted uploads, allows gateway read, allows team lead write
-  - **IAM role** `engram-gateway-{env}` with IRSA trust policy (EKS OIDC provider)
+  - **IAM role** `quorum-gateway-{env}` with IRSA trust policy (EKS OIDC provider)
   - **IAM policy** per project for team leads (scoped to `{project_id}/*` prefix)
   - **S3 lifecycle rule** — noncurrent versions transition to STANDARD_IA (90d) then GLACIER_IR (365d)
 - `outputs.tf` — bucket name/ARN, KMS ARN, gateway role ARN, team lead policy ARNs
@@ -113,32 +113,32 @@ at the ingress layer:
 
 ---
 
-### GAP-07 · No `engram config show` command `LOW` ✅ RESOLVED
+### GAP-07 · No `quorum config show` command `LOW` ✅ RESOLVED
 
 **Implemented:**
 - `GET /config/:projectId` gateway endpoint
-- `engram config show` CLI command — reads `.engram` for project_id, fetches a JWT via `ENGRAM_GITHUB_TOKEN`, calls the endpoint, prints the JSON config.
+- `quorum config show` CLI command — reads `.quorum` for project_id, fetches a JWT via `QUORUM_GITHUB_TOKEN`, calls the endpoint, prints the JSON config.
 
 ---
 
 ## Act 3 — Engineer Setup
 
-### GAP-08 · No central URL discovery or `.engram` project file `HIGH` ✅ RESOLVED
+### GAP-08 · No central URL discovery or `.quorum` project file `HIGH` ✅ RESOLVED
 
 **Implemented:**
-- `src/engram-file.js` — walks up the directory tree from `process.cwd()` to find a `.engram` file; applies `gateway_url` and `project_id` to env vars as fallbacks if not already set.
-- `src/server.js` — calls `applyEngramFileDefaults()` at the very top of startup (before any other initialization).
-- `cli.js` — `engram init` command: interactive prompts for `gateway_url` and `project_id`, creates `.engram` in current directory. Supports `--gateway-url`, `--project-id`, `--yes` flags for non-interactive use.
+- `src/quorum-file.js` — walks up the directory tree from `process.cwd()` to find a `.quorum` file; applies `gateway_url` and `project_id` to env vars as fallbacks if not already set.
+- `src/server.js` — calls `applyQuorumFileDefaults()` at the very top of startup (before any other initialization).
+- `cli.js` — `quorum init` command: interactive prompts for `gateway_url` and `project_id`, creates `.quorum` in current directory. Supports `--gateway-url`, `--project-id`, `--yes` flags for non-interactive use.
 
 **File format** (committed to each project repo, no credentials):
 ```json
 {
-  "gateway_url": "https://engram.company.internal",
+  "gateway_url": "https://quorum.company.internal",
   "project_id": "platform-team"
 }
 ```
 
-Engineers `cd my-project && claude` — Engram auto-discovers gateway and project, no manual env var required.
+Engineers `cd my-project && claude` — Quorum auto-discovers gateway and project, no manual env var required.
 
 ---
 
@@ -168,7 +168,7 @@ Engineers `cd my-project && claude` — Engram auto-discovers gateway and projec
 
 **Implemented:**
 - `GET /projects` gateway endpoint (JWT required)
-- `engram projects list` CLI command — fetches JWT via `ENGRAM_GITHUB_TOKEN`, prints all projects the authenticated engineer belongs to. Marks the current project (from `.engram` or env) with `←`.
+- `quorum projects list` CLI command — fetches JWT via `QUORUM_GITHUB_TOKEN`, prints all projects the authenticated engineer belongs to. Marks the current project (from `.quorum` or env) with `←`.
 
 ---
 
@@ -181,8 +181,8 @@ session-start pending check, domain context loading, mid-task recall/remember,
 post-task reflect workflow, tool reference, confidence guidelines, domain naming
 conventions, conflict resolution guide, constitutional rules, and quick reference.
 
-Place this file in `.claude/skills/` of any project using Engram to give Claude Code
-agents full behavioral guidance for operating within the Engram governance model.
+Place this file in `.claude/skills/` of any project using Quorum to give Claude Code
+agents full behavioral guidance for operating within the Quorum governance model.
 
 ---
 
@@ -193,10 +193,10 @@ P1 — Data integrity / security
   ✅ GAP-02  Audit scan scripts (audit-scan.js + audit-scan-deletes.js)
 
 P2 — Setup UX
-  ✅ GAP-08  .engram project file + engram init command
-  ✅ GAP-05  engram config validate CLI command
-  ✅ GAP-07  engram config show CLI command
-  ✅ GAP-11  engram projects list CLI command
+  ✅ GAP-08  .quorum project file + quorum init command
+  ✅ GAP-05  quorum config validate CLI command
+  ✅ GAP-07  quorum config show CLI command
+  ✅ GAP-11  quorum projects list CLI command
   ✅ GAP-06  S3 bucket IaC (Terraform / CloudFormation)
 
 P3 — Operational hardening
@@ -213,15 +213,15 @@ LAST — Once all implementation is complete
 
 | Gap | Description | Resolution |
 |-----|-------------|------------|
-| GAP-01 | HTTP transport | Engram Gateway microservice (ES256 JWT, gateway proxy) |
+| GAP-01 | HTTP transport | Quorum Gateway microservice (ES256 JWT, gateway proxy) |
 | GAP-02 | Audit scan scripts | audit-scan.js + audit-scan-deletes.js; 15 real violations found and fixed |
-| GAP-05 | Config validate CLI | engram config validate <file> wraps POST /config/validate |
-| GAP-07 | Config show CLI | engram config show wraps GET /config/:projectId |
+| GAP-05 | Config validate CLI | quorum config validate <file> wraps POST /config/validate |
+| GAP-07 | Config show CLI | quorum config show wraps GET /config/:projectId |
 | GAP-06 | S3 + IAM Terraform | terraform/ with KMS, bucket policy, IRSA role, per-project team lead policies |
-| GAP-08 | .engram project file | src/engram-file.js + engram init + server.js auto-discovery |
+| GAP-08 | .quorum project file | src/quorum-file.js + quorum init + server.js auto-discovery |
 | GAP-09 | Tags dropped in insertVersion | Fixed: tags column + getVersionsByTag added |
 | GAP-10 | No project scoping | Fixed: project_id column + query scoping + gateway enforcement |
-| GAP-11 | Projects list CLI | engram projects list wraps GET /projects |
+| GAP-11 | Projects list CLI | quorum projects list wraps GET /projects |
 | GAP-03 | Production secrets | DEPLOYMENT.md: AWS Secrets Manager + CSI Driver, K8s etcd KMS, Vault |
 | GAP-04 | TLS / HTTPS | DEPLOYMENT.md: ALB+ACM (EKS), Caddy (local), nginx+mkcert, pre-prod checklist |
 | GAP-12 | skill/SKILL.md | Full session lifecycle skill — session start, during work, post-task reflect |

@@ -1,8 +1,8 @@
-# Engram — Architecture
+# Quorum — Architecture
 
 ## Overview
 
-Engram is a governance layer that sits between Claude Code / AI agents and Graphiti's temporal knowledge graph. It does not replace Graphiti — it extends it with the one thing Graphiti intentionally omits: human-governed conflict resolution.
+Quorum is a governance layer that sits between Claude Code / AI agents and Graphiti's temporal knowledge graph. It does not replace Graphiti — it extends it with the one thing Graphiti intentionally omits: human-governed conflict resolution.
 
 ---
 
@@ -12,7 +12,7 @@ Engram is a governance layer that sits between Claude Code / AI agents and Graph
 Every memory operation asks: Who added this? Does it conflict? Should a human be notified? Is this traceable? These are not afterthought checks — they are first-class primitives baked into every tool.
 
 ### 2. Constitution over Rules
-Engram does not maintain a blocklist of forbidden knowledge. It maintains a framework for judgment. Like Anthropic's model spec for Claude, Engram bakes values into how knowledge is reasoned about — not filters applied on top.
+Quorum does not maintain a blocklist of forbidden knowledge. It maintains a framework for judgment. Like Anthropic's model spec for Claude, Quorum bakes values into how knowledge is reasoned about — not filters applied on top.
 
 ### 3. Provenance Always
 Every node carries: author, timestamp, confidence, source episode, conflict history. Nothing is anonymous. Nothing is untrackable.
@@ -21,7 +21,7 @@ Every node carries: author, timestamp, confidence, source episode, conflict hist
 Agents operate autonomously within established knowledge. At genuine ambiguity — a contradiction, a superseded decision, a low-confidence assertion — humans receive a structured decision. Not a wall. A choice.
 
 ### 5. Silent Automatic ≠ Safe
-Graphiti resolves conflicts automatically by recency. Engram questions whether recency is the right signal for engineering decisions. A junior engineer's new addition should not silently overwrite a senior architect's 6-month-old ADR.
+Graphiti resolves conflicts automatically by recency. Quorum questions whether recency is the right signal for engineering decisions. A junior engineer's new addition should not silently overwrite a senior architect's 6-month-old ADR.
 
 ---
 
@@ -29,7 +29,7 @@ Graphiti resolves conflicts automatically by recency. Engram questions whether r
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    Engram                            │
+│                    Quorum                            │
 │                                                      │
 │  ┌─────────────┐    ┌───────────────────────────┐   │
 │  │ MCP Server  │    │   Governance Layer         │   │
@@ -80,17 +80,17 @@ Graphiti resolves conflicts automatically by recency. Engram questions whether r
 
 ### Runtime Architecture
 
-Graphiti is **Python-only** — it has no npm or Node.js package. Engram (Node.js) calls Graphiti via HTTP. Graphiti runs as a Python Docker sidecar alongside Engram.
+Graphiti is **Python-only** — it has no npm or Node.js package. Quorum (Node.js) calls Graphiti via HTTP. Graphiti runs as a Python Docker sidecar alongside Quorum.
 
 ```
-Engram MCP Server (Node.js :8000)
+Quorum MCP Server (Node.js :8000)
         ↓ HTTP/MCP calls
 Graphiti MCP Server (Python :8001)    ← Docker sidecar
         ↓
 FalkorDB (:6379)
 ```
 
-Engram never imports Graphiti. It calls it like any other HTTP service.
+Quorum never imports Graphiti. It calls it like any other HTTP service.
 
 ### LLM Configuration for Graphiti Sidecar
 
@@ -116,7 +116,7 @@ Note:         Graphiti supports Anthropic direct API but warns structured
 - `group_id` namespacing for team isolation
 - FalkorDB, Neo4j, Amazon Neptune backends
 
-### What Engram Adds
+### What Quorum Adds
 - Engineering-domain entity types (Decision, Pattern, Constraint, Runbook, Requirement)
 - Authority weighting — not all writes are equal
 - Human-in-the-loop governance at conflict points
@@ -128,7 +128,7 @@ Note:         Graphiti supports Anthropic direct API but warns structured
 - Export to Markdown and Confluence
 - Self-evolving Claude Code skill
 
-### HTTP Calls from Engram to Graphiti
+### HTTP Calls from Quorum to Graphiti
 
 ```
 remember()  →  POST /mcp {tool: "search_nodes"}   (conflict check)
@@ -150,7 +150,7 @@ forget()    →  POST /mcp {tool: "delete_episode"} (soft via metadata)
 
 ## Entity Schema
 
-Engram extends Graphiti's default entity types with engineering-specific ones:
+Quorum extends Graphiti's default entity types with engineering-specific ones:
 
 ```
 Decision
@@ -261,14 +261,14 @@ recall("auth", "token-strategy", { version: 1 })
 → v1 with note: "superseded by v2 on Jun 2024"
 ```
 
-Temporal recall answers: **"What did Engram know when PR #847 was merged?"** — deterministically, from the audit chain.
+Temporal recall answers: **"What did Quorum know when PR #847 was merged?"** — deterministically, from the audit chain.
 
 ### How Claude Surfaces Version Changes
 
 When a node has been recently updated, Claude flags it:
 
 ```
-[Engram: auth:token-strategy | v3 ACTIVE | @ayan | Dec 2024]
+[Quorum: auth:token-strategy | v3 ACTIVE | @ayan | Dec 2024]
 "JWT for Lambda, session tokens for non-Lambda internal"
 
 ℹ️  Updated 2 weeks ago from v2.
@@ -324,7 +324,7 @@ No UPDATE or DELETE ever runs on these tables. Append-only is enforced at the ap
 ### CLI — Version History
 
 ```bash
-engram history auth:token-strategy
+quorum history auth:token-strategy
 
 # auth:token-strategy — Version History
 # ──────────────────────────────────────────────────────
@@ -483,13 +483,13 @@ Retrieves knowledge by exact topic:key with structured XML injection.
 
 Output:
 ```xml
-<engram_memory topic="auth" key="token-strategy" confidence="0.9"
+<quorum_memory topic="auth" key="token-strategy" confidence="0.9"
                author="ayan" updated="2024-12-01"
                relates_to="auth:delegation-flow">
   Use JWT for external services, session tokens for internal.
   Rationale: stateless lambdas require JWT, internal services benefit
   from session revocation capability.
-</engram_memory>
+</quorum_memory>
 ```
 
 XML format is intentional — Claude's attention mechanism responds better to structured, labelled context than raw prose.
@@ -553,20 +553,20 @@ The Claude Code skill (`skill/SKILL.md`) instructs Claude to:
 
 **During task:**
 - Call `recall()` when making implementation decisions
-- Prefer Engram knowledge over generic best practices
-- Flag when Engram knowledge seems outdated or incomplete
+- Prefer Quorum knowledge over generic best practices
+- Flag when Quorum knowledge seems outdated or incomplete
 
 **After task completion:**
-- Reflect: "What did I learn that isn't in Engram?"
+- Reflect: "What did I learn that isn't in Quorum?"
 - Extract decisions, patterns, constraints discovered
 - Call `remember()` for each with high confidence if well-validated
 - Surface conflicts immediately if any arise
 
 **Self-check questions:**
 - "Did I make a decision a future engineer should know about?"
-- "Did I discover a domain constraint not in Engram?"
+- "Did I discover a domain constraint not in Quorum?"
 - "Did I apply a pattern others should reuse?"
-- "Did existing Engram knowledge lead me astray?"
+- "Did existing Quorum knowledge lead me astray?"
 
 ---
 
@@ -576,7 +576,7 @@ The Claude Code skill (`skill/SKILL.md`) instructs Claude to:
 
 ```markdown
 # {Topic} Domain — Engineering Knowledge
-> Generated by Engram | {timestamp} | {n} active nodes
+> Generated by Quorum | {timestamp} | {n} active nodes
 
 ## ✅ Active Knowledge
 
@@ -611,12 +611,12 @@ The Claude Code skill (`skill/SKILL.md`) instructs Claude to:
 
 ## Atlassian MCP Integration
 
-Engram connects to Jira and Confluence via the published Atlassian MCP server. This is a read-only enrichment layer — Engram reads from Atlassian to build richer knowledge, but never writes back (except via the existing Confluence export tool).
+Quorum connects to Jira and Confluence via the published Atlassian MCP server. This is a read-only enrichment layer — Quorum reads from Atlassian to build richer knowledge, but never writes back (except via the existing Confluence export tool).
 
 ### Architecture
 
 ```
-Engram enrichment trigger
+Quorum enrichment trigger
         ↓
 Atlassian MCP Server (published by Atlassian, OAuth auth)
         ↓
@@ -624,12 +624,12 @@ Atlassian Cloud (Jira + Confluence)
         ↓
 Raw Atlassian content
         ↓
-Engram Enrichment Agent (Claude)
+Quorum Enrichment Agent (Claude)
   → extracts decisions, requirements, constraints, patterns
   → identifies supersede relationships
   → diagrams handled separately via image → Mermaid flow (human-assisted)
         ↓
-Engram Governance Pipeline (same pipeline as always)
+Quorum Governance Pipeline (same pipeline as always)
   → conflict check
   → enters DRAFT
   → reviewer notified
@@ -643,7 +643,7 @@ Graph updated with enriched provenance
 ```
 On remember()
   Engineer references a Jira ticket or Confluence URL
-  → Engram auto-fetches and attaches as provenance
+  → Quorum auto-fetches and attaches as provenance
 
 On recall()
   Knowledge node has Atlassian reference
@@ -713,7 +713,7 @@ Fetch Jira issue and extract knowledge. Links to existing knowledge node if prov
 Fetch Confluence page and extract knowledge. Handles ADRs, runbooks, technical designs, meeting notes. Diagrams are handled separately via the human-assisted image → Mermaid flow.
 
 #### `search_atlassian(query, sources?)`
-Unified search across Jira + Confluence + Engram graph simultaneously.
+Unified search across Jira + Confluence + Quorum graph simultaneously.
 
 #### `sync_atlassian(domain?)`
 Proactive sync — checks Atlassian for changes to sources linked from knowledge nodes.
@@ -733,13 +733,13 @@ on:
     branches: [main]
 
 jobs:
-  engram-ingest:
+  quorum-ingest:
     if: github.event.pull_request.merged == true
     steps:
-      - run: engram pr ingest --pr ${{ github.event.number }} --dry-run
+      - run: quorum pr ingest --pr ${{ github.event.number }} --dry-run
 ```
 
-Dry-run by default initially — engineer reviews what Engram would extract before committing. Graduate to auto-store after trust is established.
+Dry-run by default initially — engineer reviews what Quorum would extract before committing. Graduate to auto-store after trust is established.
 
 ### What Gets Extracted
 
@@ -781,7 +781,7 @@ Post-merge: incident linked         -0.30 delta   retrospective triggered
 
 ### PR + Jira Enrichment
 
-When a PR is linked to a Jira ticket, Engram fetches the ticket automatically and cross-enriches:
+When a PR is linked to a Jira ticket, Quorum fetches the ticket automatically and cross-enriches:
 
 ```
 PR #847 linked to AUTH-247
@@ -809,7 +809,7 @@ ingest_pr(pr_url, {
 
 ## Multi-Team Namespacing
 
-Engram uses Graphiti's `group_id` for team isolation:
+Quorum uses Graphiti's `group_id` for team isolation:
 
 ```
 group_id: "macquarie-payments"    → payments team graph
@@ -880,7 +880,7 @@ Inherited from Graphiti:
 - Write latency: ~500ms (entity extraction + graph update)
 - Scales independently of graph size via hybrid indexing
 
-Engram governance overhead:
+Quorum governance overhead:
 - Conflict check: +1 Graphiti search call (~200ms)
 - LLM contradiction check (if triggered): +500ms-1s
 - Authority calculation: <1ms (pure computation)
@@ -901,7 +901,7 @@ Total worst case for remember() with conflict: ~2s — acceptable for non-intera
 | LLM for Graphiti (production) | AWS Bedrock Claude Sonnet | IAM auth, no API keys, enterprise security |
 | Embedder (local dev) | OpenAI text-embedding-3-small | Single API key with LLM |
 | Embedder (production) | AWS Bedrock Titan Embeddings | Fully AWS-native |
-| LLM for Engram governance | Same as Graphiti LLM | Conflict detection, decision briefs |
+| LLM for Quorum governance | Same as Graphiti LLM | Conflict detection, decision briefs |
 | Audit secondary store | PostgreSQL | Append-only, SQL queryable, compliance export |
 | Testing | Vitest | Fast, modern, Node-native |
 | Container | Docker Compose + K8s Helm | Local dev + production |

@@ -1,15 +1,15 @@
 ---
-name: engram
+name: quorum
 description: >
-  Engram — persistent, governed engineering memory for Claude Code and AI agents.
+  Quorum — persistent, governed engineering memory for Claude Code and AI agents.
   Use when working on any engineering task where institutional knowledge, architectural
   decisions, patterns, or constraints are relevant. This skill governs how the agent
-  reads from and writes to Engram's temporal knowledge graph.
+  reads from and writes to Quorum's temporal knowledge graph.
 ---
 
-# Engram Skill
+# Quorum Skill
 
-Engram is a **governed engineering memory** built on a temporal knowledge graph.
+Quorum is a **governed engineering memory** built on a temporal knowledge graph.
 It stores architectural decisions, patterns, constraints, runbooks, and requirements
 with full provenance, versioning, and human-in-the-loop conflict resolution.
 
@@ -53,7 +53,7 @@ If no pending items: proceed directly to work.
 
 ### Step 2 — Load Domain Context
 
-Before starting any engineering task, search Engram for relevant context:
+Before starting any engineering task, search Quorum for relevant context:
 
 ```
 search("<task domain or keywords>")
@@ -119,7 +119,7 @@ Typical mid-task triggers:
 
 Ask yourself:
 - Did I make a decision that a future engineer should know about?
-- Did I discover something about this domain that isn't in Engram yet?
+- Did I discover something about this domain that isn't in Quorum yet?
 - Did I apply a pattern that others should reuse?
 - Did I uncover a constraint (infra, legal, tech debt) that wasn't documented?
 - Would a new engineer benefit from knowing what I just learned?
@@ -353,25 +353,25 @@ These are hardcoded invariants — the server will reject violations:
 
 ---
 
-## Adding Engram to a New Project
+## Adding Quorum to a New Project
 
 ```bash
 # Create project file (committed to repo)
-engram init
+quorum init
 
 # Or manually:
-echo '{ "gateway_url": "http://localhost:3001", "project_id": "my-team" }' > .engram
+echo '{ "gateway_url": "http://localhost:3001", "project_id": "my-team" }' > .quorum
 
 # Register with Claude Code
-claude mcp add engram -- node /path/to/engram/src/server.js
+claude mcp add quorum -- node /path/to/quorum/src/server.js
 
 # Set identity (choose one):
-export ENGRAM_GITHUB_TOKEN=ghp_...    # most authoritative
-export ENGRAM_AUTHOR=your-username    # for CI contexts
+export QUORUM_GITHUB_TOKEN=ghp_...    # most authoritative
+export QUORUM_AUTHOR=your-username    # for CI contexts
 ```
 
-The `.engram` file is auto-discovered by walking up the directory tree — you do not need
-to set `ENGRAM_GATEWAY_URL` or `ENGRAM_PROJECT_ID` if the file is present in the project root.
+The `.quorum` file is auto-discovered by walking up the directory tree — you do not need
+to set `QUORUM_GATEWAY_URL` or `QUORUM_PROJECT_ID` if the file is present in the project root.
 
 ---
 

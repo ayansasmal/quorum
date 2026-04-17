@@ -96,8 +96,8 @@ describe('validateManifestHasNoDeleteTools', () => {
     ).toThrow(ConstitutionalViolation)
   })
 
-  it('does not throw on the expected Engram tool set', () => {
-    const engramTools = [
+  it('does not throw on the expected Quorum tool set', () => {
+    const quorumTools = [
       { name: 'remember' },
       { name: 'recall' },
       { name: 'search' },
@@ -107,7 +107,7 @@ describe('validateManifestHasNoDeleteTools', () => {
       { name: 'reflect' },
       { name: 'export' },
     ]
-    expect(() => validateManifestHasNoDeleteTools(engramTools)).not.toThrow()
+    expect(() => validateManifestHasNoDeleteTools(quorumTools)).not.toThrow()
   })
 
   it('handles empty manifest gracefully', () => {

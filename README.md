@@ -1,8 +1,8 @@
-# Engram
+# Quorum
 
-> *Every AI dystopia film has the same root cause — humans removed themselves from the decision loop. Engram puts them back in.*
+> *Every AI dystopia film has the same root cause — humans removed themselves from the decision loop. Quorum puts them back in.*
 
-**Engram** is an open-source governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+**Quorum** is an open-source governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
 
 ---
 
@@ -21,14 +21,14 @@ Existing solutions — Graphiti, Mem0, vector stores — handle storage and retr
 
 ---
 
-## What Engram Does
+## What Quorum Does
 
-Engram sits on top of Graphiti and adds a constitutional governance layer:
+Quorum sits on top of Graphiti and adds a constitutional governance layer:
 
 ```
 Engineer calls remember("auth", "token-strategy", "Use JWT for external")
         ↓
-Engram checks existing knowledge graph
+Quorum checks existing knowledge graph
         ↓
 ⚠️  Conflict detected with existing entry by @senior-architect (6 months ago)
     Existing: "Use session tokens always"
@@ -51,7 +51,7 @@ Engram checks existing knowledge graph
 - **Authority-weighted writes** — a junior engineer's addition does not silently overwrite a senior architect's ADR
 - **Self-evolving** — Claude Code skill reflects after every task and adds learnings automatically
 - **Human at the fork** — agents operate autonomously on established knowledge; humans only intervene at genuine ambiguity
-- **Export to human** — everything Engram knows, exportable as Markdown or Confluence markup
+- **Export to human** — everything Quorum knows, exportable as Markdown or Confluence markup
 
 ---
 
@@ -62,7 +62,7 @@ Claude Code / AI Agents
         │ MCP
         ▼
 ┌─────────────────────┐
-│  Engram MCP Server  │
+│  Quorum MCP Server  │
 │  (Node.js)          │
 ├─────────────────────┤
 │  Governance Layer   │  ← The differentiator
@@ -87,17 +87,17 @@ Claude Code / AI Agents
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/engram
-cd engram
+git clone https://github.com/yourusername/quorum
+cd quorum
 cp .env.example .env   # add your LLM API key
 
 docker-compose up -d
 
 # Add to Claude Code
-claude mcp add engram -- node /path/to/engram/src/server.js
+claude mcp add quorum -- node /path/to/quorum/src/server.js
 
 # Verify
-claude "What does Engram know about auth?"
+claude "What does Quorum know about auth?"
 ```
 
 ---
@@ -136,7 +136,7 @@ claude "What does Engram know about auth?"
 
 ## How It Differs from Graphiti Alone
 
-| Capability | Graphiti | Engram |
+| Capability | Graphiti | Quorum |
 |---|---|---|
 | Temporal knowledge graph | ✅ | ✅ inherited |
 | Conflict detection | ✅ silent/auto | ✅ + human governance |
@@ -160,7 +160,7 @@ claude "What does Engram know about auth?"
 
 Anthropic builds Claude around a model spec — values baked into how Claude reasons, not rules bolted on top. Governance is architecture, not afterthought.
 
-Engram applies the same principle to engineering knowledge. Not a system that *prevents* bad knowledge from entering. A system that *naturally tends toward* accurate, governed, trustworthy knowledge because that's how it's built.
+Quorum applies the same principle to engineering knowledge. Not a system that *prevents* bad knowledge from entering. A system that *naturally tends toward* accurate, governed, trustworthy knowledge because that's how it's built.
 
 ---
 

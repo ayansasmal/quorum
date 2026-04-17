@@ -1,0 +1,31 @@
+# Quorum Gateway — Dockerfile
+#
+# Multi-stage build keeping the image small.
+# The gateway is the only container that holds DB credentials and S3 access.
+# Never expose raw credentials to engineer machines — only the gateway URL.
+
+# ── Builder stage ──────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production
+
+# ── Runtime stage ──────────────────────────────────────────────
+FROM node:20-alpine AS runtime
+
+RUN apk add --no-cache curl
+
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY package.json ./
+COPY src/ ./src/
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:3001/health || exit 1
+
+CMD ["node", "src/gateway/server.js"]

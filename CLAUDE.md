@@ -1,14 +1,14 @@
-# Engram
+# Quorum
 ## Persistent Engineering Memory for Claude Code and AI Agents
 ### Agent Instruction File — Read this first, build everything after.
 
 ---
 
-## What is Engram?
+## What is Quorum?
 
-Engram (noun) — *a persistent memory trace in the brain formed by experience.*
+Quorum (noun) — *a persistent memory trace in the brain formed by experience.*
 
-Engram is an open-source governance layer for engineering knowledge — built on top of Graphiti's temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+Quorum is an open-source governance layer for engineering knowledge — built on top of Graphiti's temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
 
 **The core problem it solves:**
 
@@ -16,7 +16,7 @@ Every AI dystopia film — Mercy, Minority Report, Ex Machina, 2001 — shares t
 
 Multi-agent systems today have the same flaw. They share memory without governance. Knowledge is written silently, conflicts are resolved automatically, and there is no audit trail.
 
-Engram puts humans back in the loop — not as a bottleneck, but as a constitutional layer. Governance is not a feature. It is the architecture.
+Quorum puts humans back in the loop — not as a bottleneck, but as a constitutional layer. Governance is not a feature. It is the architecture.
 
 ---
 
@@ -26,7 +26,7 @@ Engram puts humans back in the loop — not as a bottleneck, but as a constituti
 Every memory operation asks: Who added this? Does it conflict? Should a human be notified? Is this traceable? These are not afterthought checks — they are first-class primitives.
 
 ### 2. Constitution over Rules
-Engram does not maintain a blocklist of forbidden knowledge. It maintains a framework for judgment. Like Anthropic's model spec for Claude, Engram bakes values into how knowledge is reasoned about — not filters applied on top.
+Quorum does not maintain a blocklist of forbidden knowledge. It maintains a framework for judgment. Like Anthropic's model spec for Claude, Quorum bakes values into how knowledge is reasoned about — not filters applied on top.
 
 ### 3. Provenance Always
 Every node in the graph carries: author, timestamp, confidence, source, conflict history. Nothing is anonymous. Nothing is untrackable.
@@ -35,7 +35,7 @@ Every node in the graph carries: author, timestamp, confidence, source, conflict
 Agents operate autonomously within established knowledge. At genuine ambiguity — a contradiction, a superseded decision, a low-confidence assertion — humans are surfaced a structured decision. Not a wall. A choice.
 
 ### 5. Silent Automatic ≠ Safe
-Graphiti resolves conflicts automatically by recency. Engram questions whether recency is the right signal for engineering decisions. A junior engineer's new addition should not silently overwrite a senior architect's 6-month-old ADR.
+Graphiti resolves conflicts automatically by recency. Quorum questions whether recency is the right signal for engineering decisions. A junior engineer's new addition should not silently overwrite a senior architect's 6-month-old ADR.
 
 ---
 
@@ -43,7 +43,7 @@ Graphiti resolves conflicts automatically by recency. Engram questions whether r
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Engram                           │
+│                    Quorum                           │
 │                                                     │
 │  ┌─────────────┐    ┌──────────────────────────┐   │
 │  │ MCP Server  │    │   Governance Layer        │   │
@@ -88,13 +88,13 @@ Graphiti resolves conflicts automatically by recency. Engram questions whether r
 Scaffold exactly this:
 
 ```
-engram/
+quorum/
 ├── CLAUDE.md                     ← this file
 ├── README.md                     ← OSS-facing documentation
 ├── CONTRIBUTING.md               ← contribution guidelines
 ├── LICENSE                       ← Apache 2.0
 ├── package.json                  ← Node.js project
-├── docker-compose.yml            ← FalkorDB + Engram stack
+├── docker-compose.yml            ← FalkorDB + Quorum stack
 ├── .env.example
 │
 ├── src/
@@ -130,7 +130,7 @@ engram/
 │   │
 │   ├── graph/
 │   │   ├── client.js                 ← Graphiti client wrapper
-│   │   ├── schema.js                 ← Engram entity/edge types
+│   │   ├── schema.js                 ← Quorum entity/edge types
 │   │   └── queries.js                ← common graph queries
 │   │
 │   ├── atlassian/
@@ -152,13 +152,13 @@ engram/
 │   └── SKILL.md                      ← Claude Code skill (self-evolving)
 │
 ├── helm/
-│   └── engram/
+│   └── quorum/
 │       ├── Chart.yaml
 │       ├── values.yaml               ← production defaults
 │       ├── values-local.yaml         ← Docker Desktop K8s overrides
 │       ├── values-aws.yaml           ← AWS-specific overrides (future)
 │       └── templates/
-│           ├── engram/
+│           ├── quorum/
 │           │   ├── deployment.yaml
 │           │   ├── service.yaml
 │           │   └── configmap.yaml
@@ -178,7 +178,7 @@ engram/
 │   └── workflows/
 │       ├── test.yml                  ← CI — constitutional + governance tests
 │       ├── build.yml                 ← build + push Docker image
-│       └── engram-pr-ingest.yml      ← PR knowledge extraction on merge
+│       └── quorum-pr-ingest.yml      ← PR knowledge extraction on merge
 │
 ├── scripts/
 │   ├── setup.sh                      ← bootstrap local stack
@@ -188,7 +188,7 @@ engram/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── .env.example
-├── cli.js                            ← engram CLI entry point
+├── cli.js                            ← quorum CLI entry point
 │
 └── tests/
     ├── constitutional/
@@ -213,7 +213,7 @@ engram/
 
 ## Graphiti Integration
 
-Engram uses Graphiti as its temporal knowledge graph engine. Do NOT reimplement graph storage, entity extraction, or temporal invalidation — Graphiti handles all of this.
+Quorum uses Graphiti as its temporal knowledge graph engine. Do NOT reimplement graph storage, entity extraction, or temporal invalidation — Graphiti handles all of this.
 
 ### What Graphiti gives us for free:
 - Bi-temporal model (valid_at, invalid_at, expired_at)
@@ -223,7 +223,7 @@ Engram uses Graphiti as its temporal knowledge graph engine. Do NOT reimplement 
 - Incremental graph updates without recomputation
 - FalkorDB, Neo4j, Amazon Neptune support
 
-### What Engram adds on top:
+### What Quorum adds on top:
 - Engineering-domain entity types (Decision, Pattern, Constraint, Runbook, Requirement)
 - Authority weighting — not all writes are equal
 - Human-in-the-loop governance at conflict points
@@ -236,10 +236,10 @@ Engram uses Graphiti as its temporal knowledge graph engine. Do NOT reimplement 
 ### Critical: Graphiti is Python-only
 
 Graphiti has no npm package. It cannot be imported into Node.js directly.
-Engram (Node.js) calls Graphiti via HTTP — Graphiti runs as a Python Docker sidecar.
+Quorum (Node.js) calls Graphiti via HTTP — Graphiti runs as a Python Docker sidecar.
 
 ```
-Engram MCP Server (Node.js :8000)
+Quorum MCP Server (Node.js :8000)
         ↓ HTTP calls
 Graphiti MCP Server (Python :8001)   ← Docker sidecar
         ↓
@@ -264,7 +264,7 @@ export async function addEpisode(content, metadata) {
       params: {
         name: metadata.key,
         episode_body: content,
-        group_id: process.env.ENGRAM_GROUP_ID || 'default',
+        group_id: process.env.QUORUM_GROUP_ID || 'default',
         source_description: metadata.source
       }
     })
@@ -278,7 +278,7 @@ export async function searchNodes(query, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tool: 'search_nodes',
-      params: { query, group_ids: [process.env.ENGRAM_GROUP_ID || 'default'], ...options }
+      params: { query, group_ids: [process.env.QUORUM_GROUP_ID || 'default'], ...options }
     })
   })
   return response.json()
@@ -290,7 +290,7 @@ export async function searchFacts(query, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tool: 'search_facts',
-      params: { query, group_ids: [process.env.ENGRAM_GROUP_ID || 'default'], ...options }
+      params: { query, group_ids: [process.env.QUORUM_GROUP_ID || 'default'], ...options }
     })
   })
   return response.json()
@@ -317,14 +317,14 @@ Graphiti explicitly validates Claude structured output support in their test sui
 
 ---
 
-## Engram Entity Schema
+## Quorum Entity Schema
 
 Define these as Graphiti Pydantic-compatible entity types:
 
 ```javascript
 // src/graph/schema.js
 
-const EngramEntityTypes = {
+const QuorumEntityTypes = {
   Decision: {
     description: 'An architectural or technical decision made by the team',
     properties: ['rationale', 'alternatives_considered', 'status', 'domain']
@@ -347,7 +347,7 @@ const EngramEntityTypes = {
   }
 };
 
-const EngramEdgeTypes = {
+const QuorumEdgeTypes = {
   SUPERSEDES: 'This knowledge replaces previous knowledge',
   DEPENDS_ON: 'This knowledge requires the other to be true',
   CONFLICTS_WITH: 'This knowledge contradicts the other (unresolved)',
@@ -539,7 +539,7 @@ enrich_from_confluence("12345678")
 ```
 
 ### `search_atlassian(query, sources?, domain?)`
-Unified semantic search across Jira + Confluence + Engram graph simultaneously.
+Unified semantic search across Jira + Confluence + Quorum graph simultaneously.
 
 - `sources`: `["jira", "confluence", "graph"]` (default: all three)
 - `domain`: optional filter (auth, payments, infra etc)
@@ -665,11 +665,11 @@ Every knowledge node has a confidence score (0-1) that evolves:
 
 ## Self-Evolving Skill (`skill/SKILL.md`)
 
-This file is placed in `.claude/skills/` of any project using Engram.
+This file is placed in `.claude/skills/` of any project using Quorum.
 
 It instructs Claude Code to:
 
-1. **At session start** — search Engram for context relevant to current task domain
+1. **At session start** — search Quorum for context relevant to current task domain
 2. **During task** — recall specific knowledge when making implementation decisions
 3. **After task completion** — reflect and extract learnable knowledge:
    - Was an architectural decision made? → remember as Decision
@@ -679,7 +679,7 @@ It instructs Claude Code to:
 
 **Self-check questions Claude asks itself post-task:**
 - "Did I make a decision that a future engineer should know about?"
-- "Did I discover something about this domain that isn't in Engram yet?"
+- "Did I discover something about this domain that isn't in Quorum yet?"
 - "Did I apply a pattern that others should reuse?"
 - "Would a new engineer benefit from knowing what I just learned?"
 
@@ -690,7 +690,7 @@ It instructs Claude Code to:
 ### Markdown Export
 ```markdown
 # {Topic} Domain — Engineering Knowledge
-> Generated by Engram | {timestamp}
+> Generated by Quorum | {timestamp}
 
 ## ✅ Active Knowledge
 
@@ -743,19 +743,19 @@ services:
   postgresql:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: engram_audit
-      POSTGRES_USER: engram
-      POSTGRES_PASSWORD: engram_local
+      POSTGRES_DB: quorum_audit
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum_local
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U engram"]
+      test: ["CMD-SHELL", "pg_isready -U quorum"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Graphiti runs as a Python sidecar — Engram (Node.js) calls it via HTTP
+  # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP
   # Graphiti has no npm package — do NOT try to import it into Node.js
   graphiti:
     image: zep/graphiti-mcp:latest   # or build from getzep/graphiti/mcp_server
@@ -768,12 +768,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLM_MODEL_NAME=gpt-4o-mini
       - EMBEDDER_MODEL_NAME=text-embedding-3-small
-      - GROUP_ID=${ENGRAM_GROUP_ID:-default}
+      - GROUP_ID=${QUORUM_GROUP_ID:-default}
     depends_on:
       falkordb:
         condition: service_healthy
 
-  engram:
+  quorum:
     build: .
     ports:
       - "8000:8000"
@@ -781,12 +781,12 @@ services:
       - GRAPHITI_URL=http://graphiti:8000
       - FALKORDB_URI=redis://falkordb:6379
       - POSTGRES_HOST=postgresql
-      - POSTGRES_USER=engram
-      - POSTGRES_PASSWORD=engram_local
-      - POSTGRES_DB=engram_audit
-      - ENGRAM_GROUP_ID=${ENGRAM_GROUP_ID:-default}
-      - ENGRAM_CONFLICT_THRESHOLD=0.85
-      - ENGRAM_AUTHORITY_THRESHOLD=0.20
+      - POSTGRES_USER=quorum
+      - POSTGRES_PASSWORD=quorum_local
+      - POSTGRES_DB=quorum_audit
+      - QUORUM_GROUP_ID=${QUORUM_GROUP_ID:-default}
+      - QUORUM_CONFLICT_THRESHOLD=0.85
+      - QUORUM_AUTHORITY_THRESHOLD=0.20
       - NODE_ENV=development
     depends_on:
       falkordb:
@@ -838,7 +838,7 @@ Make one pair of entries deliberately contradictory (for conflict detection demo
 
 ```env
 # ─────────────────────────────────────────────
-# Engram MCP Server (Node.js)
+# Quorum MCP Server (Node.js)
 # ─────────────────────────────────────────────
 
 # Graphiti sidecar URL (Python — runs as Docker service)
@@ -851,21 +851,21 @@ FALKORDB_URI=redis://localhost:6379
 # Audit secondary store (PostgreSQL)
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_DB=engram_audit
-POSTGRES_USER=engram
-POSTGRES_PASSWORD=engram_local
+POSTGRES_DB=quorum_audit
+POSTGRES_USER=quorum
+POSTGRES_PASSWORD=quorum_local
 
-# Engram governance config
-ENGRAM_GROUP_ID=default            # namespace for team isolation
-ENGRAM_CONFLICT_THRESHOLD=0.85     # semantic similarity conflict threshold
-ENGRAM_AUTHORITY_THRESHOLD=0.20    # auto-supersede delta threshold
-ENGRAM_PORT=8000
+# Quorum governance config
+QUORUM_GROUP_ID=default            # namespace for team isolation
+QUORUM_CONFLICT_THRESHOLD=0.85     # semantic similarity conflict threshold
+QUORUM_AUTHORITY_THRESHOLD=0.20    # auto-supersede delta threshold
+QUORUM_PORT=8000
 NODE_ENV=development
 
 # ─────────────────────────────────────────────
 # Graphiti Sidecar (Python — set in docker-compose / k8s)
 # Graphiti is Python-only. These vars are for the Graphiti container,
-# not the Engram Node.js process.
+# not the Quorum Node.js process.
 # ─────────────────────────────────────────────
 
 # LOCAL DEV — OpenAI (recommended: proven stable with Graphiti)
@@ -933,18 +933,18 @@ npx vitest run tests/constitutional/no-hard-delete.test.js  # single file
 - The governance philosophy (why this exists)
 - Quick start (docker-compose up + claude mcp add)
 - Architecture diagram
-- Comparison with Graphiti alone (what Engram adds)
+- Comparison with Graphiti alone (what Quorum adds)
 - Roadmap
 
 ### Target communities:
-- HackerNews: "Show HN: Engram — governance layer for AI agent memory"
+- HackerNews: "Show HN: Quorum — governance layer for AI agent memory"
 - r/LocalLLaMA
 - r/ClaudeAI
 - Dev.to
 - Tag @getzep on Twitter/X — they will likely notice and engage
 
 ### Differentiation message:
-> "Graphiti is brilliant at temporal knowledge graphs. Engram is the governance layer on top — conflict detection with human oversight, authority weighting, provenance tracking, and self-evolving knowledge from Claude Code sessions. Built for engineering teams who can't afford silent knowledge corruption."
+> "Graphiti is brilliant at temporal knowledge graphs. Quorum is the governance layer on top — conflict detection with human oversight, authority weighting, provenance tracking, and self-evolving knowledge from Claude Code sessions. Built for engineering teams who can't afford silent knowledge corruption."
 
 ---
 
@@ -999,7 +999,7 @@ If you are a Claude agent reading this file:
 3. Implement all MCP tools in `src/tools/` — each as a separate module
 4. Implement governance layer in `src/governance/`
 5. Wire Graphiti client in `src/graph/client.js`
-6. Write `docker-compose.yml` with FalkorDB + Engram
+6. Write `docker-compose.yml` with FalkorDB + Quorum
 7. Write `scripts/seed.js` with realistic contradictory data
 8. Write `skill/SKILL.md` for Claude Code self-evolution
 9. Write tests for all governance logic

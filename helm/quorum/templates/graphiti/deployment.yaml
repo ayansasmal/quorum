@@ -1,0 +1,51 @@
+{{- if .Values.graphiti.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quorum.graphiti.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quorum.graphiti.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "quorum.graphiti.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "quorum.graphiti.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: graphiti
+          image: "{{ .Values.graphiti.image.repository }}:{{ .Values.graphiti.image.tag }}"
+          imagePullPolicy: {{ .Values.graphiti.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.graphiti.port }}
+          env:
+            - name: FALKORDB_URI
+              value: "redis://{{ include "quorum.falkordb.fullname" . }}:{{ .Values.falkordb.port }}"
+            - name: LLM_MODEL_NAME
+              value: {{ .Values.graphiti.llm.modelName | quote }}
+            - name: EMBEDDER_MODEL_NAME
+              value: {{ .Values.graphiti.llm.embedderModelName | quote }}
+            - name: GROUP_ID
+              value: {{ .Values.graphiti.groupId | quote }}
+            {{- if .Values.graphiti.openaiSecret.apiKey }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quorum.graphiti.openaiSecretName" . }}
+                  key: apiKey
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.graphiti.resources | nindent 12 }}
+{{- end -}}

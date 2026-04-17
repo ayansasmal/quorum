@@ -1,0 +1,143 @@
+# Quorum Helm Chart — Production Defaults
+# Override with values-local.yaml (Docker Desktop) or values-aws.yaml (AWS EKS)
+
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# ── Quorum Gateway ──────────────────────────────────────────────────────────────
+# Central microservice: holds DB credentials, S3 access, JWT signing keys.
+# Engineers only need QUORUM_GATEWAY_URL + GitHub token.
+gateway:
+  enabled: true
+  image:
+    repository: quorum-gateway
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  port: 3001
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    NODE_ENV: production
+    QUORUM_GATEWAY_PORT: "3001"
+    AWS_REGION: ap-southeast-2
+    QUORUM_CONFIG_BUCKET: company-quorum-configs
+  # JWT signing keys — stored in a Kubernetes Secret.
+  # Generate with openssl. See src/gateway/keys.js for instructions.
+  # These values are base64-encoded PEM strings.
+  jwtSecret:
+    # existingSecret: "quorum-jwt-keys"  # use an existing Secret instead
+    privateKey: ""   # QUORUM_JWT_PRIVATE_KEY — base64-encoded PKCS8 PEM
+    publicKey: ""    # QUORUM_JWT_PUBLIC_KEY  — base64-encoded SPKI PEM
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+    host: quorum.company.internal
+    tls:
+      enabled: true
+      secretName: quorum-gateway-tls
+  serviceAccount:
+    create: true
+    annotations: {}  # e.g. eks.amazonaws.com/role-arn for IRSA (S3 access)
+  podAnnotations: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+# ── Quorum MCP ─────────────────────────────────────────────────────────────────
+# Typically runs locally on engineer machines, not in Kubernetes.
+# Include here for integration testing environments only.
+quorum:
+  enabled: false
+  image:
+    repository: quorum
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 8000
+  env:
+    NODE_ENV: production
+    QUORUM_PORT: "8000"
+    QUORUM_GROUP_ID: default
+    QUORUM_CONFLICT_THRESHOLD: "0.85"
+    QUORUM_AUTHORITY_THRESHOLD: "0.20"
+
+# ── FalkorDB ───────────────────────────────────────────────────────────────────
+falkordb:
+  enabled: true
+  image:
+    repository: falkordb/falkordb
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 6379
+  uiPort: 3000
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# ── PostgreSQL ─────────────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  port: 5432
+  database: quorum_audit
+  username: quorum
+  # Password stored in a Secret — never in values.yaml for production.
+  # Use --set postgresql.password=... or an external secret.
+  password: ""
+  existingSecret: ""          # use existing Secret instead of creating one
+  existingSecretKey: password
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# ── Graphiti sidecar ───────────────────────────────────────────────────────────
+graphiti:
+  enabled: true
+  image:
+    repository: zep/graphiti-mcp
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8000
+  groupId: default
+  llm:
+    modelName: gpt-4o-mini
+    embedderModelName: text-embedding-3-small
+  # OpenAI API key — stored in a Secret
+  openaiSecret:
+    existingSecret: ""         # set to use an existing Secret
+    apiKey: ""                 # or set inline (not recommended for production)
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi

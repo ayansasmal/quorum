@@ -1,8 +1,8 @@
-# Engram — Testing Strategy
+# Quorum — Testing Strategy
 
 ## Testing Philosophy
 
-Engram has three fundamentally different kinds of code, each requiring a different testing approach:
+Quorum has three fundamentally different kinds of code, each requiring a different testing approach:
 
 ```
 Layer 1 — Constitutional Rules    → Invariant testing (must NEVER be violated)
@@ -98,7 +98,7 @@ describe('Constitutional Rule 1: No Hard Deletes', () => {
         .some(kw => m.toLowerCase().includes(kw))
     )
     for (const method of deleteMethods) {
-      expect(engram.isMethodBlocked(method)).toBe(true)
+      expect(quorum.isMethodBlocked(method)).toBe(true)
     }
   })
 })

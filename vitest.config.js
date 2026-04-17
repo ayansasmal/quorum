@@ -1,5 +1,5 @@
 /**
- * Vitest configuration for Engram.
+ * Vitest configuration for Quorum.
  *
  * Constitutional tests are isolated and require 100% branch + line coverage.
  * Governance and tool tests are run as a separate suite.

@@ -1,0 +1,44 @@
+# Quorum Helm Chart — Docker Desktop Kubernetes overrides
+# Usage: helm upgrade --install quorum ./helm/quorum -f helm/quorum/values-local.yaml
+
+gateway:
+  replicaCount: 1
+  ingress:
+    enabled: false
+  env:
+    NODE_ENV: development
+  jwtSecret:
+    privateKey: ""   # left empty: gateway generates ephemeral key pair in dev mode
+    publicKey: ""
+
+falkordb:
+  persistence:
+    enabled: false  # ephemeral for local dev
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+postgresql:
+  password: quorum_local
+  persistence:
+    enabled: false  # ephemeral for local dev
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+graphiti:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi

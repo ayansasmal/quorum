@@ -1,4 +1,4 @@
-# Engram — Manual Test Scenarios
+# Quorum — Manual Test Scenarios
 
 These scenarios cover integration paths that the automated test suite cannot reach:
 real PostgreSQL writes, live Graphiti calls, LLM-driven conflict detection, identity
@@ -26,10 +26,10 @@ cp .env.example .env
 
 # Start the MCP server
 npm start
-# Look for: "Engram MCP server running" + "Chain integrity verified"
+# Look for: "Quorum MCP server running" + "Chain integrity verified"
 
 # Register with Claude Code (if using via MCP client)
-claude mcp add engram -- node /path/to/engram/src/server.js
+claude mcp add quorum -- node /path/to/quorum/src/server.js
 ```
 
 > All `remember()`, `recall()`, `pending()` etc. calls below are MCP tool calls.
@@ -114,7 +114,7 @@ Expected output shape:
 > If `conflict_briefs` is empty — the conflict was not written to `pending_decisions`.
 > Check the `pending_decisions` table directly:
 > ```bash
-> docker compose exec postgresql psql -U engram -d engram_audit -c "SELECT * FROM pending_decisions;"
+> docker compose exec postgresql psql -U quorum -d quorum_audit -c "SELECT * FROM pending_decisions;"
 > ```
 
 **4. Resolve the conflict**
@@ -207,7 +207,7 @@ Expected in startup log:
 ```
 ▶ Verifying audit chain...
 ✓ Chain integrity verified: N entries OK
-▶ Engram MCP server running
+▶ Quorum MCP server running
 ```
 
 > If you see `ChainIntegrityViolation` in startup — the server will refuse to start.
@@ -233,7 +233,7 @@ Expected: `Chain integrity: OK, N+2 entries` (INTENT + OUTCOME for the new remem
 **5. Inspect chain positions directly**
 
 ```bash
-docker compose exec postgresql psql -U engram -d engram_audit \
+docker compose exec postgresql psql -U quorum -d quorum_audit \
   -c "SELECT chain_position, operation, tool, author FROM audit_log ORDER BY chain_position DESC LIMIT 5;"
 ```
 
@@ -261,12 +261,12 @@ If identity resolution is broken, anyone can write high-confidence ACTIVE knowle
 
 ```bash
 # Set your token
-export ENGRAM_GITHUB_TOKEN=<your-real-github-token>
+export QUORUM_GITHUB_TOKEN=<your-real-github-token>
 
 # Set local config path (skip S3 for this test)
-export ENGRAM_CONFIG_PATH=./engram.config.example.json
+export QUORUM_CONFIG_PATH=./quorum.config.example.json
 
-# Update engram.config.example.json — add your real github_username
+# Update quorum.config.example.json — add your real github_username
 # to one of the members, e.g.:
 # { "name": "you", "team": "platform", "role": "principal_architect",
 #   "github_username": "<your-github-username>", "git_email": "..." }
@@ -300,8 +300,8 @@ Expected:
 **3b — Anonymous (no token)**
 
 ```bash
-unset ENGRAM_GITHUB_TOKEN
-unset ENGRAM_AUTHOR
+unset QUORUM_GITHUB_TOKEN
+unset QUORUM_AUTHOR
 # Also clear git config temporarily if needed:
 # git config --global --unset user.email
 npm start
@@ -323,8 +323,8 @@ Expected:
 **3c — Env var identity (CI context)**
 
 ```bash
-export ENGRAM_AUTHOR=carol-dev   # must match a member name/github_username in config
-unset ENGRAM_GITHUB_TOKEN
+export QUORUM_AUTHOR=carol-dev   # must match a member name/github_username in config
+unset QUORUM_GITHUB_TOKEN
 npm start
 ```
 
@@ -561,7 +561,7 @@ v1   SUPERSEDED  <author>   <date>
 **5. Confirm the database row was never deleted**
 
 ```bash
-docker compose exec postgresql psql -U engram -d engram_audit \
+docker compose exec postgresql psql -U quorum -d quorum_audit \
   -c "SELECT version, status, content FROM knowledge_versions WHERE topic='testing' AND key='deprecated-pattern' ORDER BY version;"
 ```
 
@@ -614,10 +614,10 @@ For any failed check, capture:
 
 ```bash
 # Server logs
-npm start 2>&1 | tee /tmp/engram-test.log
+npm start 2>&1 | tee /tmp/quorum-test.log
 
 # Database state at failure
-docker compose exec postgresql psql -U engram -d engram_audit \
+docker compose exec postgresql psql -U quorum -d quorum_audit \
   -c "\dt" \
   -c "SELECT COUNT(*) FROM audit_log;" \
   -c "SELECT topic, key, version, status FROM knowledge_versions ORDER BY topic, key, version;"

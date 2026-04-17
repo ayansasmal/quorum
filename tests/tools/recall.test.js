@@ -80,8 +80,8 @@ describe('recall — default mode (ACTIVE)', () => {
     const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
 
     expect(typeof result).toBe('string')
-    expect(result).toContain('<engram_memory')
-    expect(result).toContain('</engram_memory>')
+    expect(result).toContain('<quorum_memory')
+    expect(result).toContain('</quorum_memory>')
     expect(result).toContain('topic="auth"')
     expect(result).toContain('key="token-strategy"')
   })

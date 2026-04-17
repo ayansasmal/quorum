@@ -1,23 +1,27 @@
 ##
-## Engram CI — Build and Push Docker Image
+## Quorum CI — Build and Push Docker Images
 ##
-## Triggered on push to main branch only.
-## Requires: ghcr.io write permissions (GITHUB_TOKEN).
+## Builds two images on push to prod branch:
+##   ghcr.io/{repo}:*           ← Quorum MCP server (src/server.js)
+##   ghcr.io/{repo}-gateway:*   ← Quorum Gateway (src/gateway/server.js)
+##
+## Both images are built in parallel and share the Buildx cache.
 ##
 
 name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [prod]
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  MCP_IMAGE:     ghcr.io/${{ github.repository }}
+  GATEWAY_IMAGE: ghcr.io/${{ github.repository }}-gateway
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Image
+  build-mcp:
+    name: Build Quorum MCP Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,23 +40,66 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
+      - name: Extract metadata for MCP image
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ env.MCP_IMAGE }}
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
 
-      - name: Build and push Docker image
+      - name: Build and push Quorum MCP image
         uses: docker/build-push-action@v6
         with:
           context: .
+          dockerfile: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=mcp
+          cache-to: type=gha,mode=max,scope=mcp
+          platforms: linux/amd64,linux/arm64
+
+  build-gateway:
+    name: Build Quorum Gateway Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Gateway image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GATEWAY_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      - name: Build and push Quorum Gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          dockerfile: Dockerfile.gateway
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
           platforms: linux/amd64,linux/arm64

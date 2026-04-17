@@ -1,0 +1,19 @@
+{{- if .Values.gateway.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "quorum.gateway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quorum.gateway.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.gateway.env.NODE_ENV | quote }}
+  QUORUM_GATEWAY_PORT: {{ .Values.gateway.env.QUORUM_GATEWAY_PORT | quote }}
+  AWS_REGION: {{ .Values.gateway.env.AWS_REGION | quote }}
+  QUORUM_CONFIG_BUCKET: {{ .Values.gateway.env.QUORUM_CONFIG_BUCKET | quote }}
+  GRAPHITI_URL: "http://{{ include "quorum.graphiti.fullname" . }}:{{ .Values.graphiti.port }}"
+  POSTGRES_HOST: {{ include "quorum.postgresql.fullname" . | quote }}
+  POSTGRES_PORT: {{ .Values.postgresql.port | quote }}
+  POSTGRES_DB: {{ .Values.postgresql.database | quote }}
+  POSTGRES_USER: {{ .Values.postgresql.username | quote }}
+{{- end -}}

@@ -1,0 +1,48 @@
+# Quorum Helm Chart — AWS EKS overrides
+# Usage: helm upgrade --install quorum ./helm/quorum \
+#          -f helm/quorum/values-aws.yaml \
+#          --set postgresql.password=$PG_PASSWORD \
+#          --set gateway.jwtSecret.privateKey=$JWT_PRIVATE_KEY \
+#          --set gateway.jwtSecret.publicKey=$JWT_PUBLIC_KEY
+
+gateway:
+  replicaCount: 2
+  serviceAccount:
+    create: true
+    annotations:
+      # IRSA: grants gateway pod access to S3 config bucket without static keys
+      eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/quorum-gateway-role
+  ingress:
+    enabled: true
+    className: alb
+    annotations:
+      kubernetes.io/ingress.class: alb
+      alb.ingress.kubernetes.io/scheme: internal
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:REGION:ACCOUNT_ID:certificate/CERT_ID"
+    host: quorum.internal.company.com
+    tls:
+      enabled: false  # TLS terminated at ALB
+
+falkordb:
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: gp3
+
+postgresql:
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: gp3
+
+graphiti:
+  # Use Bedrock in production — no API keys, IAM auth, fits enterprise security
+  llm:
+    modelName: anthropic.claude-sonnet-4-5
+    embedderModelName: amazon.titan-embed-text-v2
+  # Bedrock credentials via IRSA — no openaiSecret needed
+  openaiSecret:
+    apiKey: ""

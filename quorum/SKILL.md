@@ -1,12 +1,12 @@
-# Engram Skill for Claude Code
+# Quorum Skill for Claude Code
 
-Place this file at `.claude/skills/engram.md` in any project using Engram.
+Place this file at `.claude/skills/quorum.md` in any project using Quorum.
 
 ---
 
 ## What This Skill Does
 
-This skill instructs Claude Code to use Engram as its persistent engineering memory — automatically loading relevant context at session start, consulting it during decisions, adding learnings after task completion, and surfacing governance decisions at the right moment with the right context.
+This skill instructs Claude Code to use Quorum as its persistent engineering memory — automatically loading relevant context at session start, consulting it during decisions, adding learnings after task completion, and surfacing governance decisions at the right moment with the right context.
 
 The result: every Claude Code session builds on everything that came before it, across your entire team. And every decision is made by an informed human — not a rubber stamp.
 
@@ -14,7 +14,7 @@ The result: every Claude Code session builds on everything that came before it, 
 
 ## Core Principle: PACE
 
-Every interaction with Engram follows the PACE framework:
+Every interaction with Quorum follows the PACE framework:
 
 ```
 P — Prepare       the human before they decide
@@ -32,7 +32,7 @@ Claude is not just a memory retriever. It is the interface between institutional
 **Step 1 — Check pending reviews**
 
 ```
-review_list = await engram.review.list({ reviewer: current_engineer })
+review_list = await quorum.review.list({ reviewer: current_engineer })
 
 If review_list.length > 0:
   Surface HIGHEST IMPACT one only — never dump the queue
@@ -63,7 +63,7 @@ Task: "Add rate limiting to the payment API"
     api:rate-limiting-strategy  (v2 | confidence: 0.88 | @senior-engineer)
     payments:idempotency        (v1 | confidence: 0.92 | @architect)
     infra:redis-usage           (v3 | confidence: 0.85 | @engineer | updated 3 days ago ℹ️)
-→ "Loaded 3 Engram entries. infra:redis-usage was updated recently — check if relevant."
+→ "Loaded 3 Quorum entries. infra:redis-usage was updated recently — check if relevant."
 ```
 
 **DRAFT knowledge is never loaded into Claude's context.** It is unreviewed and unvalidated.
@@ -78,15 +78,15 @@ If a loaded entry was SUPERSEDED since last session — alert and reload current
 
 ## During Task Protocol
 
-- Before making an implementation decision → check Engram first: `recall(topic, key)`
-- Prefer ACTIVE Engram knowledge over generic best practices
-- If Engram knowledge seems outdated → flag it, don't silently ignore it
-- If Engram conflicts with what the engineer just said → surface it immediately
-- Do not override Engram knowledge silently — ever
+- Before making an implementation decision → check Quorum first: `recall(topic, key)`
+- Prefer ACTIVE Quorum knowledge over generic best practices
+- If Quorum knowledge seems outdated → flag it, don't silently ignore it
+- If Quorum conflicts with what the engineer just said → surface it immediately
+- Do not override Quorum knowledge silently — ever
 
 **Recall format — always attribute the source:**
 ```
-[Engram: auth:token-strategy | ACTIVE | confidence: 0.9 | @ayan | Dec 2024]
+[Quorum: auth:token-strategy | ACTIVE | confidence: 0.9 | @ayan | Dec 2024]
 Use JWT for external services, session tokens for internal.
 Rationale: stateless lambdas require JWT; internal services benefit from revocation.
 ```
@@ -130,13 +130,13 @@ Claude NEVER presents Mode 3 as Mode 1. Ever.
 **Runbook check:** Did I fix a non-obvious bug that could recur?
 → `remember(topic, key, steps, mode="extracting", confidence=0.65)`
 
-**Gap check:** Did I find nothing in Engram for this domain?
-→ Flag to engineer: "Engram has no knowledge about X — worth adding directly?"
+**Gap check:** Did I find nothing in Quorum for this domain?
+→ Flag to engineer: "Quorum has no knowledge about X — worth adding directly?"
 
 ### What NOT to Add
 
 - Generic programming knowledge (not team-specific)
-- Things already well-covered in Engram
+- Things already well-covered in Quorum
 - Mode 3 speculation without clear evidence
 - Task-specific one-off details that won't generalise
 
@@ -147,7 +147,7 @@ Claude NEVER presents Mode 3 as Mode 1. Ever.
 If `remember()` returns a conflict — stop. Never resolve silently. Ever.
 
 ```
-⚠️ Engram Conflict Detected
+⚠️ Quorum Conflict Detected
 
 What you are adding:
   "Use session tokens for internal service auth"
@@ -165,7 +165,7 @@ Related context (graph traversal):
   → payments:service-type: Payment service runs on Lambda
   → auth-svc:deployment: Auth service runs on ECS
 
-Engram's analysis (observation, not recommendation):
+Quorum's analysis (observation, not recommendation):
   ADR may be correct for Lambda. ECS services could support sessions.
   This may be a valid nuance, not a true conflict.
 
@@ -217,7 +217,7 @@ Always generate a full brief before surfacing a human decision. Never surface a 
 │ → payments:service-type: Lambda-based                    │
 │ → auth-svc:deployment: ECS-based                         │
 ├─────────────────────────────────────────────────────────┤
-│ ENGRAM'S ANALYSIS (observation only)                     │
+│ QUORUM'S ANALYSIS (observation only)                     │
 │ ADR may be correct for Lambda. ECS services could        │
 │ support sessions. May be a nuance, not a conflict.       │
 ├─────────────────────────────────────────────────────────┤
@@ -227,7 +227,7 @@ Always generate a full brief before surfacing a human decision. Never surface a 
 ```
 
 Brief must include: impact, usage data, graph-traversed related context,
-Engram's analysis (not recommendation), structured options. Readable in < 2 minutes.
+Quorum's analysis (not recommendation), structured options. Readable in < 2 minutes.
 
 ---
 
@@ -271,7 +271,7 @@ When loading context at session start or during task, Claude must check version 
 
 **Recently updated (< 7 days):**
 ```
-[Engram: auth:token-strategy | v3 ACTIVE | @ayan | Dec 2024]
+[Quorum: auth:token-strategy | v3 ACTIVE | @ayan | Dec 2024]
 "JWT for Lambda, session tokens for non-Lambda internal"
 
 ℹ️  Updated 2 days ago from v2.
@@ -329,7 +329,7 @@ Response:
 If an engineer is investigating an incident or reviewing an old PR:
 
 ```
-Engineer: "What did Engram know about auth when PR #847 was merged Nov 30th?"
+Engineer: "What did Quorum know about auth when PR #847 was merged Nov 30th?"
 
 Claude calls: recall("auth", "token-strategy", { at: "2024-11-30" })
 
@@ -346,11 +346,11 @@ Even if superseded knowledge is closer to what the engineer seems to want:
 
 ```
 ❌ Wrong:
-  "According to an older Engram entry, you used to use session tokens..."
+  "According to an older Quorum entry, you used to use session tokens..."
   → This could lead engineer to revert to rejected approach
 
 ✅ Right:
-  "The current Engram guidance is JWT for Lambda, sessions for non-Lambda.
+  "The current Quorum guidance is JWT for Lambda, sessions for non-Lambda.
    If you want to understand the history, I can show you why it evolved."
 ```
 
@@ -378,16 +378,16 @@ Self-approval constitutional rule applies to Claude too.
 
 ## Session Summary
 
-Always end with a concise Engram summary:
+Always end with a concise Quorum summary:
 
 ```
-Engram activity this session:
+Quorum activity this session:
   📖 Loaded:    auth:token-strategy (v3), infra:redis-usage (v2), payments:idempotency (v1)
   🔄 Updated:   infra:redis-usage was at v1 last session → now v2 (reloaded)
   ✅ Added:     auth:refresh-token-rotation v1 (DRAFT | echoing | conf: 0.75)
   ⚠️  Conflict: auth:session-vs-jwt — awaiting your decision
   🔍 Gaps:      No knowledge found for payments:fraud-detection
   📋 Pending:   1 review in your queue (api:rate-limiting v2)
-  📜 History:   auth:token-strategy has 3 versions — type 'engram history auth:token-strategy' to see
+  📜 History:   auth:token-strategy has 3 versions — type 'quorum history auth:token-strategy' to see
 ```
 

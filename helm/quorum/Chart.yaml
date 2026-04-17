@@ -1,0 +1,17 @@
+apiVersion: v2
+name: quorum
+description: Governed engineering knowledge MCP server — Graphiti + governance layer
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords:
+  - mcp
+  - knowledge-graph
+  - governance
+  - ai-agents
+maintainers:
+  - name: Quorum Contributors
+home: https://github.com/your-org/quorum
+sources:
+  - https://github.com/your-org/quorum
+dependencies: []

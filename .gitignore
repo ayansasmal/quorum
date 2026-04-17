@@ -1,1 +1,15 @@
+node_modules/
+.env
+dist/
+coverage/
+*.log
+.DS_Store
 .DS_STORE
+
+# Terraform — state and secrets never go in git
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+terraform/quorum.tfplan
