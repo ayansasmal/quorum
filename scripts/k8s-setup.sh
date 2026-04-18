@@ -33,6 +33,8 @@ HELM_RELEASE="quorum"
 HELM_CHART="$PROJECT_ROOT/helm/quorum"
 CROSSPLANE_SCRIPT="$PROJECT_ROOT/crossplane/crossplane.sh"
 GATEWAY_IMAGE_NAME="quorum-gateway"
+GRAPHITI_IMAGE_NAME="graphiti-mcp"
+GRAPHITI_IMAGE="graphiti-mcp:local"
 
 # ── Load .env ───────────────────────────────────────────────────
 if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -118,7 +120,7 @@ check_openai_key() {
   echo "✓ OPENAI_API_KEY set (${#OPENAI_API_KEY} chars)"
 }
 
-# Build gateway Docker image and tag it with the current git SHA.
+# Build gateway and graphiti Docker images.
 # Docker Desktop K8s shares the local Docker daemon — no registry push needed.
 cmd_build() {
   echo ""
@@ -129,6 +131,14 @@ cmd_build() {
     -t "${GATEWAY_IMAGE_NAME}:latest" \
     "$PROJECT_ROOT"
   echo "✓ Built $GATEWAY_IMAGE"
+
+  echo ""
+  echo "▶ Building graphiti image: $GRAPHITI_IMAGE"
+  docker build \
+    -f "$PROJECT_ROOT/Dockerfile.graphiti" \
+    -t "$GRAPHITI_IMAGE" \
+    "$PROJECT_ROOT"
+  echo "✓ Built $GRAPHITI_IMAGE"
 }
 
 # ── setup ────────────────────────────────────────────────────────
@@ -138,7 +148,7 @@ cmd_setup() {
   check_localstack
   check_openai_key
 
-  # ── 1. Build gateway image ─────────────────────────────────────
+  # ── 1. Build gateway + graphiti images ────────────────────────
   cmd_build
 
   # ── 2. Create namespace ────────────────────────────────────────
@@ -218,8 +228,9 @@ cmd_status() {
   echo "── Status ──────────────────────────────────────────────────"
 
   echo ""
-  echo "Gateway image:"
+  echo "Images:"
   echo "  $GATEWAY_IMAGE (git SHA: $GIT_SHA)"
+  echo "  $GRAPHITI_IMAGE"
 
   echo ""
   echo "Quorum pods ($NAMESPACE):"
@@ -259,7 +270,7 @@ cmd_help() {
   echo "  setup     Build gateway + deploy full stack (Helm + Crossplane S3)"
   echo "  teardown  Remove everything (Helm release + Crossplane + namespace)"
   echo "  status    Show pod states, services, gateway health, and S3 contents"
-  echo "  build     Build gateway Docker image only (tagged with git SHA)"
+  echo "  build     Build gateway (git SHA tagged) + graphiti (local) images"
   echo "  help      Show this message"
   echo ""
   echo "Requires:"

@@ -32,6 +32,8 @@ spec:
               value: {{ .Values.graphiti.llm.embedderModelName | quote }}
             - name: GROUP_ID
               value: {{ .Values.graphiti.groupId | quote }}
+            - name: TRANSPORT
+              value: {{ .Values.graphiti.transport | default "http" | quote }}
             {{- if .Values.graphiti.openaiSecret.apiKey }}
             - name: OPENAI_API_KEY
               valueFrom:

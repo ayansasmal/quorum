@@ -123,11 +123,12 @@ postgresql:
 graphiti:
   enabled: true
   image:
-    repository: zep/graphiti-mcp
-    tag: latest
+    repository: graphiti-mcp
+    tag: local
     pullPolicy: IfNotPresent
   port: 8000
   groupId: default
+  transport: http   # http = POST /mcp (Quorum proxy); sse = SSE transport (MCP clients)
   llm:
     modelName: gpt-4o-mini
     embedderModelName: text-embedding-3-small

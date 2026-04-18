@@ -59,10 +59,9 @@ spec:
                   name: {{ include "quorum.gateway.jwtSecretName" . }}
                   key: QUORUM_JWT_PUBLIC_KEY
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: http
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
@@ -70,9 +69,9 @@ spec:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 5
             failureThreshold: 3
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}

@@ -1,0 +1,47 @@
+# Graphiti MCP Server — built from getzep/graphiti source
+#
+# graphiti-mcp is not on PyPI. We sparse-clone just the mcp_server/ directory
+# from the official repo and install its dependencies there.
+#
+# Transport: TRANSPORT=streamable-http exposes POST /mcp (JSON-RPC over HTTP),
+# which is what the Quorum Gateway calls. SSE transport exposes /sse instead.
+#
+# Required env vars at runtime:
+#   FALKORDB_URI          redis://falkordb:6379
+#   OPENAI_API_KEY        sk-...
+#   LLM_MODEL_NAME        gpt-4o-mini
+#   EMBEDDER_MODEL_NAME   text-embedding-3-small
+#   GROUP_ID              default
+#   TRANSPORT             streamable-http
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends git curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Sparse-clone only the mcp_server directory to keep the image small
+RUN git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/getzep/graphiti.git /tmp/graphiti && \
+    cd /tmp/graphiti && \
+    git sparse-checkout set mcp_server && \
+    mv mcp_server /app/ && \
+    rm -rf /tmp/graphiti
+
+WORKDIR /app/mcp_server
+
+# Install from the mcp_server pyproject.toml with FalkorDB backend support
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir ".[falkordb]"
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# streamable-http transport exposes POST /mcp — required for Quorum Gateway proxy.
+# Use 'sse' if connecting via a standard MCP client instead.
+ENV TRANSPORT=streamable-http
+
+CMD ["python", "main.py"]

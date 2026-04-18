@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/logs"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+LOG_FILE="$LOG_DIR/setup.${TIMESTAMP}.log"
+mkdir -p "$LOG_DIR"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo "── Quorum Setup ───────────────────────────────────────────"
+echo "   Log : $LOG_FILE"
+echo "───────────────────────────────────────────────────────────"
 
 # Check Node.js version
 NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
