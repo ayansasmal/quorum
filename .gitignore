@@ -6,6 +6,13 @@ coverage/
 .DS_Store
 .DS_STORE
 
+# Logs — keep folder structure, ignore log files
+logs/
+!logs/.gitkeep
+
+# Crossplane real credentials (never commit)
+crossplane/credentials/aws-creds-secret.yaml
+
 # Terraform — state and secrets never go in git
 terraform/.terraform/
 terraform/.terraform.lock.hcl

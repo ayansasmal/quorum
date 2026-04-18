@@ -1,0 +1,9 @@
+apiVersion: pkg.crossplane.io/v1alpha1
+kind: ControllerConfig
+metadata:
+  name: localstack-config
+  # No env vars — the provider must read credentials AND endpoint entirely from ProviderConfig.
+  # Any AWS_* env vars here cause the SDK env credentials chain to activate,
+  # which bypasses the ProviderConfig custom endpoint resolver and loses
+  # hostnameImmutable → UsePathStyle translation.
+  # PRODUCTION: remove this ControllerConfig reference from both provider manifests.

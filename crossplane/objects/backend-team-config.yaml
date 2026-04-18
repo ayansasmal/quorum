@@ -1,0 +1,25 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Object
+metadata:
+  name: backend-team-config
+spec:
+  forProvider:
+    region: us-east-1
+    # bucketRef resolves the actual bucket name from the Bucket resource at runtime.
+    # To target a pre-existing external bucket instead, remove bucketRef and set:
+    #   bucket: your-existing-bucket-name
+    bucketRef:
+      name: quorum-configs
+    key: backend-team/config.json
+    contentType: application/json
+    content: |
+      {
+        "projectId": "backend-team",
+        "version": "1",
+        "conflictThreshold": 0.85,
+        "authorityThreshold": 0.20,
+        "domains": ["api", "db", "testing"],
+        "teamLeads": ["charlie", "diana"]
+      }
+  providerConfigRef:
+    name: aws-provider

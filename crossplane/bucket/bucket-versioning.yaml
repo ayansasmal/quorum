@@ -1,0 +1,13 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: BucketVersioning
+metadata:
+  name: quorum-configs-versioning
+spec:
+  forProvider:
+    region: us-east-1
+    bucketRef:
+      name: quorum-configs
+    versioningConfiguration:
+      - status: Enabled
+  providerConfigRef:
+    name: aws-provider

@@ -1,0 +1,15 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: BucketPublicAccessBlock
+metadata:
+  name: quorum-configs-public-access
+spec:
+  forProvider:
+    region: us-east-1
+    bucketRef:
+      name: quorum-configs
+    blockPublicAcls: true
+    blockPublicPolicy: true
+    ignorePublicAcls: true
+    restrictPublicBuckets: true
+  providerConfigRef:
+    name: aws-provider

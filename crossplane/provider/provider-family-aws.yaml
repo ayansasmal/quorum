@@ -1,0 +1,13 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-aws
+spec:
+  # Pin to the same version auto-installed by provider-aws-s3 to avoid upgrade drift.
+  package: xpkg.upbound.io/upbound/provider-family-aws:v1.23.2
+  # DeploymentRuntimeConfig (v1beta1) sets AWS_ENDPOINT_URL on the provider pod.
+  # controllerConfigRef (v1alpha1, deprecated) is intentionally NOT used here —
+  # it does not reliably propagate env vars to existing provider revisions.
+  # PRODUCTION: remove this runtimeConfigRef entirely.
+  runtimeConfigRef:
+    name: localstack-runtime-config

@@ -1,0 +1,23 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-s3
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-s3:v1
+  controllerConfigRef:
+    name: localstack-config
+  # Production (IRSA): add a ControllerConfig to annotate the provider's ServiceAccount.
+  # ControllerConfig is the v1.17.x mechanism (installRuntimeConfig is v1.18+):
+  #
+  # ---
+  # apiVersion: pkg.crossplane.io/v1alpha1
+  # kind: ControllerConfig
+  # metadata:
+  #   name: aws-provider-irsa
+  # spec:
+  #   serviceAccountAnnotations:
+  #     eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/quorum-gateway-production
+  # ---
+  # Then reference it here:
+  #   controllerConfigRef:
+  #     name: aws-provider-irsa

@@ -1,0 +1,33 @@
+# Use this pattern when targeting a pre-existing S3 bucket NOT managed by Crossplane.
+#
+# Key difference from platform-team-config.yaml:
+#   - No bucketRef (no Crossplane Bucket resource to resolve from)
+#   - Plain `bucket:` field with the exact AWS bucket name
+#   - No Bucket, BucketVersioning, etc. resources needed — the bucket is assumed to exist
+#
+# Steps:
+#   1. Copy this file (remove the .example suffix)
+#   2. Set `bucket` to your existing bucket name
+#   3. Set `key` to the object path you want to write
+#   4. kubectl apply -f crossplane/objects/<your-file>.yaml
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Object
+metadata:
+  name: external-bucket-sample-config
+spec:
+  forProvider:
+    region: ap-southeast-2
+    bucket: your-existing-bucket-name
+    key: platform-team/config.json
+    contentType: application/json
+    content: |
+      {
+        "projectId": "platform-team",
+        "version": "1",
+        "conflictThreshold": 0.85,
+        "authorityThreshold": 0.20,
+        "domains": ["infra", "auth"],
+        "teamLeads": ["alice", "bob"]
+      }
+  providerConfigRef:
+    name: aws-provider

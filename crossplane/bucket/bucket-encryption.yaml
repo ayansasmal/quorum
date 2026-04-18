@@ -1,0 +1,20 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: BucketServerSideEncryptionConfiguration
+metadata:
+  name: quorum-configs-encryption
+spec:
+  forProvider:
+    region: us-east-1
+    bucketRef:
+      name: quorum-configs
+    rule:
+      - applyServerSideEncryptionByDefault:
+          - sseAlgorithm: AES256
+        # Production upgrade: switch to aws:kms and reference a KMS key.
+        # The Terraform setup in terraform/main.tf already creates the KMS key
+        # and outputs its ARN as kms_key_arn — use that here.
+        #   sseAlgorithm: aws:kms
+        #   kmsMasterKeyId: arn:aws:kms:ap-southeast-2:ACCOUNT_ID:key/KEY_ID
+        bucketKeyEnabled: true
+  providerConfigRef:
+    name: aws-provider

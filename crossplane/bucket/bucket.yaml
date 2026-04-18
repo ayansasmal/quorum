@@ -1,0 +1,15 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  name: quorum-configs
+  annotations:
+    # Bucket names must be globally unique. Override with a unique suffix:
+    # crossplane.io/external-name: acme-quorum-configs-prod
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+  providerConfigRef:
+    name: aws-provider

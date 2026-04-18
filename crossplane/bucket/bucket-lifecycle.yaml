@@ -1,0 +1,19 @@
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: BucketLifecycleConfiguration
+metadata:
+  name: quorum-configs-lifecycle
+spec:
+  forProvider:
+    region: us-east-1
+    bucketRef:
+      name: quorum-configs
+    rule:
+      - id: archive-noncurrent-versions
+        status: Enabled
+        noncurrentVersionTransition:
+          - noncurrentDays: 90
+            storageClass: STANDARD_IA
+          - noncurrentDays: 365
+            storageClass: GLACIER_IR
+  providerConfigRef:
+    name: aws-provider

@@ -1,0 +1,26 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: localstack-runtime-config
+  # Crossplane applies this as a deployment template when it creates/reconciles the
+  # provider pod. Unlike patching the deployment directly (which gets reverted),
+  # entries here survive reconciliation because Crossplane owns the merge.
+  #
+  # PRODUCTION: remove this file and the runtimeConfigRef from provider-family-aws.yaml.
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+          - name: package-runtime
+            env:
+            # S3-specific endpoint env var — takes priority over AWS_ENDPOINT_URL for S3.
+            # Required because ProviderConfig's global endpoint applies to STS/IAM but
+            # S3 in provider-family-aws v1.23.2 uses a separate endpoint resolution path.
+            - name: AWS_ENDPOINT_URL_S3
+              value: "http://host.docker.internal:4566"
+            - name: AWS_ENDPOINT_URL
+              value: "http://host.docker.internal:4566"
+            # Enable Terraform debug logging to diagnose endpoint configuration
