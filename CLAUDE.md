@@ -755,10 +755,14 @@ services:
       timeout: 5s
       retries: 5
 
-  # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP
-  # Graphiti has no npm package — do NOT try to import it into Node.js
+  # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP.
+  # graphiti-mcp is NOT on PyPI and zep/graphiti-mcp does NOT exist on Docker Hub.
+  # Build from source using Dockerfile.graphiti (sparse-clones getzep/graphiti mcp_server/).
+  # TRANSPORT=streamable-http exposes POST /mcp (what the gateway calls).
   graphiti:
-    image: zep/graphiti-mcp:latest   # or build from getzep/graphiti/mcp_server
+    build:
+      context: .
+      dockerfile: Dockerfile.graphiti
     ports:
       - "8001:8000"
     environment:
