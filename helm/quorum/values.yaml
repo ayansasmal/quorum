@@ -28,6 +28,7 @@ gateway:
     QUORUM_GATEWAY_PORT: "3001"
     AWS_REGION: ap-southeast-2
     QUORUM_CONFIG_BUCKET: company-quorum-configs
+    awsEndpointUrl: ""   # LOCAL DEV ONLY: set to http://host.docker.internal:4566 for LocalStack
   # JWT signing keys — stored in a Kubernetes Secret.
   # Generate with openssl. See src/gateway/keys.js for instructions.
   # These values are base64-encoded PEM strings.

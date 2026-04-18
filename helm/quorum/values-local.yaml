@@ -7,6 +7,9 @@ gateway:
     enabled: false
   env:
     NODE_ENV: development
+    AWS_REGION: us-east-1              # LocalStack default region
+    QUORUM_CONFIG_BUCKET: quorum-configs  # matches Crossplane-provisioned bucket
+    awsEndpointUrl: "http://host.docker.internal:4566"  # LocalStack S3 endpoint
   jwtSecret:
     privateKey: ""   # left empty: gateway generates ephemeral key pair in dev mode
     publicKey: ""

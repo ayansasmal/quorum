@@ -16,4 +16,7 @@ data:
   POSTGRES_PORT: {{ .Values.postgresql.port | quote }}
   POSTGRES_DB: {{ .Values.postgresql.database | quote }}
   POSTGRES_USER: {{ .Values.postgresql.username | quote }}
+  {{- if .Values.gateway.env.awsEndpointUrl }}
+  AWS_ENDPOINT_URL: {{ .Values.gateway.env.awsEndpointUrl | quote }}
+  {{- end }}
 {{- end -}}
