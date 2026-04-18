@@ -578,6 +578,27 @@ curl http://localhost:8000/health
 claude "Test remember and recall"
 ```
 
+### S3 Config Bucket (Local K8s)
+
+When running on Local K8s, provision the Quorum config S3 bucket via Crossplane instead of Terraform:
+
+```bash
+# Requires LocalStack started with LOCALSTACK_HOST set
+LOCALSTACK_HOST=host.docker.internal localstack start -d
+
+# One-command setup: Crossplane + provider + bucket + sample configs
+./crossplane/crossplane.sh setup
+
+# Verify
+awslocal s3 ls s3://quorum-configs/ --recursive
+```
+
+See [`crossplane/README.md`](crossplane/README.md) for full details, including the critical
+`endpoint.services: [s3, sts]` requirement and CoreDNS patching notes.
+
+For production, use `terraform/` instead — it provisions the bucket with KMS encryption,
+IAM bucket policies, and IRSA auth.
+
 ---
 
 ## Choosing Between Docker Compose and Local K8s

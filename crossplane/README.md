@@ -1,126 +1,181 @@
 # Crossplane — Quorum S3 Config Bucket
 
-Crossplane-native alternative to `terraform/` for provisioning the Quorum project config S3 bucket and uploading sample configs. Requires Crossplane ≥ v1.14 installed in your cluster.
+Crossplane-native alternative to `terraform/` for provisioning the Quorum project config S3 bucket and uploading sample configs. Requires Crossplane ≥ v1.14 and the Upbound AWS S3 provider.
 
 ## Folder Structure
 
 ```
 crossplane/
+├── crossplane.sh                          # Script: setup / start / status / cleanup
 ├── provider/
-│   ├── provider-aws-s3.yaml           # Installs Upbound AWS S3 provider
-│   └── providerconfig-aws.yaml        # Configures AWS credentials
+│   ├── provider-aws-s3.yaml               # Installs Upbound AWS S3 provider (v0.47.x)
+│   ├── provider-family-aws.yaml           # Pins provider-family-aws; applies runtimeConfigRef
+│   ├── providerconfig-aws.yaml            # ProviderConfig — endpoint, credentials, path-style
+│   ├── runtimeconfig-localstack.yaml      # DeploymentRuntimeConfig — injects AWS_ENDPOINT_URL
+│   └── controllerconfig-localstack.yaml   # ControllerConfig (kept for compat, no env vars)
 ├── credentials/
-│   └── aws-creds-secret.yaml.example  # Secret template (copy, fill, apply — never commit)
+│   └── aws-creds-secret.yaml.example      # Secret template (copy, fill, apply — never commit)
 ├── bucket/
-│   ├── bucket.yaml                    # S3 Bucket (ap-southeast-2)
-│   ├── bucket-versioning.yaml         # Versioning (Enabled)
-│   ├── bucket-encryption.yaml         # SSE-S3 encryption (upgrade to KMS for prod)
-│   ├── bucket-public-access.yaml      # All public access blocked
-│   └── bucket-lifecycle.yaml          # Noncurrent version archival
+│   ├── bucket.yaml                        # S3 Bucket (us-east-1)
+│   ├── bucket-versioning.yaml             # Versioning (Enabled)
+│   ├── bucket-encryption.yaml             # SSE-S3 encryption (AES256 — upgrade to KMS for prod)
+│   ├── bucket-public-access.yaml          # All public access blocked
+│   └── bucket-lifecycle.yaml             # Noncurrent version archival to STANDARD_IA / GLACIER_IR
 └── objects/
-    ├── platform-team-config.yaml      # platform-team/config.json
-    ├── backend-team-config.yaml       # backend-team/config.json
-    └── external-bucket-config.yaml.example  # Template for pre-existing buckets
+    ├── platform-team-config.yaml          # platform-team/config.json
+    ├── backend-team-config.yaml           # backend-team/config.json
+    └── external-bucket-config.yaml.example  # Template for pre-existing external buckets
 ```
 
 ---
 
-## Prerequisites
+## Quick Start — LocalStack (recommended)
+
+Use `crossplane.sh` — it handles everything in order: deps check, LocalStack validation, Crossplane install, CRD wait, CoreDNS patch, provider install, credentials, bucket, and objects.
+
+### Prerequisites
 
 ```bash
-# Install Crossplane into your cluster
-helm repo add crossplane-stable https://charts.crossplane.io/stable
-helm install crossplane crossplane-stable/crossplane \
-  --namespace crossplane-system \
-  --create-namespace
+# LocalStack must be running WITH LOCALSTACK_HOST set — this is required for
+# virtual-hosted S3 requests from inside Kubernetes pods.
+# If LocalStack is already running without it, stop and restart:
+localstack stop
+LOCALSTACK_HOST=host.docker.internal localstack start -d
+
+# Required CLIs
+brew install kubectl helm
+pip install awscli-local    # provides the awslocal command
 ```
 
----
-
-## Local Development with LocalStack
-
-LocalStack is the default target. The ProviderConfig in `provider/providerconfig-aws.yaml`
-already points to `http://host.docker.internal:4566` (Docker Desktop on Mac/Windows).
-
-**If LocalStack runs at a different address**, edit `providerconfig-aws.yaml`:
-```yaml
-endpoint:
-  url:
-    static: "http://localhost.localstack.cloud:4566"   # LocalStack DNS (host-only)
-    # static: "http://localstack:4566"                 # same k8s namespace
-    # static: "http://host.docker.internal:4566"       # Docker Desktop (default)
-```
-
-### Quick start (LocalStack)
+### Run setup
 
 ```bash
-# 1. Install provider
-kubectl apply -f crossplane/provider/provider-aws-s3.yaml
-kubectl wait provider/provider-aws-s3 --for=condition=Healthy --timeout=180s
+./crossplane/crossplane.sh setup
+```
 
-# 2. Apply test credentials (LocalStack accepts test/test)
-kubectl create secret generic aws-creds \
-  --namespace crossplane-system \
-  --from-literal=credentials=$'[default]\naws_access_key_id=test\naws_secret_access_key=test'
-kubectl apply -f crossplane/provider/providerconfig-aws.yaml
+This installs Crossplane (v1.17.2), the Upbound AWS S3 provider, patches CoreDNS for wildcard DNS resolution, provisions the `quorum-configs` bucket in LocalStack, and uploads sample configs.
 
-# 3. Provision the bucket
-kubectl apply -f crossplane/bucket/
-kubectl wait bucket/quorum-configs --for=condition=Ready --timeout=120s
+```bash
+# Check current state at any time
+./crossplane/crossplane.sh status
 
-# 4. Upload sample configs
-kubectl apply -f crossplane/objects/platform-team-config.yaml
-kubectl apply -f crossplane/objects/backend-team-config.yaml
+# Re-apply all manifests (idempotent — safe to run again after cluster restart)
+./crossplane/crossplane.sh start
 
-# 5. Verify against LocalStack using awslocal
-awslocal s3 ls s3://quorum-configs/
+# Remove all resources
+./crossplane/crossplane.sh cleanup
+```
+
+Logs are written to `./logs/crossplane.<timestamp>.log`.
+
+### Verify
+
+```bash
+# List objects in the bucket
+awslocal s3 ls s3://quorum-configs/ --recursive
+
+# Read a config
 awslocal s3 cp s3://quorum-configs/platform-team/config.json -
 awslocal s3 cp s3://quorum-configs/backend-team/config.json -
 ```
 
 ---
 
-## Option A: Create a New Bucket (full Crossplane-managed, real AWS)
+## Manual Apply Order (reference)
 
-### 1. Install the AWS S3 provider
+If you prefer running `kubectl apply` directly instead of the script:
 
 ```bash
+# 1. Install Crossplane
+helm repo add crossplane-stable https://charts.crossplane.io/stable --force-update
+helm upgrade --install crossplane crossplane-stable/crossplane \
+  --namespace crossplane-system --create-namespace --version 1.17.2 --wait
+
+# 2. Apply DeploymentRuntimeConfig before provider (provider-family-aws references it)
+kubectl apply -f crossplane/provider/runtimeconfig-localstack.yaml
+kubectl apply -f crossplane/provider/controllerconfig-localstack.yaml
+
+# 3. Install AWS S3 provider (auto-installs provider-family-aws as dependency)
 kubectl apply -f crossplane/provider/provider-aws-s3.yaml
 kubectl wait provider/provider-aws-s3 --for=condition=Healthy --timeout=180s
-```
 
-### 2. Configure AWS credentials
+# 4. Apply RuntimeConfig to provider-family-aws (the pod that makes S3 calls)
+kubectl apply -f crossplane/provider/provider-family-aws.yaml
+kubectl wait provider/upbound-provider-family-aws --for=condition=Healthy --timeout=120s
 
-```bash
-# Copy the example, fill in real AWS keys (or use IRSA — see below)
-cp crossplane/credentials/aws-creds-secret.yaml.example \
-   crossplane/credentials/aws-creds-secret.yaml
-
-kubectl apply -f crossplane/credentials/aws-creds-secret.yaml
+# 5. Create credentials secret and ProviderConfig
+kubectl create secret generic aws-creds \
+  --namespace crossplane-system \
+  --from-literal=credentials=$'[default]\naws_access_key_id=test\naws_secret_access_key=test' \
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f crossplane/provider/providerconfig-aws.yaml
-```
 
-### 3. Provision the bucket
-
-> **Bucket names are globally unique.** Set a unique name via annotation:
-> ```yaml
-> annotations:
->   crossplane.io/external-name: acme-quorum-configs-prod
-> ```
-
-```bash
+# 6. Provision the bucket
 kubectl apply -f crossplane/bucket/
 kubectl wait bucket/quorum-configs --for=condition=Ready --timeout=120s
-```
 
-### 4. Upload sample configs
-
-```bash
+# 7. Upload sample configs
 kubectl apply -f crossplane/objects/platform-team-config.yaml
 kubectl apply -f crossplane/objects/backend-team-config.yaml
-
-kubectl get object platform-team-config backend-team-config
+kubectl wait object/platform-team-config --for=condition=Ready --timeout=60s
+kubectl wait object/backend-team-config  --for=condition=Ready --timeout=60s
 ```
+
+---
+
+## LocalStack Configuration Notes
+
+### Why `LOCALSTACK_HOST=host.docker.internal` is required
+
+LocalStack must be started with this variable set so it can parse bucket names from
+virtual-hosted S3 Host headers (e.g. `quorum-configs.host.docker.internal`). Without it,
+LocalStack cannot resolve bucket names from inside Kubernetes pods and S3 operations fail silently.
+
+```bash
+# Check if your LocalStack has it set
+docker inspect localstack-main --format '{{range .Config.Env}}{{println .}}{{end}}' | grep LOCALSTACK_HOST
+```
+
+If the variable is absent, stop and restart LocalStack:
+```bash
+localstack stop
+LOCALSTACK_HOST=host.docker.internal localstack start -d
+```
+
+### Why `endpoint.services: [s3, sts]` in ProviderConfig is critical
+
+The Upbound AWS provider (built on Upjet/AWS SDK Go v2) has separate endpoint resolution
+paths for S3 and global AWS services. The global `endpoint.url.static` field routes STS,
+IAM, and most services — but **not S3** unless you explicitly list `s3` in the `services`
+array. Without it, S3 operations silently go to real AWS HTTPS instead of LocalStack.
+
+```yaml
+# providerconfig-aws.yaml — the critical part
+endpoint:
+  source: Custom
+  hostnameImmutable: true
+  signingRegion: us-east-1
+  url:
+    type: Static
+    static: "http://host.docker.internal:4566"
+  services:       # ← required — without this, S3 ignores the custom endpoint
+    - s3
+    - sts
+```
+
+### CoreDNS wildcard rewrite
+
+`crossplane.sh setup` patches the CoreDNS ConfigMap to resolve `*.host.docker.internal`
+to `host.docker.internal`. This allows virtual-hosted S3 URLs like
+`quorum-configs.host.docker.internal` to resolve from inside cluster pods.
+
+The patch is applied via Python (not sed) because macOS ships BSD sed which does not
+support multiline append in scripts. The patch is idempotent — running `setup` again
+skips it if already present.
+
+**Note:** Docker Desktop fully resets the Kubernetes cluster (including CoreDNS) if you
+restart Docker Desktop or reset the cluster. Re-run `./crossplane/crossplane.sh setup`
+after any cluster reset.
 
 ---
 
@@ -129,7 +184,7 @@ kubectl get object platform-team-config backend-team-config
 If your bucket already exists (created by Terraform, manually, or in LocalStack), skip the `bucket/` step.
 
 ```bash
-# 1. Install provider + credentials (same as Option A steps 1-2)
+# 1. Install provider + credentials (steps 1-5 from manual apply above)
 
 # 2. Copy the external bucket template
 cp crossplane/objects/external-bucket-config.yaml.example \
@@ -149,33 +204,27 @@ The only difference from the managed bucket path: use `bucket: <name>` directly 
 
 ## Production Upgrade: IRSA Instead of Static Keys
 
-1. In `provider/provider-aws-s3.yaml`, uncomment `serviceAccountAnnotations` and set the IAM role ARN (the `gateway_iam_role_arn` Terraform output).
-2. In `provider/providerconfig-aws.yaml`, change `source: Secret` → `source: IRSA`, remove `secretRef`, and remove the `endpoint` block entirely.
-3. Delete the `aws-creds` Secret — no longer needed.
+1. Remove `s3_use_path_style`, `skip_credentials_validation`, `skip_metadata_api_check`, `skip_region_validation`, and the entire `endpoint` block from `providerconfig-aws.yaml` — these are LocalStack-only settings.
+2. Change `credentials.source: Secret` → `source: IRSA` and remove `secretRef`.
+3. In `provider-aws-s3.yaml`, uncomment `serviceAccountAnnotations` and set the IAM role ARN (from the `gateway_iam_role_arn` Terraform output).
+4. Remove `runtimeconfig-localstack.yaml` and the `runtimeConfigRef` from `provider-family-aws.yaml`.
+5. Delete the `aws-creds` Secret — no longer needed.
 
 ---
 
-## Verify (LocalStack)
+## Relationship to Terraform
 
-```bash
-# awslocal = aws CLI pre-configured for LocalStack (http://localhost:4566)
-BUCKET=$(kubectl get bucket quorum-configs \
-  -o jsonpath='{.metadata.annotations.crossplane\.io/external-name}')
+`terraform/` and `crossplane/` are **parallel paths** — both provision the same S3 bucket but via different tools:
 
-awslocal s3 ls s3://$BUCKET/
-awslocal s3 cp s3://$BUCKET/platform-team/config.json -
-awslocal s3 cp s3://$BUCKET/backend-team/config.json -
-```
+| | Terraform | Crossplane |
+|--|--|--|
+| Target | Production AWS | Local (LocalStack) / any K8s cluster |
+| State | `.tfstate` file | Kubernetes CRDs |
+| Auth | AWS credentials / IRSA | Kubernetes Secret / IRSA |
+| KMS encryption | ✅ (`terraform/`) | AES256 only (upgrade path documented above) |
+| Bucket policy IAM | ✅ per-project policies | Not implemented (use Terraform for prod) |
 
-## Verify (real AWS)
-
-```bash
-BUCKET=$(kubectl get bucket quorum-configs \
-  -o jsonpath='{.metadata.annotations.crossplane\.io/external-name}')
-
-aws s3 ls s3://$BUCKET/
-aws s3 cp s3://$BUCKET/platform-team/config.json -
-```
+For production, use `terraform/`. For local development and K8s-native workflows, use `crossplane/`.
 
 ---
 
@@ -194,4 +243,4 @@ Each `{project_id}/config.json` object in the bucket follows this structure:
 }
 ```
 
-The Quorum Gateway reads these at startup via `QUORUM_CONFIG_BUCKET` env var (see `helm/quorum/values-aws.yaml`).
+The Quorum Gateway reads these at startup via the `QUORUM_CONFIG_BUCKET` env var (see `helm/quorum/values-aws.yaml`).

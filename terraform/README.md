@@ -2,6 +2,10 @@
 
 This directory provisions the AWS resources that Quorum needs to run in production.
 
+> **Local development?** Use `crossplane/` instead — it provisions the same S3 bucket
+> via Crossplane CRDs targeting LocalStack. No AWS account required.
+> See [`crossplane/README.md`](../crossplane/README.md) for setup.
+
 ## What it creates
 
 **1. KMS encryption key**
