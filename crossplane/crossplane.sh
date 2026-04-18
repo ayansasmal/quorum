@@ -162,6 +162,15 @@ cmd_setup() {
   # Note: no deployment patch needed — DeploymentRuntimeConfig handles env vars,
   # and ProviderConfig endpoint.services:[s3,sts] routes S3 calls to LocalStack.
 
+  # provider.Healthy=True means Crossplane accepted the provider, but the provider
+  # pod's conversion webhook may not be ready yet. Wait for the pod itself.
+  echo -n "  Waiting for provider-aws-s3 pod to be Ready ..."
+  kubectl wait pods \
+    -n crossplane-system \
+    -l pkg.crossplane.io/revision \
+    --for=condition=Ready \
+    --timeout=120s 2>/dev/null && echo " ✓" || { echo " ✗"; exit 1; }
+
   echo ""
   echo "▶ Applying LocalStack credentials..."
   kubectl create secret generic aws-creds \
