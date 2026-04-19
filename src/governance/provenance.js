@@ -40,6 +40,7 @@ export function hashContent(content) {
  * @returns {Record<string, unknown>}
  */
 export function buildVersionRecord(params) {
+  const confidence = params.confidence ?? 0.7
   return {
     topic: params.topic,
     key: params.key,
@@ -47,11 +48,15 @@ export function buildVersionRecord(params) {
     status: params.status ?? KnowledgeStatus.ACTIVE,
     content_hash: hashContent(params.content),
     author: params.author,
+    author_role: params.authorRole ?? 'unknown',
+    confidence,
+    starting_confidence: confidence,
     created_at: new Date().toISOString(),
     created_by_audit: params.auditEntryId,
     triggered_by: params.triggeredBy,
     conflict_id: params.conflictId ?? null,
     graphiti_episode_id: params.graphitiEpisodeId ?? null,
+    project_id: params.projectId ?? process.env.QUORUM_PROJECT_ID ?? 'default',
     // Backward link — set at creation time
     supersedes_version: params.supersedesVersion ?? null,
     supersedes_reason: params.supersedesReason ?? null,

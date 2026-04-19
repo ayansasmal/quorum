@@ -32,6 +32,7 @@ import graphitiRoutes from './routes/graphiti.js'
 import pgRoutes       from './routes/pg.js'
 import configRoutes   from './routes/config.js'
 import projectsRoutes from './routes/projects.js'
+import bumpRoutes     from './routes/bump.js'
 
 const PORT = parseInt(process.env.QUORUM_GATEWAY_PORT ?? '3001', 10)
 
@@ -64,6 +65,7 @@ app.use('/graphiti',          graphitiRoutes)
 app.use('/pg',                pgRoutes)
 app.use('/config',            configRoutes)
 app.use('/projects',          projectsRoutes)
+app.use('/bump',              apiLimit, bumpRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 

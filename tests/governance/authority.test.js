@@ -63,13 +63,13 @@ describe('calculateAuthority', () => {
     expect(high).toBeGreaterThan(low)
   })
 
-  it('weights confidence at 50% of score for fresh zero-access episode', () => {
-    // With created_at = now (recency ≈ 1) and access_count = 0:
-    //   score ≈ (confidence * 0.5) + (1.0 * 0.3) + (0 * 0.2)
-    //         = confidence * 0.5 + 0.3
+  it('weights confidence at 35% of score for fresh zero-access episode with unknown role', () => {
+    // With created_at = now (recency ≈ 1), access_count = 0, unknown role (score 0.50):
+    //   score ≈ (confidence × 0.35) + (1.0 × 0.25) + (0 × 0.20) + (0.50 × 0.20)
+    //         = 0.8*0.35 + 0.25 + 0 + 0.10 = 0.28 + 0.35 = 0.63
     const episode = { confidence: 0.8, created_at: new Date().toISOString(), access_count: 0 }
     const score = calculateAuthority(episode)
-    const expected = 0.8 * 0.5 + 1.0 * 0.3 + 0
+    const expected = 0.8 * 0.35 + 1.0 * 0.25 + 0 * 0.20 + 0.50 * 0.20
     expect(score).toBeCloseTo(expected, 2)
   })
 

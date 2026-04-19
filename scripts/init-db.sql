@@ -224,6 +224,26 @@ GRANT UPDATE (status, resolution, resolution_note, resolved_by, resolved_at,
   ON pending_decisions TO quorum_app;
 GRANT USAGE, SELECT ON SEQUENCE pending_decisions_id_seq TO quorum_app;
 
+-- ── Confidence lifecycle (GAP-04, GAP-18, GAP-24) ────────────────────────────────
+-- confidence:         current score (0–1), decays weekly, restored by bumps and recall
+-- starting_confidence: the score at creation — bump mechanic caps restoration here
+-- last_accessed_at:  reset on every recall() — decay clock uses this, not created_at
+-- author_role:        role at write time — preserved even if author's role changes later
+ALTER TABLE knowledge_versions
+  ADD COLUMN IF NOT EXISTS confidence         FLOAT       NOT NULL DEFAULT 0.7,
+  ADD COLUMN IF NOT EXISTS starting_confidence FLOAT      NOT NULL DEFAULT 0.7,
+  ADD COLUMN IF NOT EXISTS last_accessed_at  TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS author_role       TEXT        NOT NULL DEFAULT 'unknown';
+
+CREATE INDEX IF NOT EXISTS idx_kv_confidence ON knowledge_versions (confidence)
+  WHERE status = 'ACTIVE';
+
+CREATE INDEX IF NOT EXISTS idx_kv_last_accessed ON knowledge_versions (last_accessed_at)
+  WHERE status = 'ACTIVE';
+
+GRANT UPDATE (confidence, last_accessed_at)
+  ON knowledge_versions TO quorum_app;
+
 -- ── Project scoping (GAP-10) ────────────────────────────────────────────────────
 -- Multi-tenancy: every record belongs to a project.
 -- The Quorum Gateway enforces project_id from the JWT claim on every query —
