@@ -132,13 +132,14 @@ export async function getNextVersionNumber(pg, topic, key, projectId = 'default'
 export async function insertVersion(pg, record) {
   const result = await pg.query(
     `INSERT INTO knowledge_versions (
-      topic, key, version, status, content_hash, author,
+      topic, key, version, status, content_hash, author, author_role,
+      confidence, starting_confidence,
       created_at, created_by_audit, triggered_by, conflict_id,
       graphiti_episode_id,
       supersedes_version, supersedes_reason,
       superseded_by_version, superseded_by_author, superseded_at,
       tags, project_id
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
     RETURNING *`,
     [
       record.topic,
@@ -147,16 +148,19 @@ export async function insertVersion(pg, record) {
       record.status,
       record.content_hash,
       record.author,
+      record.author_role       ?? 'unknown',
+      record.confidence        ?? 0.7,
+      record.starting_confidence ?? record.confidence ?? 0.7,
       record.created_at,
       record.created_by_audit,
       record.triggered_by,
-      record.conflict_id ?? null,
+      record.conflict_id       ?? null,
       record.graphiti_episode_id ?? null,
-      record.supersedes_version ?? null,
-      record.supersedes_reason ?? null,
+      record.supersedes_version  ?? null,
+      record.supersedes_reason   ?? null,
       record.superseded_by_version ?? null,
-      record.superseded_by_author ?? null,
-      record.superseded_at ?? null,
+      record.superseded_by_author  ?? null,
+      record.superseded_at         ?? null,
       record.tags ?? [],
       record.project_id ?? process.env.QUORUM_PROJECT_ID ?? 'default',
     ],
@@ -463,5 +467,95 @@ export async function resolvePendingDecision(pg, conflictId, updates) {
       updates.mergedContent ?? null,
       conflictId,
     ],
+  )
+}
+
+// ── Confidence lifecycle (GAP-04, GAP-24) ─────────────────────────────────────
+
+/**
+ * Update the confidence score for a specific knowledge version row (decay or bump).
+ * Also resets last_accessed_at to now.
+ * @param {import('pg').Pool} pg
+ * @param {number} id - knowledge_versions.id (serial PK)
+ * @param {number} newConfidence
+ */
+export async function updateConfidence(pg, id, newConfidence) {
+  await pg.query(
+    `UPDATE knowledge_versions
+     SET confidence = $1, last_accessed_at = NOW()
+     WHERE id = $2`,
+    [newConfidence, id],
+  )
+}
+
+/**
+ * Reset last_accessed_at to now (called on every recall()).
+ * @param {import('pg').Pool} pg
+ * @param {string} topic
+ * @param {string} key
+ * @param {string} [projectId='default']
+ */
+export async function updateLastAccessed(pg, topic, key, projectId = 'default') {
+  await pg.query(
+    `UPDATE knowledge_versions
+     SET last_accessed_at = NOW()
+     WHERE project_id = $1 AND topic = $2 AND key = $3 AND status = 'ACTIVE'`,
+    [projectId, topic, key],
+  )
+}
+
+/**
+ * Fetch all ACTIVE knowledge versions eligible for confidence decay.
+ * Eligible = older than 7 days, confidence above floor (0.10).
+ * @param {import('pg').Pool} pg
+ * @param {string} [projectId='default']
+ * @param {number} [batchSize=200]
+ * @returns {Promise<Array<{ id: number, topic: string, key: string, confidence: number, starting_confidence: number, last_accessed_at: string | null, created_at: string }>>}
+ */
+export async function getDecayEligibleVersions(pg, projectId = 'default', batchSize = 200) {
+  const result = await pg.query(
+    `SELECT id, topic, key, confidence, starting_confidence, last_accessed_at, created_at
+     FROM knowledge_versions
+     WHERE project_id = $1
+       AND status = 'ACTIVE'
+       AND created_at < NOW() - INTERVAL '7 days'
+       AND confidence > 0.10
+     ORDER BY last_accessed_at ASC NULLS FIRST
+     LIMIT $2`,
+    [projectId, batchSize],
+  )
+  return result.rows
+}
+
+/**
+ * Check the bump_log for the most recent bump by an author for a topic:key.
+ * Returns null if no bump found, or the row if a cooldown-relevant bump exists.
+ * @param {import('pg').Pool} pg
+ * @param {string} author
+ * @param {string} topic
+ * @param {string} key
+ * @param {string} projectId
+ * @returns {Promise<{ bumped_at: string } | null>}
+ */
+export async function getLastBump(pg, author, topic, key, projectId) {
+  const result = await pg.query(
+    `SELECT bumped_at FROM bump_log
+     WHERE author = $1 AND topic = $2 AND key = $3 AND project_id = $4
+     ORDER BY bumped_at DESC LIMIT 1`,
+    [author, topic, key, projectId],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * Record a bump action in bump_log.
+ * @param {import('pg').Pool} pg
+ * @param {{ author: string, topic: string, key: string, projectId: string, role: string, deltaApplied: number }} record
+ */
+export async function insertBump(pg, record) {
+  await pg.query(
+    `INSERT INTO bump_log (author, topic, key, project_id, role, delta_applied)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [record.author, record.topic, record.key, record.projectId, record.role, record.deltaApplied],
   )
 }

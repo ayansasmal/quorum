@@ -149,11 +149,11 @@ export async function handler(pg, input, identity) {
           // auto_supersede falls through to the supersession logic below
         }
 
-        return supersede(pg, input, existing, author, confidence, tags, triggeredBy)
+        return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role)
       }
 
       // ── First version ───────────────────────────────────────────────────────
-      return storeFirst(pg, input, author, confidence, tags, triggeredBy)
+      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role)
     },
   )
 
@@ -172,7 +172,7 @@ export async function handler(pg, input, identity) {
  * @param {string[]} tags
  * @param {string} triggeredBy
  */
-async function supersede(pg, input, existing, author, confidence, tags, triggeredBy) {
+async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole) {
   const nextVersion = await getNextVersionNumber(pg, input.topic, input.key)
 
   const graphitiResult = await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
@@ -190,6 +190,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     version: nextVersion,
     content: input.content,
     author,
+    authorRole: authorRole ?? 'unknown',
     confidence,
     tags,
     triggeredBy,
@@ -226,7 +227,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
  * Store the first version of a topic:key (no existing knowledge).
  * Claude-authored and reflect-triggered knowledge always enters as DRAFT.
  */
-async function storeFirst(pg, input, author, confidence, tags, triggeredBy) {
+async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole) {
   const graphitiResult = await addEpisode(input.content, {
     key: `${input.topic}:${input.key}`,
     source: `quorum:remember:${author}`,
@@ -246,6 +247,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy) {
     version: 1,
     content: input.content,
     author,
+    authorRole: authorRole ?? 'unknown',
     confidence,
     tags,
     triggeredBy,

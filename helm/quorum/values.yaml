@@ -5,6 +5,12 @@ global:
   imageRegistry: ""
   imagePullSecrets: []
 
+# ── Confidence decay CronJob (GAP-04) ─────────────────────────────────────────
+decayJob:
+  enabled: true
+  schedule: "0 2 * * 0"   # Sunday 2am UTC — weekly
+  projectId: ""            # leave empty to use QUORUM_PROJECT_ID from env; set to scope per-project
+
 # ── Quorum Gateway ──────────────────────────────────────────────────────────────
 # Central microservice: holds DB credentials, S3 access, JWT signing keys.
 # Engineers only need QUORUM_GATEWAY_URL + GitHub token.
