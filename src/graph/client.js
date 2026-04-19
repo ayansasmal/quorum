@@ -143,13 +143,14 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  * Store a new knowledge episode in Graphiti.
  * @param {string} content
  * @param {{ key: string, source: string, entityType?: string, tags?: string[] }} metadata
+ * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addEpisode(content, metadata) {
+export async function addEpisode(content, metadata, groupId = GROUP_ID) {
   return callGraphiti('add_episode', {
     name: metadata.key,
     episode_body: content,
-    group_id: GROUP_ID,
+    group_id: groupId,
     source_description: metadata.source,
     entity_types: metadata.entityType ? [metadata.entityType] : undefined,
     metadata: { tags: metadata.tags ?? [] },
@@ -163,13 +164,14 @@ export async function addEpisode(content, metadata) {
  * @param {string} newContent
  * @param {string} oldEpisodeId
  * @param {{ key: string, source: string, entityType?: string, tags?: string[], reason?: string }} metadata
+ * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata) {
+export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId = GROUP_ID) {
   const newEpisode = await callGraphiti('add_episode', {
     name: metadata.key,
     episode_body: newContent,
-    group_id: GROUP_ID,
+    group_id: groupId,
     source_description: metadata.source,
     entity_types: metadata.entityType ? [metadata.entityType] : undefined,
     metadata: {
@@ -185,7 +187,7 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata) 
     await callGraphiti('add_episode', {
       name: `${metadata.key}:supersedes_link`,
       episode_body: `Version supersedes previous. Reason: ${metadata.reason ?? 'updated'}`,
-      group_id: GROUP_ID,
+      group_id: groupId,
       source_description: 'quorum:versioning',
       metadata: {
         relationship: 'SUPERSEDES',
@@ -206,12 +208,13 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata) 
  * Walk the SUPERSEDES edges from an episode back to the root, returning the
  * full organic evolution chain as an ordered array (newest first).
  * @param {string} episodeId
+ * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  * @returns {Promise<Array<{ episode_id: string, metadata: unknown }>>}
  */
-export async function getEvolutionChain(episodeId) {
+export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
   const result = await callGraphiti('search_facts', {
     query: `supersedes evolution chain for ${episodeId}`,
-    group_ids: [GROUP_ID],
+    group_ids: [groupId],
     metadata_filter: { relationship: 'SUPERSEDES' },
   }).catch(() => ({ facts: [] }))
 
@@ -221,13 +224,13 @@ export async function getEvolutionChain(episodeId) {
 /**
  * Search for knowledge nodes semantically.
  * @param {string} query
- * @param {{ limit?: number, groupIds?: string[] }} [options]
+ * @param {{ limit?: number, groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
   return callGraphiti('search_nodes', {
     query,
-    group_ids: options.groupIds ?? [GROUP_ID],
+    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
     limit: options.limit ?? 10,
   })
 }
@@ -235,13 +238,13 @@ export async function searchNodes(query, options = {}) {
 /**
  * Search for relationships/edges across the knowledge graph.
  * @param {string} query
- * @param {{ groupIds?: string[] }} [options]
+ * @param {{ groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
   return callGraphiti('search_facts', {
     query,
-    group_ids: options.groupIds ?? [GROUP_ID],
+    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
   })
 }
 
@@ -259,12 +262,13 @@ export async function getEpisodes(groupId = GROUP_ID) {
  * Never calls Graphiti delete methods — constitutional rule enforced.
  * @param {string} episodeId
  * @param {{ key: string, reason: string, author: string }} meta
+ * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  */
-export async function deleteEpisodeSoft(episodeId, meta) {
+export async function deleteEpisodeSoft(episodeId, meta, groupId = GROUP_ID) {
   return callGraphiti('add_episode', {
     name: `${meta.key}:deprecated`,
     episode_body: `Knowledge deprecated. Reason: ${meta.reason}`,
-    group_id: GROUP_ID,
+    group_id: groupId,
     source_description: 'quorum:deprecation',
     metadata: {
       status: 'DEPRECATED',

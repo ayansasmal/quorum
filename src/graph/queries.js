@@ -137,8 +137,8 @@ export async function insertVersion(pg, record) {
       graphiti_episode_id,
       supersedes_version, supersedes_reason,
       superseded_by_version, superseded_by_author, superseded_at,
-      tags
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+      tags, project_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
     RETURNING *`,
     [
       record.topic,
@@ -158,6 +158,7 @@ export async function insertVersion(pg, record) {
       record.superseded_by_author ?? null,
       record.superseded_at ?? null,
       record.tags ?? [],
+      record.project_id ?? process.env.QUORUM_PROJECT_ID ?? 'default',
     ],
   )
   return result.rows[0]

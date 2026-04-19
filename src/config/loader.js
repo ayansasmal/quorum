@@ -232,6 +232,52 @@ export function getConfig() {
 }
 
 /**
+ * Load a project config directly from the `projects` table.
+ * Used by MCP tool handlers when multi-project isolation is active.
+ * Does not cache — call sites manage their own caching if needed.
+ *
+ * @param {string} projectId
+ * @param {import('pg').Pool} pg
+ * @returns {Promise<import('./schema.js').QuorumConfig>}
+ */
+export async function getProjectConfig(projectId, pg) {
+  const result = await pg.query(
+    `SELECT id, name, members, domains, governance
+     FROM projects
+     WHERE id = $1 AND status = $2`,
+    [projectId, 'ACTIVE'],
+  )
+
+  if (!result.rows[0]) {
+    throw new Error(`[Quorum:config] Project not found or archived: ${projectId}`)
+  }
+
+  const row = result.rows[0]
+
+  const domains = Object.fromEntries(
+    (row.domains ?? []).map((d) => [d.name, { conflict_threshold: d.conflict_threshold }]),
+  )
+
+  return QuorumConfigSchema.parse({
+    project:  row.name,
+    group_id: row.id,
+    members:  (row.members ?? []).map((m) => ({
+      name:            m.github_username ?? 'unknown',
+      team:            m.team            ?? 'platform',
+      role:            m.role,
+      github_username: m.github_username,
+      base_confidence: m.base_confidence,
+    })),
+    roles:   {},
+    domains,
+    thresholds: {
+      conflict_threshold:  row.governance?.conflict_threshold  ?? 0.85,
+      authority_threshold: row.governance?.authority_threshold ?? 0.20,
+    },
+  })
+}
+
+/**
  * Stop the config polling timer. Call on graceful shutdown.
  */
 export function stopConfigPoller() {

@@ -52,6 +52,7 @@ export function buildVersionRecord(params) {
     triggered_by: params.triggeredBy,
     conflict_id: params.conflictId ?? null,
     graphiti_episode_id: params.graphitiEpisodeId ?? null,
+    project_id: params.projectId ?? process.env.QUORUM_PROJECT_ID ?? 'default',
     // Backward link — set at creation time
     supersedes_version: params.supersedesVersion ?? null,
     supersedes_reason: params.supersedesReason ?? null,
