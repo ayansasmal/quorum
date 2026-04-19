@@ -26,6 +26,8 @@
 import express from 'express'
 import pg from 'pg'
 import { loadKeys } from './keys.js'
+import { HttpError } from './errors.js'
+import { authLimit, apiLimit, graphitiLimit } from './middleware/rate-limit.js'
 import authRoutes     from './routes/auth.js'
 import jwksRoutes     from './routes/jwks.js'
 import graphitiRoutes from './routes/graphiti.js'
@@ -58,12 +60,12 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',              authRoutes)
+app.use('/auth',              authLimit, authRoutes)
 app.use('/.well-known/jwks.json', jwksRoutes)
-app.use('/graphiti',          graphitiRoutes)
-app.use('/pg',                pgRoutes)
-app.use('/config',            configRoutes)
-app.use('/projects',          projectsRoutes)
+app.use('/graphiti',          graphitiLimit, graphitiRoutes)
+app.use('/pg',                apiLimit, pgRoutes)
+app.use('/config',            apiLimit, configRoutes)
+app.use('/projects',          apiLimit, projectsRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 
@@ -95,9 +97,19 @@ app.use((_req, res) => {
 // ── Global error handler ───────────────────────────────────────────────────────
 
 // eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
-  console.error('[Gateway] Unhandled error:', err.message)
-  res.status(500).json({ error: 'internal_error', message: err.message })
+app.use((err, req, res, _next) => {
+  const status = err instanceof HttpError ? err.status : (err.status ?? err.statusCode ?? 500)
+
+  // Log 5xx with method + path for diagnostics — never log req.body (may contain tokens)
+  if (status >= 500) {
+    console.error(`[Gateway] ${req.method} ${req.path} → ${status}: ${err.message}`)
+  }
+
+  // Safe response — stack traces, SQL errors, and AWS details stay server-side
+  res.status(status).json({
+    error: status < 500 ? err.message : 'Internal server error',
+    ...(err.code && { code: err.code }),
+  })
 })
 
 // ── Startup ────────────────────────────────────────────────────────────────────

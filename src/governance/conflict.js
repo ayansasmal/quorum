@@ -77,8 +77,9 @@ function getConflictThreshold(domain) {
 async function checkContradiction(existing, incoming) {
   if (!OPENAI_API_KEY) {
     return {
-      contradicts: true,
-      reason: 'LLM not configured — flagging for human review',
+      contradicts: false,
+      llm_unavailable: true,
+      reason: 'LLM not configured — contradiction check skipped',
       possible_split: false,
     }
   }
@@ -116,8 +117,9 @@ Reply with only valid JSON. Example:
 
   if (!response.ok) {
     return {
-      contradicts: true,
-      reason: `LLM check failed (${response.status}) — flagging for human review`,
+      contradicts: false,
+      llm_unavailable: true,
+      reason: `LLM check failed (${response.status}) — contradiction check skipped`,
       possible_split: false,
     }
   }
@@ -127,14 +129,16 @@ Reply with only valid JSON. Example:
     const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}')
     return {
       contradicts: Boolean(parsed.contradicts),
+      llm_unavailable: false,
       reason: parsed.reason ?? '',
       possible_split: Boolean(parsed.possible_split),
       split_suggestion: parsed.split_suggestion ?? undefined,
     }
   } catch {
     return {
-      contradicts: true,
-      reason: 'LLM response unparseable — flagging for human review',
+      contradicts: false,
+      llm_unavailable: true,
+      reason: 'LLM response unparseable — contradiction check skipped',
       possible_split: false,
     }
   }
@@ -260,6 +264,15 @@ export async function detectConflict(newContent, topic, key, domain) {
       node.summary ?? node.content ?? JSON.stringify(node),
       newContent,
     ).catch(() => ({ contradicts: false, reason: '', possible_split: false }))
+
+    if (result.llm_unavailable) {
+      return {
+        conflict: false,
+        warning: 'llm_check_skipped',
+        llm_unavailable: true,
+        reason: result.reason,
+      }
+    }
 
     if (result.contradicts) {
       return {

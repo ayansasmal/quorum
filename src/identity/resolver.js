@@ -22,10 +22,15 @@
 import { execFileSync } from 'node:child_process'
 import { getConfig } from '../config/loader.js'
 
-// ── Module-level cache ────────────────────────────────────────────────────────
+// ── TTL cache ─────────────────────────────────────────────────────────────────
 
-/** @type {ResolvedIdentity | null} */
-let _identity = null
+const CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
+
+/**
+ * @type {Map<string, { identity: ResolvedIdentity, expiresAt: number }>}
+ * Keyed by token string (or 'anonymous' / 'git_email' / 'env_var' for non-token paths).
+ */
+const _cache = new Map()
 
 /**
  * @typedef {Object} ResolvedIdentity
@@ -180,34 +185,37 @@ function identityFromMember(member, method) {
  * @returns {Promise<ResolvedIdentity>}
  */
 export async function resolveIdentity({ forceRefresh = false } = {}) {
-  if (_identity && !forceRefresh) return _identity
+  const githubToken = process.env.QUORUM_GITHUB_TOKEN
+  const cacheKey = githubToken ?? 'no-token'
+
+  if (!forceRefresh) {
+    const hit = _cache.get(cacheKey)
+    if (hit && hit.expiresAt > Date.now()) return hit.identity
+  }
+
+  /** @param {ResolvedIdentity} identity */
+  const cache = (identity) => {
+    _cache.set(cacheKey, { identity, expiresAt: Date.now() + CACHE_TTL_MS })
+    return identity
+  }
 
   // ── Layer 1: QUORUM_GITHUB_TOKEN ──────────────────────────────────────────
-  const githubToken = process.env.QUORUM_GITHUB_TOKEN
   if (githubToken) {
     const username = await verifyGitHubToken(githubToken)
     if (username) {
       const member = findMemberByGitHubUsername(username)
       if (member) {
-        _identity = identityFromMember(member, 'github_token')
-        console.error(
-          `[Quorum:identity] Resolved via GitHub token: ${_identity.name} (${_identity.role})`,
-        )
-        return _identity
+        const identity = identityFromMember(member, 'github_token')
+        console.error(`[Quorum:identity] Resolved via GitHub token: ${identity.name} (${identity.role})`)
+        return cache(identity)
       }
-      // Verified GitHub user but not in config — treat as named but ungoverned
-      _identity = {
-        name: username,
-        team: null,
-        role: null,
-        base_confidence: 0.5,
-        method: 'github_token',
-      }
-      console.error(
-        `[Quorum:identity] GitHub user @${username} not in config — anonymous confidence applied`,
-      )
-      return _identity
+      // Verified GitHub user but not in config — named but ungoverned
+      const identity = { name: username, team: null, role: null, base_confidence: 0.5, method: 'github_token' }
+      console.error(`[Quorum:identity] GitHub user @${username} not in config — anonymous confidence applied`)
+      return cache(identity)
     }
+    // Token present but rejected by GitHub API — revoked or invalid
+    console.error('[Quorum:identity] GitHub token rejected — falling through to next layer')
   }
 
   // ── Layer 2: git config user.email ────────────────────────────────────────
@@ -215,24 +223,13 @@ export async function resolveIdentity({ forceRefresh = false } = {}) {
   if (gitEmail) {
     const member = findMemberByGitEmail(gitEmail)
     if (member) {
-      _identity = identityFromMember(member, 'git_email')
-      console.error(
-        `[Quorum:identity] Resolved via git email (${gitEmail}): ${_identity.name} (${_identity.role})`,
-      )
-      return _identity
+      const identity = identityFromMember(member, 'git_email')
+      console.error(`[Quorum:identity] Resolved via git email (${gitEmail}): ${identity.name} (${identity.role})`)
+      return cache(identity)
     }
-    // Email found but not in config
-    _identity = {
-      name: gitEmail,
-      team: null,
-      role: null,
-      base_confidence: 0.5,
-      method: 'git_email',
-    }
-    console.error(
-      `[Quorum:identity] Git email ${gitEmail} not in config — anonymous confidence applied`,
-    )
-    return _identity
+    const identity = { name: gitEmail, team: null, role: null, base_confidence: 0.5, method: 'git_email' }
+    console.error(`[Quorum:identity] Git email ${gitEmail} not in config — anonymous confidence applied`)
+    return cache(identity)
   }
 
   // ── Layer 3: QUORUM_AUTHOR env var ────────────────────────────────────────
@@ -240,37 +237,19 @@ export async function resolveIdentity({ forceRefresh = false } = {}) {
   if (quorumAuthor) {
     const member = findMemberByName(quorumAuthor)
     if (member) {
-      _identity = identityFromMember(member, 'env_var')
-      console.error(
-        `[Quorum:identity] Resolved via QUORUM_AUTHOR: ${_identity.name} (${_identity.role})`,
-      )
-      return _identity
+      const identity = identityFromMember(member, 'env_var')
+      console.error(`[Quorum:identity] Resolved via QUORUM_AUTHOR: ${identity.name} (${identity.role})`)
+      return cache(identity)
     }
-    _identity = {
-      name: quorumAuthor,
-      team: null,
-      role: null,
-      base_confidence: 0.5,
-      method: 'env_var',
-    }
-    console.error(
-      `[Quorum:identity] QUORUM_AUTHOR=${quorumAuthor} not in config — anonymous confidence applied`,
-    )
-    return _identity
+    const identity = { name: quorumAuthor, team: null, role: null, base_confidence: 0.5, method: 'env_var' }
+    console.error(`[Quorum:identity] QUORUM_AUTHOR=${quorumAuthor} not in config — anonymous confidence applied`)
+    return cache(identity)
   }
 
   // ── Layer 4: Anonymous ────────────────────────────────────────────────────
-  _identity = {
-    name: 'anonymous',
-    team: null,
-    role: null,
-    base_confidence: 0.5,
-    method: 'anonymous',
-  }
-  console.error(
-    '[Quorum:identity] WARNING: No identity signal resolved — all writes will be DRAFT with base_confidence 0.5',
-  )
-  return _identity
+  const identity = { name: 'anonymous', team: null, role: null, base_confidence: 0.5, method: 'anonymous' }
+  console.error('[Quorum:identity] WARNING: No identity signal resolved — all writes will be DRAFT with base_confidence 0.5')
+  return cache(identity)
 }
 
 /**
@@ -279,14 +258,16 @@ export async function resolveIdentity({ forceRefresh = false } = {}) {
  * @returns {ResolvedIdentity | null}
  */
 export function getIdentity() {
-  return _identity
+  const token = process.env.QUORUM_GITHUB_TOKEN ?? 'no-token'
+  const hit = _cache.get(token)
+  return hit && hit.expiresAt > Date.now() ? hit.identity : null
 }
 
 /**
- * Clear the cached identity. Primarily for testing.
+ * Clear the identity cache. Primarily for testing.
  */
 export function clearIdentityCache() {
-  _identity = null
+  _cache.clear()
 }
 
 /**
