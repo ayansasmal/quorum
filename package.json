@@ -31,7 +31,7 @@
     "audit:scan-graphiti-deletes": "node scripts/audit-scan-deletes.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.830.0",
+    "@aws-sdk/client-s3": "3.1032.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "14.0.3",
     "express": "4.21.2",
