@@ -267,3 +267,36 @@ CREATE INDEX IF NOT EXISTS idx_kv_project_topic_key_status
   ON knowledge_versions (project_id, topic, key, status);
 
 GRANT UPDATE (project_id) ON knowledge_versions TO quorum_app;
+
+-- ── Entity type + summary (dashboard graph view) ───────────────────────────────
+-- entity_type: Decision | Pattern | Constraint | Runbook | Requirement | unknown
+-- summary:     short human-readable label for graph node tooltips
+ALTER TABLE knowledge_versions
+  ADD COLUMN IF NOT EXISTS entity_type TEXT NOT NULL DEFAULT 'unknown',
+  ADD COLUMN IF NOT EXISTS summary     TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_kv_entity_type ON knowledge_versions (entity_type)
+  WHERE status = 'ACTIVE';
+
+GRANT UPDATE (entity_type, summary) ON knowledge_versions TO quorum_app;
+
+-- ── Bump log (GAP-24 — confidence endorsement audit trail) ─────────────────────
+-- Append-only record of every bump action. Used for:
+--   1. 7-day per-author cooldown enforcement
+--   2. Audit trail of who endorsed what and with what role delta
+CREATE TABLE IF NOT EXISTS bump_log (
+  id            SERIAL PRIMARY KEY,
+  author        TEXT        NOT NULL,
+  topic         TEXT        NOT NULL,
+  key           TEXT        NOT NULL,
+  project_id    TEXT        NOT NULL DEFAULT 'default',
+  role          TEXT        NOT NULL,
+  delta_applied NUMERIC     NOT NULL,
+  bumped_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bump_log_cooldown
+  ON bump_log (author, topic, key, project_id, bumped_at DESC);
+
+GRANT INSERT, SELECT ON bump_log TO quorum_app;
+GRANT USAGE, SELECT ON SEQUENCE bump_log_id_seq TO quorum_app;

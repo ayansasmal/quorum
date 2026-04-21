@@ -1,7 +1,7 @@
 # Quorum — Frontend Dashboard Design
 
 > Created: 2026-04-19
-> Status: Design document — not yet implemented
+> Status: Implemented — Wave 4 complete (2026-04-21)
 > Purpose: Full reference for the Quorum visibility dashboard implementation
 
 ---
@@ -477,13 +477,12 @@ Response:
       context: ./dashboard
       dockerfile: Dockerfile
     ports:
-      - "3001:80"        # dashboard on :3001 (FalkorDB browser stays on :3000)
-    environment:
-      - VITE_GATEWAY_URL=http://localhost:8002   # injected at build time
+      - "3002:80"        # dashboard on :3002 (gateway owns :3001, FalkorDB browser owns :3000)
     depends_on:
-      - quorum-gateway
-    networks:
-      - quorum-network
+      gateway:
+        condition: service_healthy
+    # No VITE_GATEWAY_URL needed — nginx.conf proxies /auth, /api, /config, /health
+    # to http://gateway:3001 (Docker internal service name) at runtime.
 ```
 
 ```dockerfile

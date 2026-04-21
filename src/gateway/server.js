@@ -20,19 +20,28 @@
  *   GET  /config/:projectId             — project config from S3
  *   POST /config/validate               — validate config JSON (no auth)
  *   GET  /projects                      — list projects the user is a member of
+ *   POST /bump/:topic/:key              — MCP server confidence bump (X-Quorum-Token auth)
+ *   GET  /api/stats                     — dashboard: aggregated metrics
+ *   GET  /api/graph                     — dashboard: Cytoscape.js graph data
+ *   GET  /api/knowledge                 — dashboard: paginated knowledge browser
+ *   GET  /api/search                    — dashboard: semantic search via Graphiti
+ *   POST /api/review/:id                — dashboard: approve / reject / request_changes
+ *   POST /api/bump/:topic/:key          — dashboard: confidence bump (JWT auth)
  *   GET  /health                        — health check
  */
 
 import express from 'express'
 import pg from 'pg'
 import { loadKeys } from './keys.js'
-import authRoutes     from './routes/auth.js'
-import jwksRoutes     from './routes/jwks.js'
-import graphitiRoutes from './routes/graphiti.js'
-import pgRoutes       from './routes/pg.js'
-import configRoutes   from './routes/config.js'
-import projectsRoutes from './routes/projects.js'
-import bumpRoutes     from './routes/bump.js'
+import authRoutes      from './routes/auth.js'
+import jwksRoutes      from './routes/jwks.js'
+import graphitiRoutes  from './routes/graphiti.js'
+import pgRoutes        from './routes/pg.js'
+import configRoutes    from './routes/config.js'
+import projectsRoutes  from './routes/projects.js'
+import bumpRoutes      from './routes/bump.js'
+import dashboardRoutes from './routes/dashboard.js'
+import { verifyJwt }   from './middleware/verify-jwt.js'
 
 const PORT = parseInt(process.env.QUORUM_GATEWAY_PORT ?? '3001', 10)
 
@@ -59,13 +68,14 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',              authRoutes)
-app.use('/.well-known/jwks.json', jwksRoutes)
-app.use('/graphiti',          graphitiRoutes)
-app.use('/pg',                pgRoutes)
-app.use('/config',            configRoutes)
-app.use('/projects',          projectsRoutes)
-app.use('/bump',              apiLimit, bumpRoutes)
+app.use('/auth',                   authRoutes)
+app.use('/.well-known/jwks.json',  jwksRoutes)
+app.use('/graphiti',               graphitiRoutes)
+app.use('/pg',                     pgRoutes)
+app.use('/config',                 configRoutes)
+app.use('/projects',               projectsRoutes)
+app.use('/bump',                   bumpRoutes)           // MCP server path (uses X-Quorum-Token)
+app.use('/api',    verifyJwt,      dashboardRoutes)      // dashboard BFF (uses JWT only)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 
