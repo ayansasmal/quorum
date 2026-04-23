@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-width: 220px;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  * {
+    @apply box-border;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.gray.700') transparent;
+  }
+}
+
+@layer components {
+  .input-sm {
+    @apply w-full rounded bg-gray-800 border border-gray-700 px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500;
+  }
+}

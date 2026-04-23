@@ -52,6 +52,19 @@ export const ThresholdsSchema = z.object({
   authority_threshold: z.number().min(0).max(1).default(0.20),
 })
 
+/**
+ * Webhook notification config (GAP-17).
+ * Teams wire webhook_url to Slack, email relay, or PagerDuty.
+ * Quorum fires POST with a structured JSON payload when a conflict
+ * lands in the human review queue.
+ */
+export const NotificationsSchema = z.object({
+  /** HTTP(S) URL to POST when a conflict.pending_review event fires. */
+  webhook_url: z.string().url().optional(),
+  /** QUORUM_DASHBOARD_URL override (used to build the dashboard deep-link in the payload). */
+  dashboard_url: z.string().url().optional(),
+})
+
 /** Root config schema. */
 export const QuorumConfigSchema = z.object({
   project: z.string().min(1),
@@ -60,6 +73,7 @@ export const QuorumConfigSchema = z.object({
   roles: z.record(z.string(), RoleSchema).default({}),
   domains: z.record(z.string(), DomainConfigSchema).default({}),
   thresholds: ThresholdsSchema.default({}),
+  notifications: NotificationsSchema.optional(),
 })
 
 /** @typedef {import('zod').infer<typeof QuorumConfigSchema>} QuorumConfig */

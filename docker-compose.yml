@@ -94,6 +94,19 @@ services:
       start_period: 15s
       retries: 3
 
+  # Quorum Dashboard — React/Vite app served by Nginx.
+  # Nginx proxies /auth, /api, /.well-known, /config, /health to the Gateway service.
+  # Access at http://localhost:3002 (port 3001 is taken by Gateway, 3000 by FalkorDB UI).
+  quorum-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3002:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
   # Quorum MCP — runs on engineer machines via Claude Code MCP config, not Docker.
   # Kept here for local integration testing of the full central stack.
   # In production, engineers run this locally: node src/server.js

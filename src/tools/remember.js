@@ -35,10 +35,14 @@ import { initialConfidence } from '../governance/confidence.js'
 import { resolveAuthorConfidence } from '../governance/authority.js'
 import { TriggeredBy, KnowledgeStatus } from '../graph/schema.js'
 import { addEpisode, addSupersedingEpisode } from '../graph/client.js'
+import { getConfig } from '../config/loader.js'
 import {
   getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
   countPendingForKey, insertPendingDecision, getPendingDecisionById, resolvePendingDecision,
 } from '../graph/queries.js'
+
+// ── Global namespace constant (GAP-27) ────────────────────────────────────────
+const GLOBAL_PROJECT_ID = 'global'
 
 export const schema = z.object({
   topic: z.string().min(1).describe('Knowledge domain (e.g. auth, api, db)'),
@@ -74,6 +78,20 @@ export async function handler(pg, input, identity) {
   const confidence = identity ? resolveAuthorConfidence(rawConfidence, identity) : rawConfidence
   const triggeredBy = input.triggered_by ?? TriggeredBy.ENGINEER_DECISION
   const tags = normalizeTags(input.tags)
+  const projectId = process.env.QUORUM_GROUP_ID ?? 'default'
+
+  // ── GAP-27: Global namespace write guard ────────────────────────────────────
+  // The 'global' project is readable by all projects but writable only by
+  // principal_architect. Every global write enters DRAFT — no auto-activation.
+  if (projectId === GLOBAL_PROJECT_ID) {
+    if (identity?.role !== 'principal_architect') {
+      return {
+        status: 'forbidden',
+        message: `Only principal_architect role can write to the global namespace. Your role: ${identity?.role ?? 'unknown'}.`,
+        hint: 'Global knowledge is company-wide policy. Ask a principal_architect to submit or approve.',
+      }
+    }
+  }
 
   // ── Resolve a pending conflict ──────────────────────────────────────────────
   if (input.conflict_id && input.resolution) {
@@ -134,6 +152,9 @@ export async function handler(pg, input, identity) {
               more_pending_same_key: morePendingSameKey,
             })
 
+            // GAP-17: Fire webhook notification asynchronously — must never block write
+            fireWebhookAsync({ conflictId, input, conflictResult, author })
+
             return {
               result: {
                 status: 'conflict_detected',
@@ -149,11 +170,11 @@ export async function handler(pg, input, identity) {
           // auto_supersede falls through to the supersession logic below
         }
 
-        return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role)
+        return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role, projectId)
       }
 
       // ── First version ───────────────────────────────────────────────────────
-      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role)
+      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId)
     },
   )
 
@@ -163,7 +184,9 @@ export async function handler(pg, input, identity) {
 // ── Supersession helper ───────────────────────────────────────────────────────
 
 /**
- * Insert new ACTIVE version and atomically transition old one to SUPERSEDED.
+ * Insert new version and atomically transition old one to SUPERSEDED.
+ * For global project: new version enters DRAFT, old version stays ACTIVE
+ * (supersession completes only after a reviewer approves via review()).
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {Record<string, unknown>} existing
@@ -171,8 +194,11 @@ export async function handler(pg, input, identity) {
  * @param {number} confidence
  * @param {string[]} tags
  * @param {string} triggeredBy
+ * @param {string} [authorRole]
+ * @param {string} [projectId='default']
  */
-async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole) {
+async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+  const isGlobal = projectId === GLOBAL_PROJECT_ID
   const nextVersion = await getNextVersionNumber(pg, input.topic, input.key)
 
   const graphitiResult = await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
@@ -183,6 +209,9 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     confidence,
     reason: input.reason,
   })
+
+  // Global writes always enter DRAFT — supersession only finalises after review approval
+  const newStatus = isGlobal ? KnowledgeStatus.DRAFT : KnowledgeStatus.ACTIVE
 
   const versionRecord = buildVersionRecord({
     topic: input.topic,
@@ -198,25 +227,35 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     graphitiEpisodeId: graphitiResult.episode_id,
     supersedesVersion: existing.version,
     supersedesReason: input.reason,
+    status: newStatus,
   })
 
   await insertVersion(pg, { ...versionRecord, tags })
 
-  const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
-  await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink)
+  // For non-global: atomically supersede old version now.
+  // For global: old ACTIVE stays until a reviewer approves the DRAFT.
+  if (!isGlobal) {
+    const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
+    await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink)
+  }
 
   return {
     result: {
-      status: 'stored',
+      status: isGlobal ? 'pending_review' : 'stored',
       topic: input.topic,
       key: input.key,
       version: nextVersion,
+      knowledge_status: newStatus,
       episode_id: graphitiResult.episode_id,
-      superseded_version: existing.version,
+      superseded_version: isGlobal ? null : existing.version,
+      ...(isGlobal && {
+        message: 'Global namespace write entered DRAFT. A second principal_architect must approve before it becomes active.',
+        pending_supersedes_version: existing.version,
+      }),
     },
     versionImpact: buildAuditVersionImpact(
-      [{ version: nextVersion, status: KnowledgeStatus.ACTIVE, triggered_by: triggeredBy }],
-      [{ version: existing.version, status_before: KnowledgeStatus.ACTIVE }],
+      [{ version: nextVersion, status: newStatus, triggered_by: triggeredBy }],
+      isGlobal ? [] : [{ version: existing.version, status_before: KnowledgeStatus.ACTIVE }],
     ),
   }
 }
@@ -225,9 +264,19 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
 
 /**
  * Store the first version of a topic:key (no existing knowledge).
- * Claude-authored and reflect-triggered knowledge always enters as DRAFT.
+ * Claude-authored, reflect-triggered, and global-namespace writes always enter as DRAFT.
+ * @param {import('pg').Pool} pg
+ * @param {z.infer<typeof schema>} input
+ * @param {string} author
+ * @param {number} confidence
+ * @param {string[]} tags
+ * @param {string} triggeredBy
+ * @param {string} [authorRole]
+ * @param {string} [projectId='default']
  */
-async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole) {
+async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+  const isGlobal = projectId === GLOBAL_PROJECT_ID
+
   const graphitiResult = await addEpisode(input.content, {
     key: `${input.topic}:${input.key}`,
     source: `quorum:remember:${author}`,
@@ -237,7 +286,10 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
   })
 
   const status =
-    author === 'claude' || author === 'anonymous' || triggeredBy === TriggeredBy.REFLECT
+    isGlobal ||
+    author === 'claude' ||
+    author === 'anonymous' ||
+    triggeredBy === TriggeredBy.REFLECT
       ? KnowledgeStatus.DRAFT
       : KnowledgeStatus.ACTIVE
 
@@ -428,4 +480,45 @@ async function closeConflict(pg, conflictId, resolution, note, resolvedBy, split
     splitIncomingKey,
     mergedContent,
   })
+}
+
+// ── GAP-17: Webhook notification ──────────────────────────────────────────────
+
+/**
+ * Fire a webhook notification when a conflict enters the human review queue.
+ * Runs asynchronously and swallows all errors — notification failure must never
+ * block the write operation. Teams wire the webhook_url to Slack, email relay,
+ * or PagerDuty in quorum.config.json → notifications.webhook_url.
+ *
+ * @param {{ conflictId: string, input: object, conflictResult: object, author: string }} params
+ */
+async function fireWebhookAsync({ conflictId, input, conflictResult, author }) {
+  try {
+    const config = getConfig()
+    const url = config?.notifications?.webhook_url
+    if (!url) return
+
+    const dashboardBase = config?.notifications?.dashboard_url
+      ?? process.env.QUORUM_DASHBOARD_URL
+      ?? null
+
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'conflict.pending_review',
+        topic: input.topic,
+        key: input.key,
+        conflict_id: conflictId,
+        conflict_reason: conflictResult.reason,
+        possible_split: conflictResult.possible_split ?? false,
+        incoming_author: author,
+        dashboard_url: dashboardBase
+          ? `${dashboardBase}/pending/${conflictId}`
+          : null,
+      }),
+    })
+  } catch {
+    // Swallow — webhook failure is non-fatal. The pending decision is already stored.
+  }
 }

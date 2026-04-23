@@ -74,12 +74,21 @@ export async function handler(pg, input) {
         }
       }
 
-      // ── Default: ACTIVE version ───────────────────────────────────────────
-      const version = await getCurrentVersion(pg, input.topic, input.key)
+      // ── Default: ACTIVE version with global fallback (GAP-27) ─────────────
+      const projectId = process.env.QUORUM_GROUP_ID ?? 'default'
+      let version = await getCurrentVersion(pg, input.topic, input.key, projectId)
+      let fromGlobal = false
+
+      // If no project-local result and we are not already in global, fall through
+      if (!version && projectId !== 'global') {
+        version = await getCurrentVersion(pg, input.topic, input.key, 'global')
+        if (version) fromGlobal = true
+      }
+
       if (!version) return { result: null, versionImpact: buildAuditVersionImpact([], []) }
 
       return {
-        result: formatVersion(version, {}),
+        result: formatVersion(version, { fromGlobal }),
         versionImpact: buildAuditVersionImpact([], []),
       }
     },
@@ -93,15 +102,20 @@ export async function handler(pg, input) {
 /**
  * Format a single version as XML for Claude context injection.
  * @param {Record<string, unknown>} version
- * @param {{ pointInTime?: string, explicit?: boolean }} opts
+ * @param {{ pointInTime?: string, explicit?: boolean, fromGlobal?: boolean }} opts
  * @returns {string}
  */
 function formatVersion(version, opts) {
   const daysSince = (Date.now() - new Date(version.created_at).getTime()) / (1000 * 60 * 60 * 24)
   const isRecent = daysSince < FRESHNESS_DAYS
   const isSuperseded = version.status === 'SUPERSEDED'
+  const source = opts.fromGlobal ? 'global' : 'project'
 
-  let xml = `<quorum_memory topic="${version.topic}" key="${version.key}" version="${version.version}" status="${version.status}" author="${version.author}" updated="${formatDate(version.created_at)}" triggered_by="${version.triggered_by}">`
+  let xml = `<quorum_memory topic="${version.topic}" key="${version.key}" version="${version.version}" status="${version.status}" author="${version.author}" updated="${formatDate(version.created_at)}" triggered_by="${version.triggered_by}" source="${source}">`
+
+  if (opts.fromGlobal) {
+    xml += `\n  <!-- ℹ️  Sourced from global namespace — company-wide policy, readonly from this project -->`
+  }
 
   if (opts.pointInTime) {
     xml += `\n  <!-- Point-in-time recall: active on ${opts.pointInTime} -->`
