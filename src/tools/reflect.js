@@ -10,6 +10,7 @@
  * Claude never presents Mode 3 (generalising) as Mode 1 (echoing).
  */
 
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
@@ -88,6 +89,26 @@ Return a JSON array. If nothing is worth capturing, return an empty array [].`
 }
 
 /**
+ * Check if an identical DRAFT for this topic:key already exists in knowledge_versions.
+ * Prevents reflect() from inserting the same content twice on repeated task summaries.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {string} topic
+ * @param {string} key
+ * @param {string} contentHash - SHA-256 hex of the content body
+ * @returns {Promise<boolean>}
+ */
+async function isDuplicateReflect(pg, topic, key, contentHash) {
+  const { rows } = await pg.query(
+    `SELECT id FROM knowledge_versions
+     WHERE topic = $1 AND key = $2 AND status = 'DRAFT' AND content_hash = $3
+     LIMIT 1`,
+    [topic, key, contentHash],
+  )
+  return rows.length > 0
+}
+
+/**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @returns {Promise<Record<string, unknown>>}
@@ -111,8 +132,17 @@ export async function handler(pg, input) {
       const stored = []
       const conflicts = []
       const failed = []
+      let skipped = 0
 
       for (const item of extracted) {
+        // GAP-13: skip if identical content already exists as DRAFT for this topic:key
+        const contentHash = createHash('sha256').update(item.content).digest('hex')
+        // eslint-disable-next-line no-await-in-loop
+        if (await isDuplicateReflect(pg, item.topic, item.key, contentHash)) {
+          skipped++
+          continue
+        }
+
         try {
           const result = await rememberHandler(pg, {
             topic: item.topic,
@@ -141,12 +171,15 @@ export async function handler(pg, input) {
           stored: stored.length,
           conflicts: conflicts.length,
           failed: failed.length,
+          skipped,
           items: stored,
           conflict_items: conflicts,
           failed_items: failed,
           note: extracted.length === 0
             ? 'No team-specific knowledge identified in this task.'
-            : `${stored.length} knowledge item(s) added as DRAFT — pending review.`,
+            : skipped === extracted.length
+              ? `All ${extracted.length} item(s) already in DRAFT — no duplicates stored.`
+              : `${stored.length} knowledge item(s) added as DRAFT — pending review.${skipped > 0 ? ` ${skipped} skipped (duplicate).` : ''}`,
         },
         versionImpact: buildAuditVersionImpact([], []),
       }
