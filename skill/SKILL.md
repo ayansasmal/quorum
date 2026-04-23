@@ -124,7 +124,28 @@ Ask yourself:
 - Did I uncover a constraint (infra, legal, tech debt) that wasn't documented?
 - Would a new engineer benefit from knowing what I just learned?
 
-If any answer is yes → go to Step 2. If all no → skip.
+If any answer is yes → go to Step 2. If all no → **skip entirely**.
+
+### Over-Extraction Guard
+
+**Do NOT call `reflect()` for these sessions — the DRAFT queue is a shared resource:**
+
+| Session type | Action |
+|-------------|--------|
+| Pure read session (recall, search only) | Skip reflect |
+| Debugging session with no decisions made | Skip reflect |
+| Task abandoned / rolled back | Skip reflect |
+| Documentation only, no implementation | Skip reflect |
+| Repeated work covered by existing knowledge | Skip reflect |
+
+Only call `reflect()` when you made choices with genuine rationale — not observations,
+not temporary workarounds, not personal style preferences.
+
+**Quality bar:** Each entry extracted by `reflect()` should pass this test:
+> "If a senior engineer asked me 'why did you do X?', would this entry be the answer?"
+
+If the extracted entry is just "I used a for-loop", skip it. If it is "I used polling instead
+of a push callback because the upstream API does not support webhooks", store it.
 
 ### Step 2 — Reflect
 
@@ -147,12 +168,22 @@ reflect(
 
 `reflect()` will:
 - Extract individual learnable entries (decisions, patterns, constraints) via LLM
-- Call `remember()` for each entry
-- Return a list of what was stored and any conflicts detected
+- Deduplicate against existing DRAFT entries via content hash — identical content is silently skipped
+- Call `remember()` for each novel entry
+- Return a list of what was stored, skipped, and any conflicts detected
 
 **All knowledge extracted via `reflect()` enters as DRAFT with `triggered_by: reflect`.**
 A human must review and approve via `review("approve", ...)` before it becomes ACTIVE.
 This is intentional — Claude-authored knowledge requires human validation.
+
+### Step 3 — DRAFT Notification
+
+When `reflect()` stores entries, a webhook notification fires automatically to any
+configured channel (Slack, webhook URL). **You do not need to poll `pending()` again.**
+The reviewer will be notified and will use `review()` in their next session.
+
+If no webhook is configured, remind the human: "X entries were stored as DRAFT —
+run `pending()` in your next session to review them."
 
 ---
 
@@ -186,6 +217,12 @@ Returns XML-wrapped context. Pay attention to:
 - `confidence` — below 0.60 means this knowledge may be stale or unverified
 - `triggered_by: reflect` — Claude-authored, may still be DRAFT
 - `status: SUPERSEDED` — use current ACTIVE version instead
+- `status: PENDING_CONFLICT_CHECK` — Graphiti was unavailable when stored; conflict check is pending. Treat as tentative — do not treat it as confirmed ACTIVE.
+- `source: global` — read from global namespace; **do not supersede from this project**. Only a principal architect with global scope can update global knowledge.
+
+Frequent recall of an entry by multiple sessions automatically increases its domain track
+record signal — the authority formula rewards knowledge that is actively used, not just
+knowledge that is recent or from a senior author.
 
 ### `search(query, domain?, limit?)`
 
@@ -338,6 +375,29 @@ remember("auth", "token-strategy",
   reason: "Lambda statelessness constraint makes sessions impossible for API routes"
 )
 ```
+
+---
+
+## The Self-Evolution Loop
+
+Quorum builds authority automatically from usage — no curation required beyond normal work:
+
+```
+recall() ──────────────────────► recalled_count +1 (per domain)
+review("approve", ...) ────────► approved_count +1 (per domain)
+remember() supersedes older ──► superseded_count +1 (for old author)
+```
+
+After a few weeks of active use, the authority formula will weight knowledge from
+engineers whose work:
+- Gets recalled often (teams trust it for context)
+- Gets approved by reviewers (peers validated it)
+- Rarely gets superseded (it was right the first time)
+
+**What this means for you:** calling `recall()` is not just retrieving — it is casting a
+vote. When you recall knowledge to inform your implementation, you are contributing to
+that author's domain track record. Over time, the system learns whose knowledge in which
+domains is most reliable.
 
 ---
 
