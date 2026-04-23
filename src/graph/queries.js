@@ -562,3 +562,53 @@ export async function insertBump(pg, record) {
     [record.author, record.topic, record.key, record.projectId, record.role, record.deltaApplied],
   )
 }
+
+// ── Domain track record (GAP-21) ─────────────────────────────────────────────
+
+/**
+ * @typedef {'approved_count' | 'recalled_count' | 'superseded_count'} DomainStatField
+ */
+
+/**
+ * Increment a domain track-record counter for an author.
+ * Uses INSERT … ON CONFLICT to upsert atomically — no race conditions.
+ * Non-fatal: swallows errors so a stat failure never blocks the primary operation.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {{ author: string, domain: string, projectId: string, field: DomainStatField }} opts
+ * @returns {Promise<void>}
+ */
+export async function incrementDomainStat(pg, { author, domain, projectId = 'default', field }) {
+  if (!author || !domain) return
+  try {
+    await pg.query(
+      `INSERT INTO author_domain_stats (author, domain, project_id, ${field}, last_updated)
+       VALUES ($1, $2, $3, 1, NOW())
+       ON CONFLICT (author, domain, project_id) DO UPDATE
+         SET ${field} = author_domain_stats.${field} + 1,
+             last_updated = NOW()`,
+      [author, domain, projectId],
+    )
+  } catch (err) {
+    // Non-fatal — domain stat is a quality signal, not a hard requirement
+    console.error(`[Quorum:queries] Failed to increment ${field} for ${author}/${domain}: ${err.message}`)
+  }
+}
+
+/**
+ * Fetch domain track record stats for a given author and domain.
+ * Returns null if no stats exist yet.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {{ author: string, domain: string, projectId: string }} opts
+ * @returns {Promise<{ approved_count: number, recalled_count: number, superseded_count: number } | null>}
+ */
+export async function getDomainStats(pg, { author, domain, projectId = 'default' }) {
+  const { rows } = await pg.query(
+    `SELECT approved_count, recalled_count, superseded_count
+     FROM author_domain_stats
+     WHERE author = $1 AND domain = $2 AND project_id = $3`,
+    [author, domain, projectId],
+  )
+  return rows[0] ?? null
+}

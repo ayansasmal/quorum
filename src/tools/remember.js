@@ -39,6 +39,7 @@ import { getConfig } from '../config/loader.js'
 import {
   getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
   countPendingForKey, insertPendingDecision, getPendingDecisionById, resolvePendingDecision,
+  incrementDomainStat,
 } from '../graph/queries.js'
 
 // ── Global namespace constant (GAP-27) ────────────────────────────────────────
@@ -242,6 +243,14 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
   if (!isGlobal) {
     const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
     await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink)
+
+    // GAP-21: mark the superseded author's entry as superseded in their domain track record
+    incrementDomainStat(pg, {
+      author: existing.author,
+      domain: input.topic,
+      projectId,
+      field: 'superseded_count',
+    }).catch(() => {})
   }
 
   return {

@@ -13,7 +13,7 @@
 
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
-import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion } from '../graph/queries.js'
+import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion, incrementDomainStat } from '../graph/queries.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 
 const FRESHNESS_DAYS = 7
@@ -86,6 +86,14 @@ export async function handler(pg, input) {
       }
 
       if (!version) return { result: null, versionImpact: buildAuditVersionImpact([], []) }
+
+      // GAP-21: increment recalled_count for the author in this domain (fire-and-forget)
+      incrementDomainStat(pg, {
+        author: version.author,
+        domain: input.topic,
+        projectId,
+        field: 'recalled_count',
+      }).catch(() => {})
 
       return {
         result: formatVersion(version, { fromGlobal }),

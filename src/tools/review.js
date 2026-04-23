@@ -23,7 +23,7 @@ import { withAuditPipeline } from '../audit/pipeline.js'
 import { enforceNoSelfApproval, enforceReasonRequired } from '../governance/constitutional.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 import { KnowledgeStatus } from '../graph/schema.js'
-import { getCurrentVersion, getSpecificVersion, transitionVersionStatus, getLatestDraftVersion } from '../graph/queries.js'
+import { getCurrentVersion, getSpecificVersion, transitionVersionStatus, getLatestDraftVersion, incrementDomainStat } from '../graph/queries.js'
 import { getConfig } from '../config/loader.js'
 
 export const schema = z.object({
@@ -130,6 +130,16 @@ export async function handler(pg, input, identity) {
       // ── approve / reject: state transition ───────────────────────────────
       const newStatus = input.action === 'approve' ? KnowledgeStatus.ACTIVE : KnowledgeStatus.REJECTED
       await transitionVersionStatus(pg, input.topic, input.key, targetVersion.version, newStatus)
+
+      // GAP-21: on approve, increment approved_count for the entry author in this domain
+      if (input.action === 'approve') {
+        incrementDomainStat(pg, {
+          author: targetVersion.author,
+          domain: input.topic,
+          projectId: process.env.QUORUM_GROUP_ID ?? 'default',
+          field: 'approved_count',
+        }).catch(() => {})
+      }
 
       return {
         result: {

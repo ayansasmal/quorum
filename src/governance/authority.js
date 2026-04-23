@@ -36,10 +36,11 @@ const DEFAULT_ROLE_SCORES = {
 
 /** Default formula weights — overridable via governance.authority.weights */
 const DEFAULT_WEIGHTS = {
-  confidence:       0.35,
-  recency:          0.25,
-  access_frequency: 0.20,
-  role:             0.20,
+  confidence:          0.30,   // was 0.35 before GAP-21
+  recency:             0.22,   // was 0.25 before GAP-21
+  access_frequency:    0.18,   // was 0.20 before GAP-21
+  role:                0.18,   // was 0.20 before GAP-21
+  domain_track_record: 0.12,   // GAP-21: demonstrated expertise in the domain
 }
 
 /**
@@ -96,7 +97,13 @@ function loadAuthorityConfig() {
 /**
  * Calculate the composite authority score for a knowledge episode.
  *
- * @param {{ confidence?: number, created_at: string | Date, access_count?: number, author_role?: string }} episode
+ * @param {{
+ *   confidence?: number,
+ *   created_at: string | Date,
+ *   access_count?: number,
+ *   author_role?: string,
+ *   domain_track_record?: { approved_count?: number, recalled_count?: number, superseded_count?: number }
+ * }} episode
  * @returns {number} score between 0 and 1
  */
 export function calculateAuthority(episode) {
@@ -107,11 +114,21 @@ export function calculateAuthority(episode) {
   const access     = Math.log1p(episode.access_count ?? 0) / 10
   const role       = roleScore(episode.author_role, roleScores)
 
+  // GAP-21: domain track record — normalised to 0–1 via log1p, same pattern as access_frequency.
+  // Net endorsement score: approved + recalled signals expertise; superseded signals over-confidence.
+  // Floored at 0 so a heavily superseded author doesn't get a negative contribution.
+  const dtr = episode.domain_track_record ?? {}
+  const domainScore = Math.max(
+    0,
+    Math.log1p((dtr.approved_count ?? 0) + (dtr.recalled_count ?? 0) - (dtr.superseded_count ?? 0)) / 10,
+  )
+
   return (
-    confidence * weights.confidence +
-    recency    * weights.recency +
-    access     * weights.access_frequency +
-    role       * weights.role
+    confidence  * weights.confidence +
+    recency     * weights.recency +
+    access      * weights.access_frequency +
+    role        * weights.role +
+    domainScore * (weights.domain_track_record ?? 0.12)
   )
 }
 

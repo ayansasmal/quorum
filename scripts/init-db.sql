@@ -360,6 +360,28 @@ VALUES (
   'not-a-real-token'
 ) ON CONFLICT (id) DO NOTHING;
 
+-- ── GAP-21: Domain track record (author_domain_stats) ───────────────────────
+-- Tracks per-author per-domain expertise signals used in authority scoring.
+-- Incremented by: recall() → recalled_count, review(approve) → approved_count,
+--                 remember() supersede → superseded_count.
+-- Primary key prevents duplicate rows; UPSERT pattern used for all increments.
+CREATE TABLE IF NOT EXISTS author_domain_stats (
+  author            TEXT        NOT NULL,
+  domain            TEXT        NOT NULL,
+  project_id        TEXT        NOT NULL DEFAULT 'default',
+  approved_count    INTEGER     NOT NULL DEFAULT 0,
+  recalled_count    INTEGER     NOT NULL DEFAULT 0,
+  superseded_count  INTEGER     NOT NULL DEFAULT 0,
+  last_updated      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (author, domain, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_author_domain ON author_domain_stats (author, domain, project_id);
+
+GRANT INSERT, SELECT ON author_domain_stats TO quorum_app;
+GRANT UPDATE (approved_count, recalled_count, superseded_count, last_updated)
+  ON author_domain_stats TO quorum_app;
+
 -- ── GAP-05: Audit log archival columns ───────────────────────────────────────
 -- Append-only: archival marks entries with a pointer to S3 — never deletes rows.
 -- archived_at + archive_s3_key are both nullable; NULL means not yet archived.
