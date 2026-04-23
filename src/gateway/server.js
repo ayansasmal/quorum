@@ -42,6 +42,7 @@ import projectsRoutes  from './routes/projects.js'
 import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
+import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
 const PORT = parseInt(process.env.QUORUM_GATEWAY_PORT ?? '3001', 10)
 
@@ -68,14 +69,15 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',                   authRoutes)
-app.use('/.well-known/jwks.json',  jwksRoutes)
-app.use('/graphiti',               graphitiRoutes)
-app.use('/pg',                     pgRoutes)
-app.use('/config',                 configRoutes)
-app.use('/projects',               projectsRoutes)
-app.use('/bump',                   bumpRoutes)           // MCP server path (uses X-Quorum-Token)
-app.use('/api',    verifyJwt,      dashboardRoutes)      // dashboard BFF (uses JWT only)
+app.use('/auth',                              authRoutes)
+app.use('/.well-known/jwks.json',            jwksRoutes)
+// JWT-gated routes: per-engineer + per-project rate limits applied (GAP-14, GAP-31)
+app.use('/graphiti', verifyJwt, engineerLimit, projectLimit, graphitiRoutes)
+app.use('/pg',       verifyJwt, engineerLimit, projectLimit, pgRoutes)
+app.use('/config',                            configRoutes)
+app.use('/projects', verifyJwt, engineerLimit,              projectsRoutes)
+app.use('/bump',                              bumpRoutes)  // MCP server path (X-Quorum-Token)
+app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) // dashboard BFF
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 

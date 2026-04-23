@@ -300,3 +300,62 @@ CREATE INDEX IF NOT EXISTS idx_bump_log_cooldown
 
 GRANT INSERT, SELECT ON bump_log TO quorum_app;
 GRANT USAGE, SELECT ON SEQUENCE bump_log_id_seq TO quorum_app;
+
+-- ── Projects table (GAP-20) ────────────────────────────────────────────────────
+-- Central config store. Each project has a unique token (stored as SHA-256 hash).
+-- Replaces per-project S3 config files. Members/domains/governance are JSONB columns.
+-- config_version enables optimistic locking (GAP-25): PATCH must supply current version.
+CREATE TABLE IF NOT EXISTS projects (
+  id                TEXT PRIMARY KEY,          -- proj-abc123 | 'global'
+  slug              TEXT UNIQUE NOT NULL,      -- human-readable short name
+  name              TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED')),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by        TEXT NOT NULL,             -- github username of creator
+
+  -- Full governance config (replaces S3 config file)
+  members           JSONB NOT NULL DEFAULT '[]',
+  -- [{ github_username, role, team, base_confidence }]
+  domains           JSONB NOT NULL DEFAULT '[]',
+  -- [{ name, conflict_threshold }]
+  governance        JSONB NOT NULL DEFAULT '{}',
+  -- { conflict_threshold, authority_threshold, notifications: { webhook_url } }
+
+  schema_version    INTEGER NOT NULL DEFAULT 1,
+  config_version    INTEGER NOT NULL DEFAULT 0, -- optimistic lock (GAP-25)
+  config_updated_at TIMESTAMPTZ,
+  config_updated_by TEXT,
+
+  -- Enterprise integrations (all optional)
+  github_org        TEXT,
+  github_repo       TEXT,
+  jira_project      TEXT,
+  slack_channel     TEXT,
+
+  -- Project token for MCP server auth (bcrypt hash; plaintext returned once on creation)
+  token_hash        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_status    ON projects (status);
+CREATE INDEX IF NOT EXISTS idx_projects_members   ON projects USING GIN (members);
+CREATE INDEX IF NOT EXISTS idx_projects_slug      ON projects (slug);
+
+GRANT INSERT, SELECT ON projects TO quorum_app;
+GRANT UPDATE (members, domains, governance, status, config_version,
+              config_updated_at, config_updated_by, token_hash)
+  ON projects TO quorum_app;
+
+-- ── GAP-27: Global namespace bootstrap ────────────────────────────────────────
+-- The 'global' project is a reserved namespace readable by all projects.
+-- Only principal_architect role may write to it; all writes enter DRAFT.
+-- 'not-a-real-token' ensures this project cannot be used as an MCP token target.
+INSERT INTO projects (id, slug, name, created_by, members, governance, token_hash)
+VALUES (
+  'global',
+  'global',
+  'Global Shared Knowledge',
+  'system',
+  '[{"github_username": "system", "role": "principal_architect", "team": "platform", "base_confidence": 1.0}]',
+  '{"description": "Company-wide policy namespace. Readable by all projects. Writable by principal_architect only. All writes enter DRAFT."}',
+  'not-a-real-token'
+) ON CONFLICT (id) DO NOTHING;
