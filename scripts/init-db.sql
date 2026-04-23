@@ -360,6 +360,19 @@ VALUES (
   'not-a-real-token'
 ) ON CONFLICT (id) DO NOTHING;
 
+-- ── GAP-05: Audit log archival columns ───────────────────────────────────────
+-- Append-only: archival marks entries with a pointer to S3 — never deletes rows.
+-- archived_at + archive_s3_key are both nullable; NULL means not yet archived.
+-- Partial index speeds the archival script's "find unarchived rows" query.
+ALTER TABLE audit_log
+  ADD COLUMN IF NOT EXISTS archived_at    TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS archive_s3_key TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_archived ON audit_log (archived_at)
+  WHERE archived_at IS NULL;
+
+GRANT UPDATE (archived_at, archive_s3_key) ON audit_log TO quorum_app;
+
 -- ── GAP-03: PENDING_CONFLICT_CHECK status ─────────────────────────────────────
 -- Extend the status CHECK constraint to include PENDING_CONFLICT_CHECK.
 -- This status is set when Graphiti is unavailable at write time so conflict
