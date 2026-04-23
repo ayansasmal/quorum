@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs'
 import { QuorumConfigSchema } from './schema.js'
+import { applyMigrations } from './migrations.js'
 
 // ── Module-level cache ────────────────────────────────────────────────────────
 
@@ -252,7 +253,8 @@ export async function getProjectConfig(projectId, pg) {
     throw new Error(`[Quorum:config] Project not found or archived: ${projectId}`)
   }
 
-  const row = result.rows[0]
+  // GAP-30: run schema migrations before building config shape
+  const row = await applyMigrations(result.rows[0], pg)
 
   const domains = Object.fromEntries(
     (row.domains ?? []).map((d) => [d.name, { conflict_threshold: d.conflict_threshold }]),
