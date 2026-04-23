@@ -10,6 +10,10 @@ coverage/
 logs/
 !logs/.gitkeep
 
+# AI tooling — local state and worktree artifacts (never commit)
+.claude/
+.claire/
+
 # Crossplane real credentials (never commit)
 crossplane/credentials/aws-creds-secret.yaml
 
