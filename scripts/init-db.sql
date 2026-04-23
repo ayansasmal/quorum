@@ -359,3 +359,17 @@ VALUES (
   '{"description": "Company-wide policy namespace. Readable by all projects. Writable by principal_architect only. All writes enter DRAFT."}',
   'not-a-real-token'
 ) ON CONFLICT (id) DO NOTHING;
+
+-- ── GAP-03: PENDING_CONFLICT_CHECK status ─────────────────────────────────────
+-- Extend the status CHECK constraint to include PENDING_CONFLICT_CHECK.
+-- This status is set when Graphiti is unavailable at write time so conflict
+-- detection is deferred to the recheck-conflicts CronJob.
+DO $$
+BEGIN
+  ALTER TABLE knowledge_versions
+    DROP CONSTRAINT IF EXISTS knowledge_versions_status_check;
+  ALTER TABLE knowledge_versions
+    ADD CONSTRAINT knowledge_versions_status_check
+      CHECK (status IN ('ACTIVE','DRAFT','SUPERSEDED','DEPRECATED','REJECTED','PENDING_CONFLICT_CHECK'));
+END
+$$;

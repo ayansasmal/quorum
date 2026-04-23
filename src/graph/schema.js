@@ -60,6 +60,12 @@ export const KnowledgeStatus = /** @type {const} */ ({
   SUPERSEDED: 'SUPERSEDED',
   DEPRECATED: 'DEPRECATED',
   REJECTED: 'REJECTED',
+  /**
+   * Graphiti was unavailable when this version was stored.
+   * Conflict check is deferred — the recheck-conflicts CronJob will
+   * promote this to ACTIVE or CONFLICT_DETECTED once Graphiti recovers.
+   */
+  PENDING_CONFLICT_CHECK: 'PENDING_CONFLICT_CHECK',
 })
 
 /**

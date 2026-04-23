@@ -241,8 +241,9 @@ export async function detectConflict(newContent, topic, key, domain) {
   try {
     searchResult = await searchNodes(newContent, { limit: 5 })
   } catch {
-    // Graphiti unavailable — skip conflict check, allow write
-    return { conflict: false }
+    // GAP-03: Graphiti unavailable — signal caller to store with PENDING_CONFLICT_CHECK status.
+    // Do NOT silently skip: a skipped conflict check is a governance failure.
+    return { conflict: false, graphiti_unavailable: true }
   }
 
   const nodes = searchResult?.nodes ?? []

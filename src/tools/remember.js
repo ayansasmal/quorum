@@ -117,6 +117,11 @@ export async function handler(pg, input, identity) {
 
         const conflictResult = await detectConflict(input.content, input.topic, input.key, domain)
 
+        // GAP-03: Graphiti was unavailable — store as PENDING_CONFLICT_CHECK for deferred re-check
+        if (conflictResult.graphiti_unavailable) {
+          return storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId)
+        }
+
         if (conflictResult.conflict) {
           const resolution = resolveConflict(
             { content: input.content, author, confidence, created_at: new Date().toISOString() },
@@ -321,6 +326,65 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     },
     versionImpact: buildAuditVersionImpact(
       [{ version: 1, status, triggered_by: triggeredBy }],
+      [],
+    ),
+  }
+}
+
+// ── Graphiti downtime fallback (GAP-03) ──────────────────────────────────────
+
+/**
+ * Store a version with PENDING_CONFLICT_CHECK status when Graphiti is unavailable.
+ * The recheck-conflicts CronJob will promote it to ACTIVE or trigger the
+ * conflict workflow once Graphiti recovers.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {z.infer<typeof schema>} input
+ * @param {string} author
+ * @param {number} confidence
+ * @param {string[]} tags
+ * @param {string} triggeredBy
+ * @param {string} [authorRole]
+ * @param {string} [projectId='default']
+ */
+async function storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+  const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
+  const version = existing ? (existing.version + 1) : 1
+
+  const versionRecord = buildVersionRecord({
+    topic: input.topic,
+    key: input.key,
+    version,
+    content: input.content,
+    author,
+    authorRole: authorRole ?? 'unknown',
+    confidence,
+    tags,
+    triggeredBy,
+    auditEntryId: 'pre_pending',
+    graphitiEpisodeId: null,      // episode not stored — Graphiti was unavailable
+    status: KnowledgeStatus.PENDING_CONFLICT_CHECK,
+    supersedes_version: existing?.version ?? null,
+    supersedes_reason: input.reason ?? null,
+    project_id: projectId,
+  })
+
+  await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })
+
+  console.error(`[Quorum:remember] Graphiti unavailable — stored ${input.topic}:${input.key} v${version} as PENDING_CONFLICT_CHECK for deferred re-check`)
+
+  return {
+    result: {
+      status: 'stored',
+      topic: input.topic,
+      key: input.key,
+      version,
+      knowledge_status: KnowledgeStatus.PENDING_CONFLICT_CHECK,
+      episode_id: null,
+      warning: 'Conflict check deferred — Graphiti unavailable. Entry stored as PENDING_CONFLICT_CHECK and will be re-checked automatically when Graphiti recovers.',
+    },
+    versionImpact: buildAuditVersionImpact(
+      [{ version, status: KnowledgeStatus.PENDING_CONFLICT_CHECK, triggered_by: triggeredBy }],
       [],
     ),
   }
