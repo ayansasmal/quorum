@@ -138,6 +138,10 @@ postgresql:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # GAP-11: native PostgreSQL TLS — set enabled: true for production
+  tls:
+    enabled: false            # set true in production
+    certSecretName: ""        # cert-manager Certificate secret name (required when enabled)
 
 # ── Graphiti sidecar ───────────────────────────────────────────────────────────
 graphiti:
@@ -163,3 +167,7 @@ graphiti:
     limits:
       cpu: 2000m
       memory: 2Gi
+  # GAP-11: NetworkPolicy restricting Graphiti ingress to the gateway pod only.
+  # Sufficient threat model for same-namespace services without a full service mesh.
+  networkPolicy:
+    enabled: false            # set true in production

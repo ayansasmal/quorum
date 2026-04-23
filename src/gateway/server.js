@@ -48,14 +48,21 @@ const PORT = parseInt(process.env.QUORUM_GATEWAY_PORT ?? '3001', 10)
 
 // ── PostgreSQL pool ────────────────────────────────────────────────────────────
 
+// GAP-11: native PostgreSQL SSL — set POSTGRES_SSL=true in production.
+// Certificate verification is enforced when enabled (no self-signed certs in prod).
+const pgSsl = process.env.POSTGRES_SSL === 'true'
+  ? { rejectUnauthorized: true }
+  : false
+
 const pool = new pg.Pool({
-  host:                  process.env.POSTGRES_HOST     ?? 'localhost',
-  port:                  parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
-  database:              process.env.POSTGRES_DB       ?? 'quorum_audit',
-  user:                  process.env.POSTGRES_USER     ?? 'quorum',
-  password:              process.env.POSTGRES_PASSWORD ?? 'quorum_local',
-  max:                   20,
-  idleTimeoutMillis:     30000,
+  host:                    process.env.POSTGRES_HOST     ?? 'localhost',
+  port:                    parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
+  database:                process.env.POSTGRES_DB       ?? 'quorum_audit',
+  user:                    process.env.POSTGRES_USER     ?? 'quorum',
+  password:                process.env.POSTGRES_PASSWORD ?? 'quorum_local',
+  ssl:                     pgSsl,
+  max:                     20,
+  idleTimeoutMillis:       30000,
   connectionTimeoutMillis: 5000,
 })
 

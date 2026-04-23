@@ -1026,3 +1026,23 @@ quorum.localhost {
 - [ ] `QUORUM_GATEWAY_URL` in all `.quorum` files uses `https://`
 - [ ] `alb.ingress.kubernetes.io/ssl-redirect: "443"` forces HTTP → HTTPS redirect
 - [ ] Certificate auto-renews (ACM manages this automatically; cert-manager handles it for nginx ingress)
+
+### Production TLS checklist (GAP-11 — service-to-service encryption)
+
+- [ ] Set `POSTGRES_SSL=true` in gateway environment (enables `ssl: { rejectUnauthorized: true }`)
+- [ ] Provision a cert-manager `Certificate` resource for the PostgreSQL service
+- [ ] Set `postgresql.tls.enabled=true` in Helm values (documents the cert secret name)
+- [ ] Set `graphiti.networkPolicy.enabled=true` in Helm values (restricts Graphiti ingress to gateway pod only)
+- [ ] Verify gateway → PostgreSQL SSL with: `openssl s_client -connect <postgres-host>:5432 -starttls postgres`
+
+```yaml
+# helm/quorum/values-production.yaml additions
+postgresql:
+  tls:
+    enabled: true
+    certSecretName: quorum-postgresql-tls   # cert-manager Certificate secret
+
+graphiti:
+  networkPolicy:
+    enabled: true
+```
