@@ -120,6 +120,9 @@ cmd_docker() {
   EXTERNAL_LOCALSTACK=""
   check_localstack_conflict
 
+  info "Removing any stale containers (data volumes are preserved)..."
+  docker compose down --remove-orphans 2>/dev/null || true
+
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
     docker compose up -d --scale localstack=0
