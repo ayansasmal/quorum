@@ -50,34 +50,32 @@ check_docker() {
   ok "docker $(docker --version | awk '{print $3}' | tr -d ',')"
 }
 
-# Check for a standalone LocalStack container that would conflict with the
-# Compose-managed localstack service on port 4566.
+# Check for a container already using port 4566 (LocalStack).
 #
 # Cases handled:
-#   localstack-main running  → auto-stop (started by crossplane/crossplane.sh)
-#   engram-localstack-1      → already Compose-managed, fine — no action
-#   something else on :4566  → warn, let Docker surface the real error
+#   quorum-localstack-1  → already Compose-managed, idempotent — no action
+#   any other localstack → reuse it: connect to quorum_default network so
+#                          gateway can reach it as http://localstack:4566,
+#                          then skip starting the Compose service
+#   something else       → warn, let Docker surface the real error
+#
+# Sets EXTERNAL_LOCALSTACK=<name> when an external container will be reused.
 check_localstack_conflict() {
-  # Find any container currently publishing port 4566
   local conflict
   conflict=$(docker ps --filter "publish=4566" --format "{{.Names}}" 2>/dev/null | head -1)
 
-  [[ -z "$conflict" ]] && return 0   # port free — nothing to do
+  [[ -z "$conflict" ]] && return 0   # port free — Compose will start its own
 
-  # Is it our own Compose service? Idempotent — fine.
+  # Our own Compose-managed service — already running, nothing to do.
   if [[ "$conflict" == *"localstack"* && "$conflict" == *"quorum"* ]]; then
     ok "Compose-managed LocalStack already running ($conflict)"
     return 0
   fi
 
-  # Is it the standalone LocalStack started by crossplane/crossplane.sh?
-  if [[ "$conflict" == "localstack-main" ]]; then
-    warn "Standalone LocalStack ($conflict) is using port 4566."
-    warn "Docker Compose needs that port for its own LocalStack service."
-    info "Stopping $conflict automatically..."
-    docker stop "$conflict" &>/dev/null \
-      && ok "Stopped $conflict — Docker Compose will start its own LocalStack." \
-      || die "Failed to stop $conflict. Stop it manually: docker stop $conflict"
+  # Any other LocalStack container — reuse it instead of starting a new one.
+  if [[ "$conflict" == *"localstack"* ]]; then
+    ok "LocalStack already running ($conflict) — reusing it"
+    EXTERNAL_LOCALSTACK="$conflict"
     return 0
   fi
 
@@ -119,9 +117,22 @@ cmd_docker() {
   fi
 
   header "Docker stack"
+  EXTERNAL_LOCALSTACK=""
   check_localstack_conflict
-  info "Starting FalkorDB + PostgreSQL + Graphiti + Gateway + Dashboard..."
-  docker compose up -d
+
+  if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
+    info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
+    docker compose up -d --scale localstack=0
+    # Connect the external container to the quorum network so the gateway can
+    # resolve it by service name (http://localstack:4566 inside the network).
+    info "Connecting $EXTERNAL_LOCALSTACK to Docker network quorum_default..."
+    docker network connect --alias localstack quorum_default "$EXTERNAL_LOCALSTACK" 2>/dev/null \
+      && ok "$EXTERNAL_LOCALSTACK connected to quorum_default (alias: localstack)" \
+      || ok "$EXTERNAL_LOCALSTACK already in quorum_default — no action needed"
+  else
+    info "Starting FalkorDB + PostgreSQL + Graphiti + Gateway + Dashboard..."
+    docker compose up -d
+  fi
 
   info "Waiting for services to be healthy..."
   local timeout=60 elapsed=0

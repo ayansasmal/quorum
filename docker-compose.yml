@@ -110,8 +110,6 @@ services:
     volumes:
       - ./quorum.config.example.json:/app/quorum.config.example.json:ro
     depends_on:
-      localstack:
-        condition: service_healthy
       postgresql:
         condition: service_healthy
       graphiti:

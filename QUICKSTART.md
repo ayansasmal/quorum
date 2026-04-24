@@ -232,12 +232,14 @@ lsof -i :3002    # find what's using the dashboard port
 
 **Port 4566 already in use (LocalStack conflict)**
 ```bash
-# Happens when a standalone LocalStack is running alongside Docker Compose.
-# The Crossplane K8s workflow starts LocalStack standalone (localstack start -d).
-# Docker Compose mode runs its own LocalStack — they can't share the port.
-localstack stop                 # stop the standalone instance
-docker compose up -d            # bring up the Compose-managed LocalStack + gateway
-./scripts/init-localstack.sh    # re-bootstrap the bucket (fresh instance)
+# setup.sh detects a running LocalStack on port 4566 and reuses it automatically:
+# it connects the container to the quorum_default Docker network (alias: localstack)
+# and skips starting a second instance. No manual action needed.
+#
+# If you still hit a conflict for some reason, you can either stop the external instance:
+localstack stop                 # stop standalone LocalStack (Crossplane workflow)
+# ...or just re-run setup.sh — it handles it
+./scripts/setup.sh docker
 ```
 
 **Fresh start — wipe everything and begin again**
