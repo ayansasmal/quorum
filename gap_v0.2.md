@@ -205,7 +205,39 @@ P3 — Operational hardening
 
 LAST — Once all implementation is complete
   ✅ GAP-12  skill/SKILL.md
+  ✅ GAP-21  Domain track record authority signal
+  ✅ GAP-23  SKILL.md self-evolution loop
 ```
+
+---
+
+### GAP-21 · Domain track record authority signal `HIGH` ✅ RESOLVED
+
+**Implemented:** `author_domain_stats` table tracks per-author-per-domain accepted/rejected
+counts. `incrementDomainStat` added to `graph/queries.js`. Wired as fire-and-forget into:
+- `recall.js` — increments on knowledge access (usage signal)
+- `review.js` — increments accepted/rejected on approve/reject
+- `remember.js` — increments on successful version creation
+
+Authority calculation (`src/governance/authority.js`) reads the stats and feeds the
+domain track record component (30% of composite score). A junior engineer who consistently
+contributes accurate knowledge in `auth` gradually outweighs a senior engineer with a poor
+track record in that specific domain — exactly the behaviour the authority model was
+designed to encode.
+
+---
+
+### GAP-23 · SKILL.md self-evolution loop `MEDIUM` ✅ RESOLVED
+
+**Implemented:** `skill/SKILL.md` completed with:
+- Over-extraction guard — Claude checks "is this actually new or a restatement?" before
+  calling `remember()` post-task
+- `PENDING_CONFLICT_CHECK` handling — explicit instructions for how Claude handles the
+  conflict detection response from `remember()` (surface to human, do not silently retry)
+- Global namespace semantics — clarified that `group_id` is project-scoped, not global,
+  and Claude must never write cross-project
+- Authority feedback loop diagram — shows how `recall` → `review` → `remember` each
+  update the `author_domain_stats` table and how the authority score evolves over time
 
 ---
 
@@ -225,3 +257,5 @@ LAST — Once all implementation is complete
 | GAP-03 | Production secrets | DEPLOYMENT.md: AWS Secrets Manager + CSI Driver, K8s etcd KMS, Vault |
 | GAP-04 | TLS / HTTPS | DEPLOYMENT.md: ALB+ACM (EKS), Caddy (local), nginx+mkcert, pre-prod checklist |
 | GAP-12 | skill/SKILL.md | Full session lifecycle skill — session start, during work, post-task reflect |
+| GAP-21 | Domain track record | `author_domain_stats` table + `incrementDomainStat`; wired into recall/review/remember as fire-and-forget |
+| GAP-23 | SKILL.md self-evolution loop | Over-extraction guard, PENDING_CONFLICT_CHECK handling, global namespace semantics, authority feedback loop diagram |

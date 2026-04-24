@@ -50,21 +50,18 @@ Simplest path. No K8s required. Good for first-time setup and local development.
 ### What Runs
 
 ```
-┌─────────────────────────────────────────┐
-│  Docker Compose Stack                   │
-│                                         │
-│  quorum        → MCP server  :8000      │
-│  falkordb      → graph DB    :6379      │
-│  falkordb-ui   → browser UI  :3000      │
-│  postgresql    → audit store :5432      │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  Docker Compose Stack                           │
+│                                                 │
+│  localstack       → S3 emulation  :4566         │
+│  falkordb         → graph DB      :6379, :3000  │
+│  postgresql       → audit store   :5432         │
+│  graphiti         → LLM sidecar   :8001         │
+│  gateway          → central API   :3001         │
+│  quorum-dashboard → web UI        :3002         │
+│  quorum           → MCP server    :8000 (test)  │
+└─────────────────────────────────────────────────┘
 ```
-
-**Stack includes 4 services:**
-- `quorum` — the Node.js MCP server (port 8000)
-- `graphiti` — Python sidecar, Quorum calls it via HTTP (port 8001)
-- `falkordb` — graph database (port 6379, browser UI port 3000)
-- `postgresql` — audit secondary store (port 5432)
 
 Graphiti is Python-only — it has no npm package. It runs as a Docker sidecar.
 Quorum never imports Graphiti — it calls it over HTTP.
@@ -72,28 +69,18 @@ Quorum never imports Graphiti — it calls it over HTTP.
 ### Setup
 
 ```bash
-# Clone the repo
+# Clone
 git clone https://github.com/ayansasmal/quorum
 cd quorum
 
-# Copy environment file
+# Copy environment file and add your OpenAI key
 cp .env.example .env
 
-# Edit .env — add your OpenAI API key (used by Graphiti sidecar)
-# OPENAI_API_KEY=sk-...
+# One-command setup (requires Docker Desktop + pip install awscli-local)
+./scripts/setup.sh docker
 
-# Start the stack
-docker compose up -d
-
-# Verify all 4 services are running
-docker compose ps
-
-# NAME         STATUS    PORTS
-# quorum       running   0.0.0.0:8000->8000/tcp
-# graphiti     running   0.0.0.0:8001->8000/tcp
-# falkordb     running   0.0.0.0:6379->6379/tcp
-#                        0.0.0.0:3000->3000/tcp
-# postgresql   running   0.0.0.0:5432->5432/tcp
+# Verify
+node cli.js audit verify
 ```
 
 ### Environment Variables
@@ -141,6 +128,13 @@ QUORUM_GROUP_ID=default
 QUORUM_CONFLICT_THRESHOLD=0.85
 QUORUM_AUTHORITY_THRESHOLD=0.20
 NODE_ENV=development
+
+# LocalStack / AWS S3 (set automatically in docker-compose.yml; shown for reference)
+AWS_ENDPOINT_URL=http://localstack:4566
+AWS_ACCESS_KEY_ID=test                    # LocalStack dummy
+AWS_SECRET_ACCESS_KEY=test                # LocalStack dummy
+AWS_REGION=us-east-1
+QUORUM_CONFIG_BUCKET=quorum-configs
 ```
 
 ### Docker Compose File
@@ -580,7 +574,7 @@ claude "Test remember and recall"
 
 ### S3 Config Bucket (Local K8s)
 
-When running on Local K8s, provision the Quorum config S3 bucket via Crossplane instead of Terraform:
+When running on Local K8s, provision the Quorum config S3 bucket via Crossplane:
 
 ```bash
 # Requires LocalStack started with LOCALSTACK_HOST set
@@ -596,8 +590,8 @@ awslocal s3 ls s3://quorum-configs/ --recursive
 See [`crossplane/README.md`](crossplane/README.md) for full details, including the critical
 `endpoint.services: [s3, sts]` requirement and CoreDNS patching notes.
 
-For production, use `terraform/` instead — it provisions the bucket with KMS encryption,
-IAM bucket policies, and IRSA auth.
+For production, use Crossplane with IRSA instead of static credentials — see
+[`crossplane/README.md#production-upgrade-irsa`](crossplane/README.md#production-upgrade-irsa-instead-of-static-keys).
 
 ---
 
@@ -645,7 +639,7 @@ AWS Native:
   → Secrets Manager for API keys
   → ALB for load balancing
   → ECR for container images
-  → Terraform for all infrastructure
+  → Crossplane for all infrastructure
 ```
 
 ### Production Sizing (Reference)
@@ -808,18 +802,9 @@ gateway:
 # No secret values appear in values.yaml or Kubernetes Secret objects.
 ```
 
-The gateway pod's IRSA role (provisioned by the Terraform in `terraform/`) must have
-`secretsmanager:GetSecretValue` permission. Add to `terraform/main.tf`:
-
-```hcl
-# Add to aws_iam_role_policy.quorum_gateway_s3 (or a separate policy)
-{
-  Sid    = "ReadGatewaySecrets"
-  Effect = "Allow"
-  Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-  Resource = "arn:aws:iam::<account>:secret:quorum/production/*"
-}
-```
+The gateway pod's IRSA role must have `secretsmanager:GetSecretValue` and
+`secretsmanager:DescribeSecret` permissions scoped to
+`arn:aws:iam::<account>:secret:quorum/production/*`.
 
 ### Option B — Kubernetes Secrets (simpler, less secure)
 
@@ -867,21 +852,15 @@ inject secrets into the gateway pod at startup.
 
 ### Local dev with LocalStack
 
-The `scripts/setup_env.sh local` script writes dummy credentials to `.env`:
-
-```
-AWS_ACCESS_KEY_ID=test
-AWS_SECRET_ACCESS_KEY=test
-AWS_ENDPOINT_URL=http://localhost:4566
-```
-
-These are only written for local environments. The `prod` path never touches `.env`.
+In Docker Compose mode, `AWS_ENDPOINT_URL=http://localstack:4566` and dummy credentials
+(`AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`) are set automatically in
+`docker-compose.yml`. Run `./scripts/init-localstack.sh` manually if you need to
+re-bootstrap the S3 bucket.
 
 ### What never goes in git
 
 ```
 .env                          # gitignored
-terraform/terraform.tfvars    # gitignored — contains team lead ARNs
 *.pem                         # any certificate private keys
 *_private_key*                # JWT signing keys
 ```

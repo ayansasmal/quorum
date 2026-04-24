@@ -59,26 +59,31 @@ Quorum checks existing knowledge graph
 
 ```
 Claude Code / AI Agents
-        │ MCP
+        │ MCP (stdio)
         ▼
 ┌─────────────────────┐
-│  Quorum MCP Server  │
-│  (Node.js)          │
-├─────────────────────┤
-│  Governance Layer   │  ← The differentiator
-│  Conflict detection │
-│  Authority weights  │
-│  Provenance track   │
-│  Confidence scores  │
-└──────────┬──────────┘
+│  Quorum MCP Server  │──→  QUORUM_GATEWAY_URL (optional)
+│  (Node.js)          │                │
+├─────────────────────┤                ▼
+│  Governance Layer   │    ┌─────────────────────┐
+│  Conflict detection │    │  Quorum Gateway      │
+│  Authority weights  │    │  (Express :3001)     │
+│  Provenance track   │    │  JWT auth, S3 config │
+│  Confidence scores  │    │  GraphQL proxy        │
+└──────────┬──────────┘    └─────────┬───────────┘
+           │                         │
+┌──────────▼──────────┐   ┌──────────▼──────────┐
+│  Graphiti Engine    │   │  LocalStack / AWS S3 │
+└──────────┬──────────┘   └─────────────────────┘
            │
 ┌──────────▼──────────┐
-│  Graphiti Engine    │  ← Temporal knowledge graph (OSS)
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  FalkorDB / Neo4j   │  ← Graph storage
+│  FalkorDB / Neo4j   │
 │  / AWS Neptune      │
+└─────────────────────┘
+          │
+┌──────────▼──────────┐
+│  Quorum Dashboard   │
+│  (React :3002)      │
 └─────────────────────┘
 ```
 
@@ -89,15 +94,16 @@ Claude Code / AI Agents
 ```bash
 git clone https://github.com/yourusername/quorum
 cd quorum
-cp .env.example .env   # add your LLM API key
+cp .env.example .env   # add your OPENAI_API_KEY
 
-docker-compose up -d
+# Requires: Docker Desktop + pip install awscli-local
+./scripts/setup.sh docker
 
 # Add to Claude Code
 claude mcp add quorum -- node /path/to/quorum/src/server.js
 
 # Verify
-claude "What does Quorum know about auth?"
+node cli.js audit verify
 ```
 
 ---
@@ -166,12 +172,12 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 ## Roadmap
 
-- **v0.1** — Core MCP server + Graphiti integration + conflict detection
-- **v0.2** — Full governance (authority weighting, human-in-the-loop, confidence scoring)
-- **v0.3** — Self-evolving Claude Code skill
-- **v0.4** — Export (Markdown + Confluence) + multi-team namespacing
-- **v1.0** — Production ready
-- **Future** — Confluence ingestion, Draw.io parsing, cross-org federation
+- **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack, seed data with contradictions
+- **v0.2** (current) — Quorum Gateway (ES256 JWT, S3-backed project config), `.quorum` project files, multi-project scoping, authority weighting (role + domain track record + usage + confidence), confidence decay, human-in-the-loop conflict resolution, self-evolving `skill/SKILL.md`, Crossplane-based IaC, LocalStack for local dev, Express gateway + React dashboard
+- **v0.3** — PR knowledge ingestion (`ingest_pr`), post-merge confidence feedback loop
+- **v0.4** — Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`, `search_atlassian`, `sync_atlassian`), Markdown + Confluence export
+- **v1.0** — Production hardening, AWS Neptune support, hosted docs
+- **Future** — Diagram ingestion (image → Mermaid), cross-org federation, analytics dashboard
 
 ---
 

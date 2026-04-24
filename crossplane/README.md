@@ -1,6 +1,6 @@
 # Crossplane — Quorum S3 Config Bucket
 
-Crossplane-native alternative to `terraform/` for provisioning the Quorum project config S3 bucket and uploading sample configs. Requires Crossplane ≥ v1.14 and the Upbound AWS S3 provider.
+Crossplane manages all Quorum infrastructure — the only IaC tool in this project. Provisions the Quorum project config S3 bucket and uploads sample configs. Requires Crossplane ≥ v1.14 and the Upbound AWS S3 provider.
 
 ## Folder Structure
 
@@ -181,7 +181,7 @@ after any cluster reset.
 
 ## Option B: Use a Pre-existing External Bucket
 
-If your bucket already exists (created by Terraform, manually, or in LocalStack), skip the `bucket/` step.
+If your bucket already exists (created manually or in LocalStack), skip the `bucket/` step.
 
 ```bash
 # 1. Install provider + credentials (steps 1-5 from manual apply above)
@@ -206,25 +206,23 @@ The only difference from the managed bucket path: use `bucket: <name>` directly 
 
 1. Remove `s3_use_path_style`, `skip_credentials_validation`, `skip_metadata_api_check`, `skip_region_validation`, and the entire `endpoint` block from `providerconfig-aws.yaml` — these are LocalStack-only settings.
 2. Change `credentials.source: Secret` → `source: IRSA` and remove `secretRef`.
-3. In `provider-aws-s3.yaml`, uncomment `serviceAccountAnnotations` and set the IAM role ARN (from the `gateway_iam_role_arn` Terraform output).
+3. In `provider-aws-s3.yaml`, uncomment `serviceAccountAnnotations` and set the IAM role ARN provisioned for the gateway.
 4. Remove `runtimeconfig-localstack.yaml` and the `runtimeConfigRef` from `provider-family-aws.yaml`.
 5. Delete the `aws-creds` Secret — no longer needed.
 
 ---
 
-## Relationship to Terraform
+## IaC Strategy
 
-`terraform/` and `crossplane/` are **parallel paths** — both provision the same S3 bucket but via different tools:
+Crossplane is the **only** IaC tool in this project. There is no Terraform.
 
-| | Terraform | Crossplane |
+| Mode | S3 | Auth |
 |--|--|--|
-| Target | Production AWS | Local (LocalStack) / any K8s cluster |
-| State | `.tfstate` file | Kubernetes CRDs |
-| Auth | AWS credentials / IRSA | Kubernetes Secret / IRSA |
-| KMS encryption | ✅ (`terraform/`) | AES256 only (upgrade path documented above) |
-| Bucket policy IAM | ✅ per-project policies | Not implemented (use Terraform for prod) |
+| Docker Compose (local dev) | LocalStack via `scripts/init-localstack.sh` | Dummy credentials (`test`/`test`) |
+| Local K8s | LocalStack via `crossplane.sh setup` | K8s Secret (`aws-creds`) |
+| Production | Real AWS S3 | IRSA (no static keys) |
 
-For production, use `terraform/`. For local development and K8s-native workflows, use `crossplane/`.
+For production, see the IRSA upgrade path above.
 
 ---
 
