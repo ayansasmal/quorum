@@ -117,8 +117,10 @@ app.use((_req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
-  console.error('[Gateway] Unhandled error:', err.message)
-  res.status(500).json({ error: 'internal_error', message: err.message })
+  const status = err.status ?? 500
+  const code   = err.code   ?? 'INTERNAL_ERROR'
+  if (status >= 500) console.error('[Gateway] Unhandled error:', err.message)
+  res.status(status).json({ error: code.toLowerCase(), message: err.message })
 })
 
 // ── Startup ────────────────────────────────────────────────────────────────────

@@ -126,3 +126,24 @@ async function loadLocalConfig(filePath) {
 export function invalidateProject(projectId) {
   cache.delete(projectId)
 }
+
+/**
+ * Resolve a project by its SHA-256 token hash (used by projectMiddleware).
+ *
+ * Queries the projects table directly — token hashes are stored in the DB,
+ * not in S3. Returns null if no matching active project is found.
+ *
+ * @param {string} tokenHash - SHA-256 hex of the raw X-Quorum-Token header
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<object | null>} Project row or null
+ */
+export async function getProjectByTokenHash(tokenHash, pool) {
+  const { rows } = await pool.query(
+    `SELECT id, slug, name, members, domains, governance, config_version
+     FROM projects
+     WHERE token_hash = $1 AND status = 'active'
+     LIMIT 1`,
+    [tokenHash],
+  )
+  return rows[0] ?? null
+}
