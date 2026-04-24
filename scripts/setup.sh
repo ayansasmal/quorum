@@ -50,6 +50,42 @@ check_docker() {
   ok "docker $(docker --version | awk '{print $3}' | tr -d ',')"
 }
 
+# Check for a standalone LocalStack container that would conflict with the
+# Compose-managed localstack service on port 4566.
+#
+# Cases handled:
+#   localstack-main running  → auto-stop (started by crossplane/crossplane.sh)
+#   engram-localstack-1      → already Compose-managed, fine — no action
+#   something else on :4566  → warn, let Docker surface the real error
+check_localstack_conflict() {
+  # Find any container currently publishing port 4566
+  local conflict
+  conflict=$(docker ps --filter "publish=4566" --format "{{.Names}}" 2>/dev/null | head -1)
+
+  [[ -z "$conflict" ]] && return 0   # port free — nothing to do
+
+  # Is it our own Compose service? Idempotent — fine.
+  if [[ "$conflict" == *"localstack"* && "$conflict" == *"engram"* ]]; then
+    ok "Compose-managed LocalStack already running ($conflict)"
+    return 0
+  fi
+
+  # Is it the standalone LocalStack started by crossplane/crossplane.sh?
+  if [[ "$conflict" == "localstack-main" ]]; then
+    warn "Standalone LocalStack ($conflict) is using port 4566."
+    warn "Docker Compose needs that port for its own LocalStack service."
+    info "Stopping $conflict automatically..."
+    docker stop "$conflict" &>/dev/null \
+      && ok "Stopped $conflict — Docker Compose will start its own LocalStack." \
+      || die "Failed to stop $conflict. Stop it manually: docker stop $conflict"
+    return 0
+  fi
+
+  # Unknown container on port 4566 — warn and let Docker handle it.
+  warn "Container '$conflict' is already using port 4566."
+  warn "If 'docker compose up' fails, stop it first: docker stop $conflict"
+}
+
 # ── docker mode ───────────────────────────────────────────────────────────────
 # Starts the full stack via Docker Compose: FalkorDB + PostgreSQL + Graphiti +
 # Quorum MCP server + Gateway + Dashboard. No Kubernetes required.
@@ -83,6 +119,7 @@ cmd_docker() {
   fi
 
   header "Docker stack"
+  check_localstack_conflict
   info "Starting FalkorDB + PostgreSQL + Graphiti + Gateway + Dashboard..."
   docker compose up -d
 
