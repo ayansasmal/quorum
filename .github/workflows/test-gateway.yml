@@ -1,0 +1,85 @@
+##
+## Quorum CI — Gateway Tests
+##
+## Runs on every push / PR that touches the gateway source or its tests.
+## Uses the root vitest installation — gateway tests live in tests/gateway/.
+##
+## Jobs:
+##   gateway-tests   <- unit tests for all gateway routes + middleware
+##   gateway-build   <- Docker image build check (no push)
+##
+
+name: Gateway CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/gateway/**'
+      - 'Dockerfile.gateway'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/gateway/**'
+      - 'Dockerfile.gateway'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  # -- Gateway unit tests ------------------------------------------------------
+  gateway-tests:
+    name: Gateway Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run gateway tests
+        run: npx vitest run tests/gateway/
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: Upload test results on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: gateway-test-results
+          path: coverage/
+          retention-days: 7
+
+  # -- Gateway Docker build check ----------------------------------------------
+  # Validates Dockerfile.gateway builds cleanly — no push to registry.
+  gateway-build:
+    name: Gateway Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Gateway image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          dockerfile: Dockerfile.gateway
+          push: false
+          tags: quorum-gateway:ci
+          cache-from: type=gha,scope=gateway-ci
+          cache-to: type=gha,mode=max,scope=gateway-ci
+          platforms: linux/amd64

@@ -68,8 +68,8 @@ jobs:
         run: npm run audit:scan-bypasses
         continue-on-error: true
 
-      - name: Scan for Graphiti delete calls
-        run: npm run audit:scan-graphiti-deletes
+      - name: Scan for hard deletes
+        run: npm run audit:scan-harddeletes
         continue-on-error: true
 
   # ── Governance tests ─────────────────────────────────────────────────────────
