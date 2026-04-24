@@ -28,7 +28,10 @@
     "test:coverage:constitutional": "vitest run --coverage --coverage.include='src/governance/constitutional.js' tests/constitutional",
     "seed": "node scripts/seed.js",
     "audit:scan-bypasses": "node scripts/audit-scan.js",
-    "audit:scan-graphiti-deletes": "node scripts/audit-scan-deletes.js"
+    "audit:scan-harddeletes": "node scripts/audit-scan-harddeletes.js",
+    "job:decay": "node scripts/decay-confidence.js",
+    "job:archive": "node scripts/archive-audit.js",
+    "job:recheck": "node scripts/recheck-conflicts.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1032.0",

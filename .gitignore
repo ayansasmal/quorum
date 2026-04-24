@@ -17,10 +17,5 @@ logs/
 # Crossplane real credentials (never commit)
 crossplane/credentials/aws-creds-secret.yaml
 
-# Terraform — state and secrets never go in git
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
-terraform/terraform.tfvars
-terraform/quorum.tfplan
+# Infrastructure tooling state — never go in git
+.terraform/
