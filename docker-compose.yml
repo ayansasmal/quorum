@@ -1,4 +1,25 @@
 services:
+  # LocalStack — AWS S3 emulation for local dev.
+  # The gateway reads team config from S3; for local Docker Compose runs we point
+  # it here instead of real AWS. Bucket is created by scripts/init-localstack.sh
+  # (called automatically by setup.sh docker after the stack is healthy).
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
   falkordb:
     image: falkordb/falkordb:latest
     ports:
@@ -70,8 +91,12 @@ services:
       - POSTGRES_USER=quorum
       - POSTGRES_PASSWORD=quorum_local
       - POSTGRES_DB=quorum_audit
-      - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-company-quorum-configs}
-      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-quorum-configs}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # LocalStack — S3 calls inside the Docker network go here (not real AWS)
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
       # JWT signing keys — generate with openssl, store in secrets manager for production
       # Leave unset in dev: gateway generates an ephemeral key pair automatically
       - QUORUM_JWT_PRIVATE_KEY=${QUORUM_JWT_PRIVATE_KEY:-}
@@ -83,6 +108,8 @@ services:
     volumes:
       - ./quorum.config.example.json:/app/quorum.config.example.json:ro
     depends_on:
+      localstack:
+        condition: service_healthy
       postgresql:
         condition: service_healthy
       graphiti:
@@ -144,3 +171,4 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
+  localstack_data:

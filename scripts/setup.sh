@@ -105,6 +105,16 @@ cmd_docker() {
 
   [[ $elapsed -ge $timeout ]] && die "Timed out waiting for services. Check: docker compose ps"
 
+  header "LocalStack S3"
+  info "Bootstrapping S3 bucket in LocalStack..."
+  if command -v awslocal &>/dev/null; then
+    bash "$SCRIPT_DIR/init-localstack.sh"
+  else
+    warn "awslocal not found — skipping S3 bucket init"
+    warn "Install with: pip install awscli-local"
+    warn "Then run: ./scripts/init-localstack.sh"
+  fi
+
   header "Seed data"
   npm run seed
 
@@ -117,8 +127,9 @@ cmd_docker() {
   echo "    node cli.js audit verify"
   echo "    node cli.js history auth:token-strategy"
   echo ""
-  echo "  Dashboard: http://localhost:3002"
-  echo "  Gateway:   http://localhost:3001/health"
+  echo "  Dashboard:  http://localhost:3002"
+  echo "  Gateway:    http://localhost:3001/health"
+  echo "  LocalStack: http://localhost:4566/_localstack/health"
   echo ""
 }
 
