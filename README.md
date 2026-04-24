@@ -91,19 +91,26 @@ Claude Code / AI Agents
 
 ## Quick Start
 
+> **Full step-by-step guide:** [QUICKSTART.md](QUICKSTART.md)
+
+**Prerequisites:** Node.js 20+, Docker Desktop, `pip install awscli-local`, OpenAI API key
+
 ```bash
-git clone https://github.com/yourusername/quorum
+git clone https://github.com/ayansasmal/quorum.git
 cd quorum
-cp .env.example .env   # add your OPENAI_API_KEY
+cp .env.example .env          # set OPENAI_API_KEY — the only required change
 
-# Requires: Docker Desktop + pip install awscli-local
-./scripts/setup.sh docker
+./scripts/setup.sh docker     # start stack, bootstrap S3, seed knowledge graph
 
-# Add to Claude Code
+# Connect to Claude Code (replace path with your clone location)
 claude mcp add quorum -- node /path/to/quorum/src/server.js
+```
 
-# Verify
-node cli.js audit verify
+After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
+
+```bash
+node cli.js audit verify      # verify audit chain integrity
+node cli.js history auth:token-strategy   # inspect seeded knowledge
 ```
 
 ---
