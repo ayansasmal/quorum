@@ -17,6 +17,15 @@ const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
 
 /**
+ * Dedicated Graphiti group ID for audit episodes.
+ * Kept separate from GROUP_ID so audit records never appear in
+ * normal knowledge searches (searchNodes / searchFacts).
+ *
+ * @type {string}
+ */
+export const AUDIT_GROUP_ID = 'quorum-audit'
+
+/**
  * Returns the base URL for Graphiti calls.
  * In gateway mode, routes to the gateway's /graphiti prefix.
  * @returns {{ baseUrl: string, useGateway: boolean }}
