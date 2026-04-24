@@ -120,6 +120,19 @@ cmd_docker() {
   EXTERNAL_LOCALSTACK=""
   check_localstack_conflict
 
+  # One-time migration: stop containers from the old project name (engram-*)
+  # that predate the `name: quorum` fix in docker-compose.yml.
+  # --remove-orphans only removes orphans of the current project, so these
+  # would otherwise hold their ports and block the new quorum-* containers.
+  local old_containers
+  old_containers=$(docker ps -q --filter "name=engram-" 2>/dev/null)
+  if [[ -n "$old_containers" ]]; then
+    warn "Found containers from old project name (engram-*) — stopping them..."
+    docker stop $old_containers 2>/dev/null || true
+    docker rm   $old_containers 2>/dev/null || true
+    ok "Old engram-* containers removed"
+  fi
+
   info "Removing any stale containers (data volumes are preserved)..."
   docker compose down --remove-orphans 2>/dev/null || true
 
