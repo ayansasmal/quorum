@@ -230,6 +230,16 @@ lsof -i :3002    # find what's using the dashboard port
 # Change ports in .env if needed: QUORUM_GATEWAY_PORT=3011
 ```
 
+**Port 4566 already in use (LocalStack conflict)**
+```bash
+# Happens when a standalone LocalStack is running alongside Docker Compose.
+# The Crossplane K8s workflow starts LocalStack standalone (localstack start -d).
+# Docker Compose mode runs its own LocalStack — they can't share the port.
+localstack stop                 # stop the standalone instance
+docker compose up -d            # bring up the Compose-managed LocalStack + gateway
+./scripts/init-localstack.sh    # re-bootstrap the bucket (fresh instance)
+```
+
 **Fresh start — wipe everything and begin again**
 ```bash
 docker compose down -v          # stop containers and delete all volumes
