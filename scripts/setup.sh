@@ -170,9 +170,16 @@ cmd_docker() {
   [[ $elapsed -ge $timeout ]] && die "Timed out waiting for services. Check: docker compose ps"
 
   header "LocalStack S3"
-  info "Bootstrapping S3 bucket in LocalStack..."
   if command -v awslocal &>/dev/null; then
-    bash "$SCRIPT_DIR/init-localstack.sh"
+    if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
+      # External LocalStack is owned by another workflow (e.g. Crossplane).
+      # Read-only: list available configs so the operator can set QUORUM_PROJECT_ID.
+      info "Using external LocalStack — listing available configs (read-only)..."
+      bash "$SCRIPT_DIR/init-localstack.sh" --read-only
+    else
+      info "Bootstrapping S3 bucket in LocalStack..."
+      bash "$SCRIPT_DIR/init-localstack.sh"
+    fi
   else
     warn "awslocal not found — skipping S3 bucket init"
     warn "Install with: pip install awscli-local"
