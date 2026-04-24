@@ -25,6 +25,8 @@ vi.mock('../../src/graph/queries.js', () => ({
   transitionVersionStatus: vi.fn(),
   insertVersionAuditLink: vi.fn(),
   getNextVersionNumber: vi.fn(),
+  // GAP-21: fire-and-forget domain stat increment — must be present in mock
+  incrementDomainStat: vi.fn().mockResolvedValue(),
 }))
 
 vi.mock('../../src/audit/pipeline.js', () => ({

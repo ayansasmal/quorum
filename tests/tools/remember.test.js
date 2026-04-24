@@ -47,6 +47,8 @@ vi.mock('../../src/graph/queries.js', () => ({
   insertPendingDecision: vi.fn().mockResolvedValue(),
   getPendingDecisionById: vi.fn(),
   resolvePendingDecision: vi.fn().mockResolvedValue(),
+  // GAP-21: fire-and-forget domain stat increment — must be present in mock
+  incrementDomainStat: vi.fn().mockResolvedValue(),
 }))
 
 vi.mock('../../src/audit/pipeline.js', () => ({
