@@ -1,3 +1,5 @@
+name: quorum
+
 services:
   # LocalStack — AWS S3 emulation for local dev.
   # The gateway reads team config from S3; for local Docker Compose runs we point

@@ -65,7 +65,7 @@ check_localstack_conflict() {
   [[ -z "$conflict" ]] && return 0   # port free — nothing to do
 
   # Is it our own Compose service? Idempotent — fine.
-  if [[ "$conflict" == *"localstack"* && "$conflict" == *"engram"* ]]; then
+  if [[ "$conflict" == *"localstack"* && "$conflict" == *"quorum"* ]]; then
     ok "Compose-managed LocalStack already running ($conflict)"
     return 0
   fi
