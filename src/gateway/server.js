@@ -13,7 +13,9 @@
  *   4. Start HTTP server
  *
  * API surface:
- *   POST /auth/token                    — GitHub token → signed ES256 JWT
+ *   GET  /auth/github                   — initiate GitHub OAuth flow
+ *   GET  /auth/callback                 — GitHub OAuth callback → redirect dashboard with token
+ *   POST /auth/token                    — GitHub OAuth/PAT token + project_id → signed ES256 JWT
  *   GET  /.well-known/jwks.json         — public key for local JWT verification
  *   POST /graphiti/*                    — JWT-authenticated Graphiti proxy
  *   GET|POST|PATCH /pg/*                — JWT-authenticated PostgreSQL REST API
@@ -34,6 +36,7 @@ import express from 'express'
 import pg from 'pg'
 import { loadKeys } from './keys.js'
 import authRoutes      from './routes/auth.js'
+import oauthRoutes     from './routes/oauth.js'
 import jwksRoutes      from './routes/jwks.js'
 import graphitiRoutes  from './routes/graphiti.js'
 import pgRoutes        from './routes/pg.js'
@@ -76,7 +79,8 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',                              authRoutes)
+app.use('/auth',                              oauthRoutes)  // GET /auth/github, GET /auth/callback
+app.use('/auth',                              authRoutes)   // POST /auth/token
 app.use('/.well-known/jwks.json',            jwksRoutes)
 // JWT-gated routes: per-engineer + per-project rate limits applied (GAP-14, GAP-31)
 app.use('/graphiti', verifyJwt, engineerLimit, projectLimit, graphitiRoutes)
