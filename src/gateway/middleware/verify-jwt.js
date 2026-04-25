@@ -39,11 +39,12 @@ export function verifyJwt(req, res, next) {
     .then(({ payload }) => {
       /** @type {{ sub: string, project: string, role: string | null, team: string | null, method: string }} */
       req.user = {
-        sub:     payload.sub,
-        project: payload.project,
-        role:    payload.role ?? null,
-        team:    payload.team ?? null,
-        method:  payload.method ?? 'jwt',
+        sub:             payload.sub,
+        project:         payload.project,
+        role:            payload.role            ?? null,
+        team:            payload.team            ?? null,
+        method:          payload.method          ?? 'jwt',
+        base_confidence: payload.base_confidence ?? 0.5,
       }
       next()
     })

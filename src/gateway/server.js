@@ -16,6 +16,7 @@
  *   GET  /auth/github                   — initiate GitHub OAuth flow
  *   GET  /auth/callback                 — GitHub OAuth callback → redirect dashboard with token
  *   POST /auth/token                    — GitHub OAuth/PAT token + project_id → signed ES256 JWT
+ *   POST /auth/refresh                  — renew JWT without re-auth (Bearer JWT → new JWT)
  *   GET  /.well-known/jwks.json         — public key for local JWT verification
  *   POST /graphiti/*                    — JWT-authenticated Graphiti proxy
  *   GET|POST|PATCH /pg/*                — JWT-authenticated PostgreSQL REST API

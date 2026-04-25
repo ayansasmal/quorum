@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 import { ThemeProvider } from './context/ThemeContext.jsx'
-import { registerTokenGetter } from './api/client.js'
+import { registerTokenGetter, registerLogout, registerRefresher } from './api/client.js'
 import Layout from './components/layout/Layout.jsx'
 
 // Pages — lazy-loaded to keep initial bundle small
@@ -22,14 +22,21 @@ import Status    from './pages/Status.jsx'
  *   - Browser notification polling (pending count change)
  */
 function AppSetup({ children }) {
-  const { token, logout, user } = useAuth()
-  const qc                      = useQueryClient()
-  const prevPendingRef          = useRef(null)
+  const { token, logout, refresh, user } = useAuth()
+  const qc                               = useQueryClient()
+  const prevPendingRef                   = useRef(null)
 
-  // Register token getter so apiFetch always has the latest JWT
+  // Register auth callbacks with the API client.
+  // - token getter re-registered whenever token changes (closure captures latest value)
+  // - logout + refresh stable references, re-registered when they change
   useEffect(() => {
     registerTokenGetter(() => token)
-  }, [token])
+    registerRefresher(refresh)
+  }, [token, refresh])
+
+  useEffect(() => {
+    registerLogout(logout)
+  }, [logout])
 
   // Clear all cached queries on logout
   useEffect(() => {

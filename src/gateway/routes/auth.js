@@ -20,6 +20,7 @@ import { Router } from 'express'
 import { SignJWT } from 'jose'
 import { getKeys } from '../keys.js'
 import { loadProjectConfig } from '../config-cache.js'
+import { verifyJwt } from '../middleware/verify-jwt.js'
 
 const router = Router()
 
@@ -128,6 +129,39 @@ router.post('/token', async (req, res) => {
     team,
     base_confidence: baseConfidence,
     member_found:    member !== null,
+  })
+})
+
+// POST /auth/refresh
+// Exchange a still-valid Quorum JWT for a fresh one — no GitHub re-auth needed.
+// The existing JWT IS the proof of identity; we just extend the expiry.
+// Rate-limited by the per-engineer limit applied in server.js.
+router.post('/refresh', verifyJwt, async (req, res) => {
+  const { sub, project, role, team, method, base_confidence } = req.user
+  const { privateKey, kid } = getKeys()
+
+  const token = await new SignJWT({
+    sub,
+    project,
+    role,
+    team,
+    method: method ?? 'jwt',
+    base_confidence,
+  })
+    .setProtectedHeader({ alg: 'ES256', kid })
+    .setIssuedAt()
+    .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
+    .setIssuer('quorum-gateway')
+    .sign(privateKey)
+
+  res.json({
+    token,
+    expires_in:      TOKEN_TTL_SECONDS,
+    sub,
+    project,
+    role,
+    team,
+    base_confidence,
   })
 })
 
