@@ -12,11 +12,11 @@ export default function ServiceIndicator({ name, status, detail }) {
           className={cn(
             'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
             isUp
-              ? 'bg-green-900/40 text-green-400 border border-green-800'
-              : 'bg-red-900/40 text-red-400 border border-red-800',
+              ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border border-green-300 dark:border-green-800'
+              : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-800',
           )}
         >
-          <span className={cn('h-1.5 w-1.5 rounded-full', isUp ? 'bg-green-400' : 'bg-red-400')} />
+          <span className={cn('h-1.5 w-1.5 rounded-full', isUp ? 'bg-green-500 dark:bg-green-400' : 'bg-red-500 dark:bg-red-400')} />
           {isUp ? 'Healthy' : 'Unavailable'}
         </span>
       </div>

@@ -21,7 +21,7 @@ export default function Graph() {
           Loading graph…
         </div>
       ) : error ? (
-        <div className="rounded-lg border border-red-800 bg-red-900/20 p-4 text-sm text-red-400">
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-400">
           {error.status === 400
             ? `Graph too large — select a domain to filter. (${error.body?.message ?? error.message})`
             : error.message}

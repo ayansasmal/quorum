@@ -111,9 +111,9 @@ export default function Stats() {
 
 function StatCard({ label, value, sub, warn }) {
   return (
-    <div className={`rounded-lg border p-4 ${warn ? 'border-amber-700/50 bg-amber-900/10' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900'}`}>
+    <div className={`rounded-lg border p-4 ${warn ? 'border-amber-300 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/10' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900'}`}>
       <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums ${warn ? 'text-amber-400' : 'text-gray-900 dark:text-white'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${warn ? 'text-amber-600 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>{value}</p>
       {sub && <p className="mt-0.5 text-xs text-gray-600">{sub}</p>}
     </div>
   )
@@ -166,7 +166,7 @@ function LoadingState() {
 
 function ErrorState({ message }) {
   return (
-    <div className="rounded-lg border border-red-800 bg-red-900/20 p-4 text-sm text-red-400">
+    <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-400">
       Failed to load stats: {message}
     </div>
   )
