@@ -4,8 +4,8 @@ import { cn } from '../../lib/utils.js'
 export default function ServiceIndicator({ name, status, detail }) {
   const isUp = status === 'connected' || status === 'healthy' || status === true
   return (
-    <div className="flex items-center justify-between py-2.5 border-b border-gray-800 last:border-0">
-      <span className="text-sm text-gray-300">{name}</span>
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-200 dark:border-gray-800 last:border-0">
+      <span className="text-sm text-gray-600 dark:text-gray-300">{name}</span>
       <div className="flex items-center gap-2">
         {detail && <span className="text-xs text-gray-500">{detail}</span>}
         <span

@@ -13,7 +13,7 @@ export default function Graph() {
       <GraphControls domain={domain} onDomainChange={setDomain} />
 
       {!domain ? (
-        <div className="flex flex-1 items-center justify-center text-gray-600 text-sm rounded-lg border border-gray-800">
+        <div className="flex flex-1 items-center justify-center text-gray-600 text-sm rounded-lg border border-gray-200 dark:border-gray-800">
           Select a domain to load the graph.
         </div>
       ) : isLoading ? (

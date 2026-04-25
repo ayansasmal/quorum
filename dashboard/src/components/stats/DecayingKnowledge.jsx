@@ -30,13 +30,13 @@ export default function DecayingKnowledge() {
     <div className="space-y-3">
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex rounded-md overflow-hidden border border-gray-700 text-xs">
+        <div className="flex rounded-md overflow-hidden border border-gray-300 dark:border-gray-700 text-xs">
           {FILTERS.map(({ label }, i) => (
             <button
               key={label}
               onClick={() => setFilterIdx(i)}
               className={`px-3 py-1.5 transition-colors ${
-                filterIdx === i ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-800'
+                filterIdx === i ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
             >
               {label}
@@ -46,7 +46,7 @@ export default function DecayingKnowledge() {
         <select
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-xs text-gray-300"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300"
         >
           <option value="">All domains</option>
           {['auth', 'api', 'db', 'infra', 'testing'].map((d) => (
@@ -70,18 +70,18 @@ export default function DecayingKnowledge() {
           {filterIdx === 0 ? 'No knowledge nodes.' : 'No nodes below this confidence threshold.'}
         </p>
       ) : (
-        <div className="rounded-lg border border-gray-800 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
           <table className="w-full text-xs">
-            <thead className="border-b border-gray-800 bg-gray-900/50">
+            <thead className="border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-gray-900/50">
               <tr>
                 {['Domain:Key', 'Type', 'Confidence', 'Last accessed', 'Author', ''].map((h) => (
                   <th key={h} className="px-3 py-2 text-left font-medium text-gray-500">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/50 bg-gray-900">
+            <tbody className="divide-y divide-gray-200/50 dark:divide-gray-800/50 bg-white dark:bg-gray-900">
               {rows.map((row, i) => (
-                <tr key={i} className="hover:bg-gray-800/30">
+                <tr key={i} className="hover:bg-gray-100 dark:hover:bg-gray-800/30">
                   <td className="px-3 py-2 font-mono text-blue-400">
                     {row.topic}:{row.key}
                   </td>

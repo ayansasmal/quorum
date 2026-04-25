@@ -1,7 +1,3 @@
-import { useEffect, useState } from 'react'
-import { useNavigate }         from 'react-router-dom'
-import { useAuth }             from '../context/AuthContext.jsx'
-
 /**
  * Login page — GitHub OAuth flow.
  *
@@ -17,6 +13,10 @@ import { useAuth }             from '../context/AuthContext.jsx'
  *         shows the project selector, and calls POST /auth/token to
  *         exchange the OAuth token for a Quorum JWT.
  */
+import { useEffect, useState } from 'react'
+import { useNavigate }         from 'react-router-dom'
+import { useAuth }             from '../context/AuthContext.jsx'
+
 export default function Login() {
   const { login, error: authError } = useAuth()
   const navigate                    = useNavigate()
@@ -70,23 +70,23 @@ export default function Login() {
   // ── Step 1: Not yet authenticated via GitHub ───────────────────────────────
   if (!oauthToken) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="w-full max-w-sm space-y-6 px-4">
 
           <div className="text-center space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Quorum</h1>
-            <p className="text-sm text-gray-400">Persistent engineering memory</p>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Quorum</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Persistent engineering memory</p>
           </div>
 
           {displayError && (
-            <div className="rounded-md bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300">
+            <div className="rounded-md bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {displayError}
             </div>
           )}
 
           <a
             href="/auth/github"
-            className="flex items-center justify-center gap-3 w-full rounded-md bg-gray-800 hover:bg-gray-700 border border-gray-600 px-4 py-2.5 text-sm font-medium text-white transition-colors"
+            className="flex items-center justify-center gap-3 w-full rounded-md bg-gray-800 hover:bg-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-600 dark:border-gray-600 px-4 py-2.5 text-sm font-medium text-white transition-colors"
           >
             {/* GitHub mark */}
             <svg viewBox="0 0 16 16" fill="currentColor" className="w-5 h-5 flex-shrink-0">
@@ -102,8 +102,8 @@ export default function Login() {
             Login with GitHub
           </a>
 
-          <p className="text-center text-xs text-gray-600">
-            Requires a GitHub account. Only <code className="text-gray-500">read:user</code> scope is requested.
+          <p className="text-center text-xs text-gray-400 dark:text-gray-600">
+            Requires a GitHub account. Only <code className="text-gray-500 dark:text-gray-500">read:user</code> scope is requested.
           </p>
         </div>
       </div>
@@ -112,23 +112,23 @@ export default function Login() {
 
   // ── Step 3: OAuth done — select project ────────────────────────────────────
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
       <div className="w-full max-w-sm space-y-6 px-4">
 
         <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight text-white">Quorum</h1>
-          <p className="text-sm text-gray-400">GitHub verified — select your project</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Quorum</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">GitHub verified — select your project</p>
         </div>
 
         {displayError && (
-          <div className="rounded-md bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300">
+          <div className="rounded-md bg-red-50 dark:bg-red-900/40 border border-red-300 dark:border-red-700 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             {displayError}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
-            <label htmlFor="project-id" className="block text-xs font-medium text-gray-400 uppercase tracking-wider">
+            <label htmlFor="project-id" className="block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
               Project ID
             </label>
             <input
@@ -139,9 +139,9 @@ export default function Login() {
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
               placeholder="platform-team"
-              className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-500">
               The project ID from your <code>.quorum</code> file or S3 bucket prefix.
             </p>
           </div>
@@ -157,7 +157,7 @@ export default function Login() {
 
         <button
           onClick={() => { setOauthToken(''); setFormError(null) }}
-          className="w-full text-center text-xs text-gray-600 hover:text-gray-400 transition-colors"
+          className="w-full text-center text-xs text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
         >
           ← Back to login
         </button>

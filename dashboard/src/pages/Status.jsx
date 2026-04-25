@@ -49,7 +49,7 @@ export default function Status() {
 
 function Card({ title, children }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4 space-y-1">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-1">
       <h2 className="text-xs font-medium uppercase tracking-wider text-gray-500 pb-2">{title}</h2>
       {children}
     </div>
@@ -58,9 +58,9 @@ function Card({ title, children }) {
 
 function Indicator({ label, value, warn }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0">
-      <span className="text-sm text-gray-400">{label}</span>
-      <span className={`text-sm font-mono font-medium ${warn ? 'text-amber-400' : 'text-gray-200'}`}>{value ?? '—'}</span>
+    <div className="flex items-center justify-between py-2 border-b border-gray-200/50 dark:border-gray-800/50 last:border-0">
+      <span className="text-sm text-gray-500 dark:text-gray-400">{label}</span>
+      <span className={`text-sm font-mono font-medium ${warn ? 'text-amber-400' : 'text-gray-700 dark:text-gray-200'}`}>{value ?? '—'}</span>
     </div>
   )
 }

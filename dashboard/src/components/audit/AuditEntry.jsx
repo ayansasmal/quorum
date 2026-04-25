@@ -15,11 +15,11 @@ export default function AuditEntry({ entry }) {
   const impact    = entry.version_impact ?? {}
 
   return (
-    <div className="flex gap-3 py-3 border-b border-gray-800/50 last:border-0 group">
+    <div className="flex gap-3 py-3 border-b border-gray-200/50 dark:border-gray-800/50 last:border-0 group">
       {/* Timeline dot */}
       <div className="flex flex-col items-center pt-0.5">
-        <span className="h-2 w-2 rounded-full bg-gray-700 group-hover:bg-blue-600 transition-colors flex-shrink-0" />
-        <span className="flex-1 w-px bg-gray-800/50" />
+        <span className="h-2 w-2 rounded-full bg-gray-200 dark:bg-gray-700 group-hover:bg-blue-600 transition-colors flex-shrink-0" />
+        <span className="flex-1 w-px bg-gray-200/50 dark:bg-gray-800/50" />
       </div>
 
       {/* Content */}
@@ -27,7 +27,7 @@ export default function AuditEntry({ entry }) {
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className={`text-xs font-medium ${toolColor}`}>{entry.tool}</span>
           <span className="text-[10px] text-gray-600">{entry.operation}</span>
-          <span className="text-xs text-gray-400">{entry.author}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{entry.author}</span>
           {entry.author_role && (
             <span className="text-[10px] text-gray-600">· {entry.author_role.replace(/_/g, ' ')}</span>
           )}

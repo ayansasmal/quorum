@@ -123,7 +123,7 @@ export default function Config() {
           onChange={(e) => {
             try { setDraft(JSON.parse(e.target.value)) } catch {}
           }}
-          className="w-full rounded-md bg-gray-950 border border-gray-700 px-3 py-2 text-xs font-mono text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+          className="w-full rounded-md bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-700 px-3 py-2 text-xs font-mono text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
           spellCheck={false}
         />
       </Card>
@@ -158,7 +158,7 @@ export default function Config() {
 
 function Card({ title, children }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4 space-y-3">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
       <h2 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h2>
       {children}
     </div>

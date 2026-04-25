@@ -12,11 +12,11 @@ export default function DecisionCard({ decision }) {
   const isStale  = !!decision.stale_warning
 
   return (
-    <div className={`rounded-lg border ${isStale ? 'border-amber-800/50' : 'border-gray-800'} bg-gray-900 overflow-hidden`}>
+    <div className={`rounded-lg border ${isStale ? 'border-amber-800/50' : 'border-gray-200 dark:border-gray-800'} bg-white dark:bg-gray-900 overflow-hidden`}>
 
       {/* Card header */}
       <div
-        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-800/40 select-none"
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-100/40 dark:hover:bg-gray-800/40 select-none"
         onClick={() => setExpanded((v) => !v)}
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -34,7 +34,7 @@ export default function DecisionCard({ decision }) {
 
       {/* Expanded body */}
       {expanded && (
-        <div className="border-t border-gray-800 px-4 py-4 space-y-4">
+        <div className="border-t border-gray-200 dark:border-gray-800 px-4 py-4 space-y-4">
 
           {/* Stale warning */}
           {isStale && (
@@ -46,7 +46,7 @@ export default function DecisionCard({ decision }) {
           {/* Conflict reason */}
           {decision.conflict_reason && (
             <p className="text-xs text-gray-500">
-              <span className="text-gray-400 font-medium">Conflict reason: </span>
+              <span className="text-gray-500 dark:text-gray-400 font-medium">Conflict reason: </span>
               {decision.conflict_reason}
             </p>
           )}
@@ -56,9 +56,9 @@ export default function DecisionCard({ decision }) {
 
           {/* LLM enrichment */}
           {decision.enrichment?.analysis && (
-            <div className="rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2 space-y-1">
-              <p className="text-xs font-medium text-gray-400">AI analysis</p>
-              <p className="text-xs text-gray-400 leading-relaxed">{decision.enrichment.analysis}</p>
+            <div className="rounded-md bg-gray-200/50 dark:bg-gray-800/50 border border-gray-300 dark:border-gray-700 px-3 py-2 space-y-1">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">AI analysis</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{decision.enrichment.analysis}</p>
               {decision.enrichment.possible_split && (
                 <p className="text-xs text-blue-400 mt-1">Split suggestion: {decision.enrichment.split_suggestion}</p>
               )}
@@ -69,7 +69,7 @@ export default function DecisionCard({ decision }) {
           {!showReview ? (
             <button
               onClick={() => setShowReview(true)}
-              className="rounded-md bg-gray-800 hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-200 transition-colors"
+              className="rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
             >
               Review this decision
             </button>

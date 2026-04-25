@@ -17,7 +17,7 @@ export default function Layout({ children }) {
   const title = PAGE_TITLES[pathname] ?? 'Quorum'
 
   return (
-    <div className="flex min-h-screen bg-gray-950">
+    <div className="flex min-h-screen bg-gray-50 dark:bg-gray-950">
       <Sidebar />
       <div className="flex flex-1 flex-col pl-[var(--sidebar-width)]">
         <Header title={title} />

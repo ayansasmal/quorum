@@ -26,7 +26,7 @@ export default function Audit() {
         <select
           value={tool}
           onChange={(e) => setTool(e.target.value)}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-300"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"
         >
           <option value="">All operations</option>
           {TOOLS.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -35,13 +35,13 @@ export default function Audit() {
           placeholder="Filter by author…"
           value={author}
           onChange={(e) => setAuthor(e.target.value)}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <input
           placeholder="Filter by topic…"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
 
@@ -53,7 +53,7 @@ export default function Audit() {
       ) : !entries.length ? (
         <p className="text-sm text-gray-600 text-center py-8">No audit entries found.</p>
       ) : (
-        <div className="rounded-lg border border-gray-800 bg-gray-900 px-4">
+        <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4">
           {entries.map((entry) => (
             <AuditEntry key={entry.entry_id} entry={entry} />
           ))}

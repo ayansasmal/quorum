@@ -48,7 +48,7 @@ export default function BumpButton({ topic, key: key_, lastBumpDate }) {
         onClick={handleBump}
         disabled={disabled}
         title={`Bump confidence for ${topic}:${key_}`}
-        className="inline-flex items-center gap-1 rounded border border-gray-700 hover:border-blue-600 px-2 py-0.5 text-[11px] font-medium text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-40"
+        className="inline-flex items-center gap-1 rounded border border-gray-300 dark:border-gray-700 hover:border-blue-600 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400 hover:text-blue-400 transition-colors disabled:opacity-40"
       >
         <TrendingUp className="h-3 w-3" />
         Bump

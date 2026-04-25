@@ -37,13 +37,13 @@ export default function Knowledge() {
             placeholder="Semantic search…"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-            className="w-full rounded-md bg-gray-800 border border-gray-700 pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 pl-9 pr-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <select
           value={domain}
           onChange={(e) => { setDomain(e.target.value); setPage(1) }}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-300"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"
         >
           <option value="">All domains</option>
           {['auth', 'api', 'db', 'infra', 'testing'].map((d) => (
@@ -53,7 +53,7 @@ export default function Knowledge() {
         <select
           value={entityType}
           onChange={(e) => { setEntityType(e.target.value); setPage(1) }}
-          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-300"
+          className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"
         >
           <option value="">All types</option>
           {ENTITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -68,23 +68,23 @@ export default function Knowledge() {
       ) : !items.length ? (
         <p className="text-sm text-gray-600 py-8 text-center">No knowledge found.</p>
       ) : (
-        <div className="rounded-lg border border-gray-800 bg-gray-900 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="border-b border-gray-800">
+            <thead className="border-b border-gray-200 dark:border-gray-800">
               <tr>
                 {['Domain', 'Key', 'Type', 'Confidence', 'Author', 'Updated'].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/50">
+            <tbody className="divide-y divide-gray-200/50 dark:divide-gray-800/50">
               {items.map((row, i) => (
                 <tr
                   key={i}
                   onClick={() => setSelected(row)}
-                  className="hover:bg-gray-800/40 cursor-pointer"
+                  className="hover:bg-gray-100/40 dark:hover:bg-gray-800/40 cursor-pointer"
                 >
-                  <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{row.topic}</td>
+                  <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{row.topic}</td>
                   <td className="px-4 py-2.5 text-blue-400 font-mono text-xs">{row.key}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${entityBadge(row.entity_type)}`}>
@@ -111,7 +111,7 @@ export default function Knowledge() {
             <button
               disabled={page === 1}
               onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
+              className="px-3 py-1 rounded bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
             >
               Prev
             </button>
@@ -119,7 +119,7 @@ export default function Knowledge() {
             <button
               disabled={page >= data.pages}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
+              className="px-3 py-1 rounded bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
             >
               Next
             </button>

@@ -13,8 +13,8 @@ export default function ConfidenceHistogram({ confidence }) {
     <div className="space-y-2">
       {bars.map(({ label, value, color }) => (
         <div key={label} className="flex items-center gap-3 text-xs">
-          <span className="w-14 text-gray-400 text-right tabular-nums">{label}</span>
-          <div className="flex-1 h-2 rounded-full bg-gray-800 overflow-hidden">
+          <span className="w-14 text-gray-500 dark:text-gray-400 text-right tabular-nums">{label}</span>
+          <div className="flex-1 h-2 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
             <div
               className={`h-full rounded-full ${color}`}
               style={{ width: `${(value / total) * 100}%` }}

@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'rea
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { ThemeProvider } from './context/ThemeContext.jsx'
 import { registerTokenGetter } from './api/client.js'
 import Layout from './components/layout/Layout.jsx'
 
@@ -60,6 +61,7 @@ function ProtectedRoute() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <AppSetup>
           <Routes>
@@ -77,6 +79,7 @@ export default function App() {
           </Routes>
         </AppSetup>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

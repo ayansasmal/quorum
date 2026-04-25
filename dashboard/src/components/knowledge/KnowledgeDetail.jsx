@@ -17,31 +17,31 @@ export default function KnowledgeDetail({ row, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div
-        className="relative w-full max-w-xl h-full bg-gray-900 border-l border-gray-800 overflow-y-auto shadow-2xl"
+        className="relative w-full max-w-xl h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 flex items-center justify-between bg-gray-900 border-b border-gray-800 px-5 py-4">
+        <div className="sticky top-0 flex items-center justify-between bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-5 py-4">
           <div>
             <p className="text-xs text-gray-500">{row.topic}</p>
-            <h2 className="font-mono text-sm font-bold text-white">{row.key}</h2>
+            <h2 className="font-mono text-sm font-bold text-gray-900 dark:text-white">{row.key}</h2>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Meta */}
-        <div className="px-5 py-4 space-y-3 border-b border-gray-800">
+        <div className="px-5 py-4 space-y-3 border-b border-gray-200 dark:border-gray-800">
           <div className="flex flex-wrap gap-2">
             <Badge className={entityBadge(row.entity_type)}>{row.entity_type}</Badge>
             {(row.tags ?? []).map((t) => (
-              <Badge key={t} className="text-gray-400 bg-gray-800 border-gray-700">{t}</Badge>
+              <Badge key={t} className="text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700">{t}</Badge>
             ))}
           </div>
           <div className="flex items-center gap-4 text-xs text-gray-500">
             <span>v{row.version}</span>
-            <span>by <span className="text-gray-300">{row.author}</span></span>
+            <span>by <span className="text-gray-600 dark:text-gray-300">{row.author}</span></span>
             <span>{fmtDate(row.updated_at)}</span>
           </div>
           <ConfidenceBar value={row.confidence} showLabel />

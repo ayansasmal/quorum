@@ -21,13 +21,13 @@ export default function Stats() {
     <div className="space-y-6">
 
       {/* Tab switcher */}
-      <div className="flex gap-1 rounded-lg bg-gray-900 border border-gray-800 p-1 w-fit">
+      <div className="flex gap-1 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-1 w-fit">
         {TABS.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              tab === t ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'
+              tab === t ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             {t}
@@ -111,9 +111,9 @@ export default function Stats() {
 
 function StatCard({ label, value, sub, warn }) {
   return (
-    <div className={`rounded-lg border p-4 ${warn ? 'border-amber-700/50 bg-amber-900/10' : 'border-gray-800 bg-gray-900'}`}>
+    <div className={`rounded-lg border p-4 ${warn ? 'border-amber-700/50 bg-amber-900/10' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900'}`}>
       <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums ${warn ? 'text-amber-400' : 'text-white'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${warn ? 'text-amber-400' : 'text-gray-900 dark:text-white'}`}>{value}</p>
       {sub && <p className="mt-0.5 text-xs text-gray-600">{sub}</p>}
     </div>
   )
@@ -121,7 +121,7 @@ function StatCard({ label, value, sub, warn }) {
 
 function Card({ title, children }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4 space-y-3">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
       <h2 className="text-xs font-medium uppercase tracking-wider text-gray-500">{title}</h2>
       {children}
     </div>
@@ -134,17 +134,17 @@ function KnowledgeTable({ rows, cols }) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-800">
+          <tr className="border-b border-gray-200 dark:border-gray-800">
             {cols.map((c) => (
               <th key={c.key} className="pb-2 pr-4 text-left text-xs font-medium text-gray-500">{c.label}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800/50">
+        <tbody className="divide-y divide-gray-200/50 dark:divide-gray-800/50">
           {rows.map((row, i) => (
-            <tr key={i} className="hover:bg-gray-800/30">
+            <tr key={i} className="hover:bg-gray-100 dark:hover:bg-gray-800/30">
               {cols.map((c) => (
-                <td key={c.key} className="py-2 pr-4 text-gray-300">
+                <td key={c.key} className="py-2 pr-4 text-gray-600 dark:text-gray-300">
                   {c.render ? c.render(row[c.key]) : row[c.key] ?? '—'}
                 </td>
               ))}

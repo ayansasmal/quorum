@@ -38,7 +38,7 @@ export default function ReviewForm({ decision, draftAuthor, onClose }) {
 
   if (isSelfAuthor) {
     return (
-      <div className="rounded-md bg-gray-800/50 border border-gray-700 px-4 py-3 text-sm text-gray-500">
+      <div className="rounded-md bg-gray-200/50 dark:bg-gray-800/50 border border-gray-300 dark:border-gray-700 px-4 py-3 text-sm text-gray-500">
         You cannot review your own submission.
       </div>
     )
@@ -53,8 +53,8 @@ export default function ReviewForm({ decision, draftAuthor, onClose }) {
             key={value}
             className={`flex items-center gap-1.5 cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
               action === value
-                ? `${color} border-current bg-gray-800`
-                : 'border-gray-700 text-gray-500 hover:border-gray-600'
+                ? `${color} border-current bg-gray-100 dark:bg-gray-800`
+                : 'border-gray-300 dark:border-gray-700 text-gray-500 hover:border-gray-400 dark:hover:border-gray-600'
             }`}
           >
             <input
@@ -76,13 +76,13 @@ export default function ReviewForm({ decision, draftAuthor, onClose }) {
         onChange={(e) => setNote(e.target.value)}
         placeholder="Required: reason for this decision (min 10 chars)"
         rows={3}
-        className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+        className="w-full rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
       />
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       <div className="flex items-center justify-end gap-2">
-        <button type="button" onClick={onClose} className="text-xs text-gray-500 hover:text-gray-300 px-3 py-1.5">
+        <button type="button" onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-1.5">
           Cancel
         </button>
         <button
