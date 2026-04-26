@@ -39,6 +39,23 @@ export default function Login() {
     if (err) setFormError(err)
 
     if (oauth) {
+      // If we're in a re-auth popup, send the token back to the opener and close.
+      // postMessage is wrapped in try/catch: between the !closed check and the send,
+      // the opener can navigate cross-origin, making postMessage throw a SecurityError.
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.postMessage(
+            { type: 'QUORUM_OAUTH', oauth, project_id: project ?? '' },
+            window.location.origin,
+          )
+        } catch {
+          // Opener navigated cross-origin between check and send — fall through
+          // to the normal login flow so the popup degrades gracefully.
+        }
+        window.close()
+        return
+      }
+
       setOauthToken(oauth)
       if (project) setProjectId(project)
       // Clear the fragment — tokens should not live in the browser history

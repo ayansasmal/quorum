@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar.jsx'
 import Header from './Header.jsx'
+import SessionWarningBanner from '../session/SessionWarningBanner.jsx'
 
 const PAGE_TITLES = {
   '/':          'Stats',
@@ -21,6 +22,7 @@ export default function Layout({ children }) {
       <Sidebar />
       <div className="flex flex-1 flex-col pl-[var(--sidebar-width)]">
         <Header title={title} />
+        <SessionWarningBanner />
         <main className="flex-1 overflow-auto p-6">
           {children}
         </main>

@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 import { ThemeProvider } from './context/ThemeContext.jsx'
 import { registerTokenGetter, registerLogout, registerRefresher } from './api/client.js'
 import Layout from './components/layout/Layout.jsx'
+import SessionExpiredModal from './components/session/SessionExpiredModal.jsx'
 
 // Pages — lazy-loaded to keep initial bundle small
 import Login     from './pages/Login.jsx'
@@ -50,7 +51,12 @@ function AppSetup({ children }) {
     }
   }, [token])
 
-  return children
+  return (
+    <>
+      {children}
+      <SessionExpiredModal />
+    </>
+  )
 }
 
 /** Redirect unauthenticated users to /login. */
