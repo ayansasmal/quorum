@@ -41,8 +41,8 @@ If `summary.total_pending > 0`, present the items to the human **before starting
 - Show: topic, key, the two conflicting versions, author of each, and the LLM-generated analysis
 - If `stale_warning` is set: mention that the conflict context is stale and has been updated
 - If `more_pending_same_key > 0`: note that more conflicts are queued for this key — resolve in order
-- Ask the human to choose: `supersede` | `coexist` | `reject` | `escalate`
-- Relay their decision back via `remember()` with `resolution: "<choice>"` and a mandatory reason
+- Ask the human to choose: `supersede` | `coexist_split` | `coexist_merge` | `reject` | `escalate`
+- Relay their decision back via `remember()` with the original `conflict_id`, `resolution: "<choice>"`, and a mandatory reason
 
 **For each `draft_review`:**
 - Show: topic, key, content, author, triggered_by (e.g. `reflect`, `pr_merge`)
@@ -182,8 +182,12 @@ When `reflect()` stores entries, a webhook notification fires automatically to a
 configured channel (Slack, webhook URL). **You do not need to poll `pending()` again.**
 The reviewer will be notified and will use `review()` in their next session.
 
-If no webhook is configured, remind the human: "X entries were stored as DRAFT —
-run `pending()` in your next session to review them."
+If no webhook is configured, remind the human:
+> "X entries stored as DRAFT — review them in the **Quorum dashboard → Pending Decisions**
+> (`http://localhost:3002/pending`), or run `pending()` at the start of your next session."
+
+The dashboard is the preferred review surface: it shows the full conflict brief, both
+versions side-by-side, the LLM analysis, and the decision buttons — no terminal needed.
 
 ---
 
@@ -335,6 +339,7 @@ When `pending()` returns conflict briefs, present them clearly:
 
 ```
 🔀 Conflict: auth:token-strategy
+   conflict_id: "cfl_abc123"    ← carry this into remember()
 
   Existing (v2 — ACTIVE, by @senior-architect, confidence 0.85):
     "Use JWT for all services — sessions don't work with Lambda"
@@ -352,25 +357,53 @@ When `pending()` returns conflict briefs, present them clearly:
     persistent server?
 
   Options:
-    A) supersede — incoming replaces existing (requires strong reason)
-    B) coexist   — both are valid in different contexts (split into two keys)
-    C) reject    — incoming is incorrect or premature
-    D) escalate  — needs a senior reviewer before deciding
+    A) supersede      — incoming replaces existing entirely (requires strong reason)
+    B) coexist_split  — fork into two scoped keys (e.g. auth:token-strategy-lambda
+                        and auth:token-strategy-web) — use when BOTH are valid in
+                        different contexts. Requires split_existing_key and
+                        split_incoming_key.
+    C) coexist_merge  — write a single combined entry that reconciles both (use when
+                        the incoming adds nuance rather than contradicting). Requires
+                        merged_content.
+    D) reject         — incoming is incorrect or premature
+    E) escalate       — needs a senior reviewer before deciding
 ```
 
-After the human decides, relay their choice:
+After the human decides, relay their choice. **Always include `conflict_id`** — without
+it `remember()` treats the call as a new write, not a conflict resolution:
 
 ```
 # Option A — supersede
 remember("auth", "token-strategy",
-  "Use JWT for Lambda routes; sessions allowed for server-rendered frontend only",
+  content: "Use JWT for Lambda routes; sessions allowed for server-rendered frontend only",
+  conflict_id: "cfl_abc123",
   resolution: "supersede",
   reason: "Frontend is nginx-backed, not Lambda — sessions are valid there"
 )
 
-# Option C — reject
+# Option B — coexist_split (fork into two scoped keys)
 remember("auth", "token-strategy",
-  ...,
+  content: "...",
+  conflict_id: "cfl_abc123",
+  resolution: "coexist_split",
+  split_existing_key: "token-strategy-lambda",
+  split_incoming_key: "token-strategy-web",
+  reason: "Both are valid — Lambda requires JWT, nginx frontend can use sessions"
+)
+
+# Option C — coexist_merge (single reconciled entry)
+remember("auth", "token-strategy",
+  content: "...",
+  conflict_id: "cfl_abc123",
+  resolution: "coexist_merge",
+  merged_content: "Use JWT for Lambda services (stateless); sessions valid for nginx-backed frontend only",
+  reason: "Incoming adds valid nuance — not a true contradiction"
+)
+
+# Option D — reject
+remember("auth", "token-strategy",
+  content: "...",
+  conflict_id: "cfl_abc123",
   resolution: "reject",
   reason: "Lambda statelessness constraint makes sessions impossible for API routes"
 )
@@ -413,25 +446,287 @@ These are hardcoded invariants — the server will reject violations:
 
 ---
 
-## Adding Quorum to a New Project
+## Onboarding a Project to Quorum
+
+**Trigger phrases:** "add this project to Quorum", "onboard this project", "set up Quorum here",
+"connect this project to Quorum", "initialize Quorum for this repo".
+
+When you detect one of these, follow this protocol **in order**. Execute each step yourself
+using your available tools (Bash, Read, Write) — do not ask the human to run commands
+unless explicitly noted.
+
+---
+
+### Phase 1 — Check for existing setup
 
 ```bash
-# Create project file (committed to repo)
-quorum init
-
-# Or manually:
-echo '{ "gateway_url": "http://localhost:3001", "project_id": "my-team" }' > .quorum
-
-# Register with Claude Code
-claude mcp add quorum -- node /path/to/quorum/src/server.js
-
-# Set identity (choose one):
-export QUORUM_GITHUB_TOKEN=ghp_...    # most authoritative
-export QUORUM_AUTHOR=your-username    # for CI contexts
+# Check for prior onboarding
+ls -la .quorum quorum.config.json .claude/skills/quorum.md 2>/dev/null
 ```
 
-The `.quorum` file is auto-discovered by walking up the directory tree — you do not need
-to set `QUORUM_GATEWAY_URL` or `QUORUM_PROJECT_ID` if the file is present in the project root.
+If `.quorum` already exists → confirm with human before re-onboarding. The `project_id`
+in that file is the active namespace; onboarding again will overwrite config in S3.
+
+---
+
+### Phase 2 — Gather team information
+
+Ask the human (one prompt, not one question at a time):
+
+> "To onboard this project I need:
+> 1. **Project ID** — a short slug, e.g. `platform-team` (default: current directory name)
+> 2. **Team members** — for each person: name, GitHub username, git email, role
+>    (`principal_architect` | `senior_engineer` | `engineer` | `junior`)
+> 3. **Key domains** — any domain that needs stricter governance, e.g. `auth`, `payments`
+>    (optional — standard thresholds apply to all domains otherwise)
+> 4. **Gateway URL** — where Quorum gateway is running (default: `http://localhost:3001`)"
+
+Do not proceed to Phase 3 until you have at least a project ID and one team member.
+
+---
+
+### Phase 3 — Create and validate the project config
+
+Write `quorum.config.json` in the current directory:
+
+```json
+{
+  "project": "<project_id>",
+  "group_id": "<project_id>",
+  "members": [
+    {
+      "name": "<name>",
+      "team": "<team>",
+      "role": "<role>",
+      "github_username": "<github_username>",
+      "git_email": "<git_email>"
+    }
+  ],
+  "roles": {
+    "principal_architect": { "base_confidence": 0.90 },
+    "senior_engineer":     { "base_confidence": 0.80 },
+    "engineer":            { "base_confidence": 0.70 },
+    "junior":              { "base_confidence": 0.60 }
+  },
+  "domains": {},
+  "thresholds": {
+    "conflict_threshold": 0.85,
+    "authority_threshold": 0.20
+  }
+}
+```
+
+Populate `domains` from what the human provided. If they specified required reviewer
+teams for a domain, add them:
+```json
+"auth": { "conflict_threshold": 0.90, "required_reviewer_teams": ["platform"] }
+```
+
+Then validate before uploading:
+
+```bash
+GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+curl -s -X POST "$GATEWAY_URL/config/validate" \
+  -H "Content-Type: application/json" \
+  -d @quorum.config.json
+```
+
+If `"valid": false` → fix the errors reported in the response and re-validate.
+Do not proceed to Phase 4 until `"valid": true`.
+
+---
+
+### Phase 4 — Upload config to S3
+
+```bash
+PROJECT_ID=$(node -e "console.log(require('./quorum.config.json').project)")
+
+# Local dev (LocalStack)
+awslocal s3 cp quorum.config.json \
+  "s3://quorum-configs/${PROJECT_ID}/config.json" \
+  --endpoint-url http://localhost:4566
+
+# Production (real S3) — use this if AWS_ENDPOINT_URL is not set
+# aws s3 cp quorum.config.json "s3://quorum-configs/${PROJECT_ID}/config.json"
+```
+
+Verify the upload:
+```bash
+awslocal s3 ls "s3://quorum-configs/${PROJECT_ID}/" --endpoint-url http://localhost:4566
+```
+
+---
+
+### Phase 5 — Create the `.quorum` discovery file
+
+```bash
+QUORUM_PATH=$(which quorum 2>/dev/null || echo "node $(pwd)/../quorum/cli.js")
+$QUORUM_PATH init \
+  --gateway-url "${QUORUM_GATEWAY_URL:-http://localhost:3001}" \
+  --project-id "$PROJECT_ID" \
+  --yes
+```
+
+This writes `.quorum` to the current directory. The MCP server auto-discovers it on
+startup — engineers do not need to set env vars manually.
+
+---
+
+### Phase 6 — Install identity and register MCP
+
+Tell the human what environment variables to set (they must do this in their shell):
+
+> Set these in your shell profile (`~/.zshrc` or `~/.bashrc`) or in a `.env` file:
+> ```bash
+> export QUORUM_GITHUB_TOKEN=ghp_...   # GitHub PAT with read:user scope — most authoritative
+> # export QUORUM_AUTHOR=your-username  # CI contexts only (no PAT available)
+> ```
+>
+> Then register the MCP server with Claude Code:
+> ```bash
+> claude mcp add quorum -- node /path/to/quorum/src/server.js
+> ```
+
+Verify auth works (ask human to run this after setting their token):
+```bash
+curl -s -X POST "${QUORUM_GATEWAY_URL:-http://localhost:3001}/auth/token" \
+  -H "Content-Type: application/json" \
+  -d "{\"github_token\":\"$QUORUM_GITHUB_TOKEN\",\"project_id\":\"$PROJECT_ID\"}"
+```
+Expected: `{ "token": "eyJ...", "sub": "<github_username>", "project": "<project_id>", ... }`
+
+---
+
+### Phase 7 — Install the Quorum skill
+
+```bash
+QUORUM_REPO_PATH=$(dirname $(which quorum 2>/dev/null) || echo "../quorum")
+mkdir -p .claude/skills
+cp "${QUORUM_REPO_PATH}/../skill/SKILL.md" .claude/skills/quorum.md
+```
+
+If the path resolution fails, ask the human for the Quorum repo path and copy manually.
+
+---
+
+### Phase 8 — Ingest existing project knowledge
+
+This is the highest-value onboarding step. The project's CLAUDE.md, MEMORY.md, and
+past Claude Code session memories contain institutional knowledge that should be governed
+— not just sitting in flat files.
+
+**8a — Read CLAUDE.md**
+
+```bash
+cat CLAUDE.md 2>/dev/null || cat .claude/CLAUDE.md 2>/dev/null
+```
+
+Extract every statement that is:
+- An architectural decision ("we use X because Y")
+- A constraint ("do not do X", "always do Y")
+- An established pattern ("errors follow RFC 7807")
+- A named convention ("all tables use snake_case")
+
+For each extracted statement, call `remember()` — classify it as the appropriate domain
+(`auth`, `api`, `db`, `infra`, `testing`, etc.) and set a key that matches the convention
+table in this skill:
+
+```
+remember(
+  topic: "api",
+  key: "error-standards",
+  content: "All API errors follow RFC 7807 Problem Detail format: type, title, status, detail",
+  confidence: 0.75,
+  tags: ["api", "errors", "conventions"]
+)
+```
+
+**All entries enter as DRAFT with `triggered_by: onboard`** — nothing becomes ACTIVE
+without human review. This is intentional.
+
+**8b — Read MEMORY.md** (Claude Code auto-memory)
+
+```bash
+# Claude Code stores auto-memory here:
+cat ~/.claude/projects/$(echo $PWD | tr '/' '-')/memory/MEMORY.md 2>/dev/null
+# Or check the .claude/memory/ directory in the project:
+cat .claude/memory/MEMORY.md 2>/dev/null
+```
+
+Extract the same categories as 8a. Pay special attention to:
+- Architecture choices recorded across sessions
+- Decisions made about patterns or technology choices
+- Constraints that emerged from debugging sessions
+
+**8c — Extract from recent session transcripts** (optional, ask human first)
+
+> "I can also extract knowledge from your recent Claude Code session transcripts.
+> These contain decisions made during actual work sessions. Want me to do that?
+> (I will only read sessions from this project directory.)"
+
+If yes, find the session file:
+```bash
+ls -lt ~/.claude/projects/$(echo $PWD | tr '/' '-')/*.jsonl 2>/dev/null | head -5
+```
+
+Read the most recent 1–3 sessions. Look for:
+- Messages where a decision was stated with a reason
+- Messages where a constraint was discovered
+- Any `reflect()` calls that were made (these may already be in Quorum as DRAFT)
+
+Do not re-ingest anything that is already in Quorum — call `search()` first for
+each candidate to check for duplicates.
+
+---
+
+### Phase 9 — Commit onboarding files
+
+```bash
+git add quorum.config.json .quorum .claude/skills/quorum.md
+git commit -m "chore: onboard project to Quorum governed memory
+
+- quorum.config.json: team members, roles, domain thresholds
+- .quorum: gateway auto-discovery file
+- .claude/skills/quorum.md: Quorum session skill for Claude Code"
+```
+
+Do not commit `.env` or files containing `QUORUM_GITHUB_TOKEN`.
+
+---
+
+### Phase 10 — Verify the connection
+
+Tell the human to start a fresh Claude Code session and run:
+
+> "What pending Quorum decisions are there?"
+
+Claude should call `pending()` and return either the DRAFT entries from Phase 8
+or "No pending items — ready to start."
+
+If Quorum is unreachable, check:
+```bash
+curl http://localhost:3001/health   # gateway health (all 4 components)
+```
+
+---
+
+### Onboarding summary
+
+| Phase | What happens |
+|-------|-------------|
+| 1 | Check for existing setup |
+| 2 | Gather team info (one prompt) |
+| 3 | Write + validate `quorum.config.json` |
+| 4 | Upload config to S3 |
+| 5 | Create `.quorum` discovery file |
+| 6 | Identity env vars + MCP registration |
+| 7 | Copy SKILL.md to `.claude/skills/` |
+| 8 | Ingest CLAUDE.md, MEMORY.md, session transcripts as DRAFT |
+| 9 | Commit onboarding files |
+| 10 | Verify connection |
+
+The `.quorum` file is auto-discovered by walking up the directory tree — engineers
+in any subdirectory of the repo will automatically connect to the right project.
 
 ---
 
@@ -449,11 +744,19 @@ During work:
 After task:
   reflect(task_summary, decisions, patterns)  ← extract learnings
 
-Review pending:
-  review("approve", "topic", "key", "reason")
+Review pending (dashboard preferred):
+  http://localhost:3002/pending          ← full UI with side-by-side diff
+  review("approve", "topic", "key", "reason")  ← or relay from Claude
   review("reject", "topic", "key", "reason")
+
+Conflict resolution (always include conflict_id):
+  remember(..., conflict_id: "cfl_...", resolution: "supersede"|"coexist_split"|"coexist_merge"|"reject"|"escalate", reason: "...")
 
 History and audit:
   history("topic", "key")               ← version timeline
   export("topic", "markdown")           ← human-readable dump
+
+Onboarding a new project:
+  "add this project to Quorum"          ← triggers 10-phase onboarding protocol
+  "onboard this project"                ← same trigger
 ```
