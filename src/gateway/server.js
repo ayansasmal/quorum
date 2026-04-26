@@ -34,7 +34,8 @@
  */
 
 import express from 'express'
-import pg from 'pg'
+import pg      from 'pg'
+import net     from 'net'
 import { loadKeys } from './keys.js'
 import authRoutes      from './routes/auth.js'
 import oauthRoutes     from './routes/oauth.js'
@@ -93,20 +94,71 @@ app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) //
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 
+/**
+ * TCP reachability check — returns true if a TCP connection can be established.
+ * Used to probe FalkorDB (Redis protocol, port 6379) without a full Redis client.
+ * @param {string} host
+ * @param {number} port
+ * @param {number} [timeoutMs=3000]
+ * @returns {Promise<boolean>}
+ */
+function tcpReachable(host, port, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    socket.setTimeout(timeoutMs)
+    socket.on('connect', () => { socket.destroy(); resolve(true)  })
+    socket.on('error',   () => { socket.destroy(); resolve(false) })
+    socket.on('timeout', () => { socket.destroy(); resolve(false) })
+    socket.connect(port, host)
+  })
+}
+
 app.get('/health', async (_req, res) => {
-  const [pgOk, graphitiOk] = await Promise.all([
+  const GRAPHITI_URL  = process.env.GRAPHITI_URL     ?? 'http://graphiti:8000'
+  const FALKORDB_HOST = process.env.FALKORDB_HOST    ?? 'falkordb'
+  const FALKORDB_PORT = parseInt(process.env.FALKORDB_PORT ?? '6379', 10)
+  const S3_BUCKET     = process.env.QUORUM_CONFIG_BUCKET ?? 'quorum-configs'
+
+  const [pgOk, graphitiOk, falkorOk, s3Ok] = await Promise.all([
+    // PostgreSQL — direct query
     pool.query('SELECT 1').then(() => true).catch(() => false),
-    fetch(`${process.env.GRAPHITI_URL ?? 'http://graphiti:8000'}/health`)
-      .then((r) => r.ok)
-      .catch(() => false),
+
+    // Graphiti sidecar — /health endpoint
+    fetch(`${GRAPHITI_URL}/health`).then((r) => r.ok).catch(() => false),
+
+    // FalkorDB — TCP reachability (Redis protocol on port 6379)
+    tcpReachable(FALKORDB_HOST, FALKORDB_PORT),
+
+    // S3 / LocalStack — HeadBucket to verify config bucket is accessible
+    (async () => {
+      try {
+        const { S3Client, HeadBucketCommand } = await import('@aws-sdk/client-s3')
+        const s3 = new S3Client({
+          region:   process.env.AWS_REGION       ?? 'us-east-1',
+          endpoint: process.env.AWS_ENDPOINT_URL,
+          forcePathStyle: !!process.env.AWS_ENDPOINT_URL,
+          credentials: process.env.AWS_ENDPOINT_URL
+            ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'test', secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test' }
+            : undefined,
+        })
+        await s3.send(new HeadBucketCommand({ Bucket: S3_BUCKET }))
+        return true
+      } catch {
+        return false
+      }
+    })(),
   ])
 
-  const status = pgOk && graphitiOk ? 'healthy' : 'degraded'
-  res.status(status === 'healthy' ? 200 : 503).json({
+  const allOk  = pgOk && graphitiOk && falkorOk && s3Ok
+  const status = allOk ? 'healthy' : 'degraded'
+
+  res.status(allOk ? 200 : 503).json({
     status,
     components: {
-      postgresql: pgOk      ? 'connected' : 'unavailable',
+      postgresql: pgOk       ? 'connected' : 'unavailable',
       graphiti:   graphitiOk ? 'connected' : 'unavailable',
+      falkordb:   falkorOk   ? 'connected' : 'unavailable',
+      s3:         s3Ok        ? 'connected' : 'unavailable',
     },
     timestamp: new Date().toISOString(),
   })

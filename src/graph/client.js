@@ -11,7 +11,14 @@
  * Gateway mode: when QUORUM_GATEWAY_URL is set, Graphiti calls are proxied
  * through the gateway (/graphiti/*) instead of calling Graphiti directly.
  * The gateway injects the project claim as group_id automatically.
+ *
+ * MCP session protocol (streamable-http transport):
+ *   1. POST /mcp with method="initialize" → server returns Mcp-Session-Id header
+ *   2. All subsequent tool calls include that header
+ *   3. 400 responses indicate expired/invalid session → re-initialize and retry
  */
+
+import { randomUUID } from 'crypto'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
@@ -80,11 +87,76 @@ export class GraphitiResponseError extends Error {
   }
 }
 
+// ── MCP session management ─────────────────────────────────────────────────────
+
+/** Active MCP session ID (per process — one session shared across all tool calls). */
+let _sessionId = null
+
+/**
+ * Initialize an MCP session with Graphiti via the streamable-http handshake.
+ * Stores the returned Mcp-Session-Id for reuse on subsequent calls.
+ *
+ * @param {string} endpoint  — full URL to /mcp
+ * @param {Record<string, string>} [authHeaders] — optional Authorization header
+ * @returns {Promise<string>} the session ID
+ */
+async function initSession(endpoint, authHeaders = {}) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept':        'application/json, text/event-stream',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id:      1,
+      method:  'initialize',
+      params:  {
+        protocolVersion: '2024-11-05',
+        capabilities:    {},
+        clientInfo:      { name: 'quorum', version: '1.0' },
+      },
+    }),
+  })
+
+  const sessionId = res.headers.get('mcp-session-id')
+  if (!sessionId) throw new GraphitiConnectionError('Graphiti MCP did not return a session ID')
+  _sessionId = sessionId
+  return sessionId
+}
+
+/**
+ * Parse the MCP streamable-http response (SSE envelope or plain JSON).
+ * Extracts the JSON-RPC result and returns the tool's structured output.
+ *
+ * @param {Response} response
+ * @returns {Promise<unknown>}
+ */
+async function parseMcpResponse(response) {
+  const text = await response.text()
+  // SSE format: "event: message\ndata: {...}\n\n"
+  const m = text.match(/^data: (.+)$/m)
+  const envelope = m ? JSON.parse(m[1]) : JSON.parse(text)
+  if (envelope.error) {
+    throw new GraphitiResponseError(envelope.error.message, 400, envelope.error)
+  }
+  const result = envelope.result
+  // Prefer structuredContent (machine-readable), fall back to parsed text content
+  if (result?.structuredContent?.result !== undefined) return result.structuredContent.result
+  if (result?.content?.[0]?.text) {
+    try { return JSON.parse(result.content[0].text) } catch { return { message: result.content[0].text } }
+  }
+  return result
+}
+
 // ── Internal HTTP helpers ──────────────────────────────────────────────────────
 
 /**
- * POST to Graphiti's MCP endpoint with exponential backoff retry.
- * Retries connection errors only — not 4xx responses.
+ * POST to Graphiti's MCP endpoint using JSON-RPC 2.0 over streamable-http.
+ * Manages the MCP session automatically (initialize on first call, re-initialize on 400).
+ * Retries connection errors with exponential backoff.
+ *
  * @param {string} tool
  * @param {Record<string, unknown>} params
  * @param {number} [maxRetries=3]
@@ -96,7 +168,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
   }
 
   const { baseUrl, useGateway } = graphitiTarget()
-  const endpoint = useGateway ? `${baseUrl}/mcp` : `${baseUrl}/mcp`
+  const endpoint = `${baseUrl}/mcp`
 
   // In gateway mode, include Authorization header from the gateway client
   let authHeaders = {}
@@ -113,6 +185,16 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Ensure a live MCP session exists before making the tool call
+    if (!_sessionId) {
+      try {
+        await initSession(endpoint, authHeaders)
+      } catch (err) {
+        throw new GraphitiConnectionError(
+          `Could not reach Graphiti at ${baseUrl}: ${err.message}`, err)
+      }
+    }
+
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
     }
@@ -120,12 +202,24 @@ async function callGraphiti(tool, params, maxRetries = 3) {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ tool, params }),
+        headers: {
+          'Content-Type':   'application/json',
+          'Accept':         'application/json, text/event-stream',
+          'Mcp-Session-Id': _sessionId,
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id:      Date.now(),
+          method:  'tools/call',
+          params:  { name: tool, arguments: params },
+        }),
       })
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
+        // 400 usually means session expired — clear it so next attempt re-initializes
+        if (response.status === 400) _sessionId = null
         throw new GraphitiResponseError(
           `Graphiti responded ${response.status} for tool '${tool}'`,
           response.status,
@@ -133,9 +227,13 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         )
       }
 
-      return await response.json()
+      return await parseMcpResponse(response)
     } catch (err) {
-      if (err instanceof GraphitiResponseError) throw err
+      if (err instanceof GraphitiResponseError) {
+        // Retry on 400 (session re-init) but not on other 4xx errors
+        if (err.status === 400 && attempt < maxRetries) { lastError = err; continue }
+        throw err
+      }
       lastError = new GraphitiConnectionError(
         `Could not reach Graphiti at ${GRAPHITI_URL}: ${err.message}`,
         err,
@@ -156,14 +254,15 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  * @returns {Promise<{ episode_id: string }>}
  */
 export async function addEpisode(content, metadata, groupId = GROUP_ID) {
-  return callGraphiti('add_episode', {
-    name: metadata.key,
-    episode_body: content,
-    group_id: groupId,
+  const uuid = randomUUID()
+  await callGraphiti('add_memory', {
+    name:               metadata.key,
+    episode_body:       content,
+    group_id:           groupId,
     source_description: metadata.source,
-    entity_types: metadata.entityType ? [metadata.entityType] : undefined,
-    metadata: { tags: metadata.tags ?? [] },
+    uuid,
   })
+  return { episode_id: uuid }
 }
 
 /**
@@ -177,40 +276,16 @@ export async function addEpisode(content, metadata, groupId = GROUP_ID) {
  * @returns {Promise<{ episode_id: string }>}
  */
 export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId = GROUP_ID) {
-  const newEpisode = await callGraphiti('add_episode', {
-    name: metadata.key,
-    episode_body: newContent,
-    group_id: groupId,
+  const uuid = randomUUID()
+  await callGraphiti('add_memory', {
+    name:               metadata.key,
+    episode_body:       `${newContent}\n\n[supersedes:${oldEpisodeId}] ${metadata.reason ?? 'updated'}`,
+    group_id:           groupId,
     source_description: metadata.source,
-    entity_types: metadata.entityType ? [metadata.entityType] : undefined,
-    metadata: {
-      tags: metadata.tags ?? [],
-      supersedes: oldEpisodeId,
-      supersedes_reason: metadata.reason,
-    },
+    uuid,
   })
 
-  // Create the SUPERSEDES relationship edge in the graph
-  // so the evolution chain is traversable without SQL
-  try {
-    await callGraphiti('add_episode', {
-      name: `${metadata.key}:supersedes_link`,
-      episode_body: `Version supersedes previous. Reason: ${metadata.reason ?? 'updated'}`,
-      group_id: groupId,
-      source_description: 'quorum:versioning',
-      metadata: {
-        relationship: 'SUPERSEDES',
-        from_episode: newEpisode.episode_id,
-        to_episode: oldEpisodeId,
-        reason: metadata.reason,
-      },
-    })
-  } catch {
-    // Non-fatal — the primary episode is stored; graph edge creation failed.
-    // The SQL bidirectional links remain the authoritative version chain.
-  }
-
-  return newEpisode
+  return { episode_id: uuid }
 }
 
 /**
@@ -221,10 +296,9 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, 
  * @returns {Promise<Array<{ episode_id: string, metadata: unknown }>>}
  */
 export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
-  const result = await callGraphiti('search_facts', {
-    query: `supersedes evolution chain for ${episodeId}`,
+  const result = await callGraphiti('search_memory_facts', {
+    query:     `supersedes evolution chain for ${episodeId}`,
     group_ids: [groupId],
-    metadata_filter: { relationship: 'SUPERSEDES' },
   }).catch(() => ({ facts: [] }))
 
   return result.facts ?? []
@@ -240,7 +314,7 @@ export async function searchNodes(query, options = {}) {
   return callGraphiti('search_nodes', {
     query,
     group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
-    limit: options.limit ?? 10,
+    max_nodes:  options.limit ?? 10,
   })
 }
 
@@ -251,7 +325,7 @@ export async function searchNodes(query, options = {}) {
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  return callGraphiti('search_facts', {
+  return callGraphiti('search_memory_facts', {
     query,
     group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
   })
@@ -263,7 +337,7 @@ export async function searchFacts(query, options = {}) {
  * @returns {Promise<{ episodes: Array<unknown> }>}
  */
 export async function getEpisodes(groupId = GROUP_ID) {
-  return callGraphiti('get_episodes', { group_id: groupId })
+  return callGraphiti('get_episodes', { group_ids: [groupId] })
 }
 
 /**
@@ -274,17 +348,12 @@ export async function getEpisodes(groupId = GROUP_ID) {
  * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  */
 export async function deleteEpisodeSoft(episodeId, meta, groupId = GROUP_ID) {
-  return callGraphiti('add_episode', {
-    name: `${meta.key}:deprecated`,
-    episode_body: `Knowledge deprecated. Reason: ${meta.reason}`,
-    group_id: groupId,
+  return callGraphiti('add_memory', {
+    name:               `${meta.key}:deprecated`,
+    episode_body:       `Knowledge deprecated by ${meta.author}. Reason: ${meta.reason}. Deprecated episode: ${episodeId}`,
+    group_id:           groupId,
     source_description: 'quorum:deprecation',
-    metadata: {
-      status: 'DEPRECATED',
-      deprecated_episode: episodeId,
-      deprecated_by: meta.author,
-      deprecated_reason: meta.reason,
-    },
+    uuid:               randomUUID(),
   })
 }
 
