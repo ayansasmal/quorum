@@ -27,52 +27,151 @@ Graphiti resolves conflicts automatically by recency. Quorum questions whether r
 
 ## Component Architecture
 
+```mermaid
+graph TD
+    CC[Claude Code / AI Agents] -->|MCP stdio| MCP[Quorum MCP Server<br/>Node.js :8000]
+    Browser[Dashboard<br/>React :3002] -->|HTTPS| Nginx[Nginx<br/>:3002]
+    Nginx -->|proxy /auth /api /config /pg /graphiti| GW[Quorum Gateway<br/>Express :3001]
+    MCP -->|QUORUM_GATEWAY_URL set| GW
+    MCP -->|direct - no gateway| PG[(PostgreSQL<br/>Audit Store :5432)]
+    GW -->|JWT-gated proxy /graphiti/*| Graphiti[Graphiti MCP<br/>Python :8001]
+    GW --> PG
+    GW -->|HeadBucket / GetObject| S3[S3 / LocalStack<br/>Project configs :4566]
+    Graphiti --> FalkorDB[(FalkorDB<br/>:6379)]
 ```
-┌──────────────────────────────────────────────────────┐
-│                    Quorum                            │
-│                                                      │
-│  ┌─────────────┐    ┌───────────────────────────┐   │
-│  │ MCP Server  │    │   Governance Layer         │   │
-│  │ (Node.js)   │    │                           │   │
-│  │             │    │  conflict.js              │   │
-│  │ remember()  │───►│  → semantic similarity    │   │
-│  │ recall()    │    │  → LLM contradiction check│   │
-│  │ search()    │    │  → authority comparison   │   │
-│  │ reflect()   │    │  → human escalation       │   │
-│  │ export()    │    │                           │   │
-│  │ forget()    │    │  authority.js             │   │
-│  └──────┬──────┘    │  → confidence scoring     │   │
-│         │           │  → recency weighting      │   │
-│         │           │  → access frequency       │   │
-│         │           │                           │   │
-│         │           │  provenance.js            │   │
-│         │           │  → author tracking        │   │
-│         │           │  → lineage chain          │   │
-│         │           │  → audit log              │   │
-│         │           └──────────┬────────────────┘   │
-│         └──────────────────────┘                    │
-│                    │                                 │
-│         ┌──────────▼───────────┐                    │
-│         │   Graphiti Engine    │                    │
-│         │                      │                    │
-│         │  add_episode()       │                    │
-│         │  search_nodes()      │                    │
-│         │  search_facts()      │                    │
-│         │  get_episodes()      │                    │
-│         │                      │                    │
-│         │  Bi-temporal model   │                    │
-│         │  Entity extraction   │                    │
-│         │  Hybrid search       │                    │
-│         └──────────┬───────────┘                    │
-│                    │                                 │
-│         ┌──────────▼───────────┐                    │
-│         │   Graph Database     │                    │
-│         │  FalkorDB (default)  │                    │
-│         │  Neo4j               │                    │
-│         │  Amazon Neptune      │                    │
-│         └──────────────────────┘                    │
-└──────────────────────────────────────────────────────┘
+
+The MCP server hosts the governance layer (`conflict.js`, `authority.js`, `provenance.js`, `confidence.js`, `constitutional.js`) and the audit pipeline. When `QUORUM_GATEWAY_URL` is set the MCP server proxies all Graphiti calls through the Gateway, which enforces JWT auth and injects the project's `group_id`. When unset (single-tenant local mode) the MCP server talks to Graphiti directly. The audit secondary store (PostgreSQL) is always written by the MCP server itself — the Gateway also exposes a JWT-gated REST surface on `/pg/*` for the Dashboard.
+
+---
+
+## Quorum Gateway
+
+The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fronts every shared backend. It is the single trust boundary between humans/agents and the data plane (Graphiti, PostgreSQL, S3). The MCP server, the Dashboard, and external automations all authenticate against the Gateway with ES256 JWTs.
+
+### API Surface
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/auth/github` | Initiate GitHub OAuth (redirects to GitHub) |
+| GET | `/auth/callback` | OAuth redirect handler — exchanges `code` for GitHub token, then issues a Quorum JWT |
+| POST | `/auth/token` | Exchange a GitHub PAT for a Quorum JWT (verifies the PAT, looks up the member in project config, signs ES256 JWT with `group_id` and role claims) |
+| POST | `/auth/refresh` | Refresh an unexpired JWT — extends `exp` without re-running OAuth |
+| GET | `/.well-known/jwks.json` | Public JWKS for ES256 verification — consumed by MCP server, Dashboard, and any third-party verifier |
+| POST | `/graphiti/*` | JWT-authenticated proxy to Graphiti. `group_id` is injected from the JWT claim (clients cannot spoof project scope) |
+| GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over the PostgreSQL audit store — used by the Dashboard for audit timelines and version history |
+| GET | `/config/:projectId` | Fetch a project's `quorum.config.json` from S3 (cached) |
+| POST | `/config/validate` | Validate a config payload against the schema before write |
+| GET | `/projects` | List projects the authenticated user is a member of |
+| POST | `/bump/:topic/:key` | Confidence bump on recall — `X-Quorum-Token` shared-secret auth, called by the MCP server |
+| GET | `/api/stats` | Dashboard BFF — graph counts, confidence distribution, recent activity |
+| GET | `/api/graph` | Dashboard BFF — node + edge payload for Cytoscape rendering |
+| GET | `/api/knowledge` | Dashboard BFF — paginated knowledge browser |
+| GET | `/api/search` | Dashboard BFF — semantic search proxied to Graphiti |
+| POST | `/api/review/:id` | Dashboard BFF — approve / reject / request_changes on a DRAFT entry |
+| POST | `/api/bump/:topic/:key` | Dashboard BFF — manual confidence bump from a logged-in user |
+| GET | `/health` | Composite health probe — checks PostgreSQL, Graphiti, FalkorDB (TCP), and S3 (HeadBucket) |
+
+### Auth Flow
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Gateway
+    participant GitHub
+    participant S3
+    Browser->>Gateway: GET /auth/github
+    Gateway->>GitHub: redirect to OAuth consent
+    GitHub-->>Browser: authorize
+    Browser->>Gateway: GET /auth/callback?code=...
+    Gateway->>GitHub: exchange code for access_token
+    GitHub-->>Gateway: GitHub user profile
+    Gateway->>S3: GET project config
+    S3-->>Gateway: members, roles, group_id
+    Gateway->>Gateway: match GitHub username → member<br/>sign ES256 JWT
+    Gateway-->>Browser: { jwt, exp, project }
 ```
+
+PAT-based exchange (`POST /auth/token`) follows the same shape but skips the redirect: the caller submits a GitHub PAT, the Gateway verifies it against `GET https://api.github.com/user`, then performs the same member lookup and JWT signing.
+
+### Graphiti Proxy Behaviour
+
+Every `/graphiti/*` call is intercepted by JWT middleware. The Gateway:
+
+1. Verifies the ES256 signature against its private key (matching JWKS).
+2. Extracts `group_id`, `sub` (GitHub username), and `role` from the JWT claims.
+3. Rewrites the request body to inject `group_id` — overwriting any client-supplied value. This means a JWT minted for `project-A` cannot be used to read or write `project-B`'s graph, regardless of payload manipulation.
+4. Forwards the rewritten request to the Graphiti sidecar.
+5. Streams the SSE/JSON response back to the caller unchanged.
+
+### S3-Backed Project Config
+
+Project configs live at `s3://quorum-configs/<project_id>/config.json`. The Gateway caches them in-process with a short TTL. Schema (validated on `POST /config/validate`):
+
+```json
+{
+  "project": "macquarie-payments",
+  "group_id": "macquarie-payments",
+  "members": [
+    { "name": "Ayan", "team": "platform", "role": "principal_architect",
+      "github_username": "ayansasmal", "git_email": "ayan@example.com" }
+  ],
+  "roles": {
+    "principal_architect": { "base_confidence": 0.9 },
+    "senior_engineer":     { "base_confidence": 0.75 },
+    "engineer":            { "base_confidence": 0.6 }
+  },
+  "domains": {
+    "auth": { "conflict_threshold": 0.85, "required_reviewer_teams": ["platform"] }
+  },
+  "thresholds": { "authority": 0.20, "conflict": 0.85 }
+}
+```
+
+The MCP server discovers its project context by walking up the working-directory tree looking for a `.quorum` file. The file sets `QUORUM_GATEWAY_URL` and `QUORUM_PROJECT_ID` — these together define which Gateway is used and which config governs this session.
+
+---
+
+## Dashboard Architecture
+
+The Dashboard (`dashboard/`) is a React + Vite SPA on port 3002, served via Nginx in production. It is the human surface for everything the MCP server does: browsing the graph, resolving conflicts, approving drafts, walking the audit timeline, and editing project config.
+
+### Pages
+
+| Page | Renders |
+|---|---|
+| Stats | Aggregate counts (active / superseded / draft / deprecated), confidence histogram, recent activity feed |
+| Knowledge Graph | Cytoscape.js-rendered force-directed graph. Click a node for full detail, supersession chain, and outbound edges |
+| Pending Decisions | DRAFT entries awaiting review and unresolved CONFLICTS_WITH edges. Approve / reject / request_changes inline |
+| Knowledge Browser | Paginated list filterable by topic, domain, status, author. Click through to version history |
+| Audit Timeline | Append-only feed from PostgreSQL — every `remember`, `forget`, `review`, and conflict resolution with SHA256 chain link |
+| Config Editor | Edit `quorum.config.json` for the current project. Validates against schema before PUT |
+| System Status | Live `/health` probe — PostgreSQL, Graphiti, FalkorDB, S3 component breakdown |
+
+### Session Management
+
+The Dashboard uses a dual-timer pattern around the JWT `exp` claim:
+
+- **Warning banner** — appears when `exp - now < 5 min`. Counts down. Clicking "Stay signed in" calls `POST /auth/refresh` and silently extends the session.
+- **Expired modal** — appears when `now >= exp`. Blocks the UI. Clicking "Sign in again" opens a popup window to `/auth/github`. On successful re-auth, the popup posts the new JWT back to the parent window and the modal dismisses without losing in-progress state.
+
+Both timers are recalculated whenever a new JWT lands (initial sign-in, refresh, or popup re-auth).
+
+### Nginx Proxy Config
+
+Nginx serves the static SPA bundle and proxies API traffic to the Gateway:
+
+```
+location /auth      → http://gateway:3001
+location /api       → http://gateway:3001
+location /config    → http://gateway:3001
+location /health    → http://gateway:3001
+location /pg        → http://gateway:3001
+location /graphiti  → http://gateway:3001
+location /projects  → http://gateway:3001
+location /          → static SPA (index.html fallback)
+```
+
+The browser never talks to Graphiti, PostgreSQL, or S3 directly — every backend call goes through Nginx → Gateway, which enforces auth and project scope.
 
 ---
 
@@ -82,15 +181,32 @@ Graphiti resolves conflicts automatically by recency. Quorum questions whether r
 
 Graphiti is **Python-only** — it has no npm or Node.js package. Quorum (Node.js) calls Graphiti via HTTP. Graphiti runs as a Python Docker sidecar alongside Quorum.
 
-```
-Quorum MCP Server (Node.js :8000)
-        ↓ HTTP/MCP calls
-Graphiti MCP Server (Python :8001)    ← Docker sidecar
-        ↓
-FalkorDB (:6379)
+```mermaid
+graph TD
+    Q[Quorum MCP Server<br/>Node.js :8000] -->|HTTP/MCP calls| G[Graphiti MCP Server<br/>Python :8001 - Docker sidecar]
+    G --> F[(FalkorDB :6379)]
 ```
 
 Quorum never imports Graphiti. It calls it like any other HTTP service.
+
+### MCP Transport — Streamable HTTP + Session Handshake
+
+Graphiti's MCP server speaks the **streamable-http** transport: JSON-RPC 2.0 over `POST /mcp`. The first call must be an `initialize` request — Graphiti returns an `Mcp-Session-Id` HTTP header which the client is required to echo back on every subsequent call. The Quorum Graphiti client (`src/graph/client.js`) caches this session ID in-process and reuses it for the lifetime of the connection.
+
+Responses arrive in one of two shapes — the client must handle both:
+
+- **SSE envelope** — `Content-Type: text/event-stream`, body framed as `data: {...json...}\n\n`
+- **Plain JSON** — `Content-Type: application/json`, body is the raw JSON-RPC response
+
+The current Graphiti tool names differ from earlier versions of this document:
+
+| Quorum operation | Graphiti tool name |
+|---|---|
+| Store knowledge | `add_memory` (was `add_episode`) |
+| Search facts/edges | `search_memory_facts` (was `search_facts`) |
+| Search nodes | `search_memory_nodes` |
+
+The Quorum client also generates UUIDs client-side and passes them as the `uuid` parameter on `add_memory` calls — this lets the audit pipeline reference the Graphiti node ID before the call returns.
 
 ### LLM Configuration for Graphiti Sidecar
 
@@ -131,19 +247,21 @@ Note:         Graphiti supports Anthropic direct API but warns structured
 ### HTTP Calls from Quorum to Graphiti
 
 ```
-remember()  →  POST /mcp {tool: "search_nodes"}   (conflict check)
-            →  POST /mcp {tool: "add_episode"}    (store if clear)
+remember()  →  POST /mcp {tool: "search_memory_nodes"}  (conflict check)
+            →  POST /mcp {tool: "add_memory"}           (store if clear)
 
-recall()    →  POST /mcp {tool: "search_nodes"}   (exact match)
-            →  POST /mcp {tool: "search_facts"}   (related edges)
+recall()    →  POST /mcp {tool: "search_memory_nodes"}  (exact match)
+            →  POST /mcp {tool: "search_memory_facts"}  (related edges)
 
-search()    →  POST /mcp {tool: "search_nodes"}   (semantic)
-            →  POST /mcp {tool: "search_facts"}   (relationships)
+search()    →  POST /mcp {tool: "search_memory_nodes"}  (semantic)
+            →  POST /mcp {tool: "search_memory_facts"}  (relationships)
 
-reflect()   →  POST /mcp {tool: "add_episode"}    (batch store learnings)
+reflect()   →  POST /mcp {tool: "add_memory"}           (batch store learnings)
 
-forget()    →  POST /mcp {tool: "delete_episode"} (soft via metadata)
+forget()    →  (soft deprecation — new SUPERSEDED version, no Graphiti delete)
 ```
+
+Every call carries the `Mcp-Session-Id` header from the `initialize` handshake.
 
 
 ---
@@ -361,50 +479,20 @@ RELATES_TO      → general semantic relationship
 
 ### Conflict Detection
 
-```
-New knowledge arrives via remember()
-        │
-        ▼
-graphiti.search_nodes(query=content, limit=5)
-        │
-        ▼
-For each result: cosine_similarity(new, existing)
-        │
-        ▼
-similarity > CONFLICT_THRESHOLD (default 0.85)?
-   YES                          NO
-    │                            │
-    ▼                            ▼
-LLM call:                    Store normally
-"Does new contradict         via add_episode()
-existing? YES/NO + reason"
-    │
-    ▼
-Contradiction confirmed?
-   YES                 NO
-    │                   │
-    ▼                   ▼
-Authority           Store as
-comparison          related node
-    │               (RELATES_TO edge)
-    ▼
-calculateAuthority(incoming) vs calculateAuthority(existing)
-    │
-    ▼
-delta > AUTHORITY_THRESHOLD?
-   YES                          NO
-    │                            │
-    ▼                            ▼
-Auto-supersede              Surface to human:
-+ notify author             structured decision
-+ store reason              A) Supersede (reason required)
-                            B) Coexist (context required)
-                            C) Reject
-                                 │
-                                 ▼
-                            Resolution stored
-                            CONFLICTS_WITH edge resolved
-                            Full audit trail preserved
+```mermaid
+flowchart TD
+    A[New knowledge arrives via remember] --> B[graphiti.search_memory_nodes<br/>query=content, limit=5]
+    B --> C[Cosine similarity<br/>new vs each existing]
+    C --> D{similarity ><br/>CONFLICT_THRESHOLD<br/>default 0.85?}
+    D -- No --> E[Store normally<br/>via add_memory]
+    D -- Yes --> F[LLM contradiction check<br/>'Does new contradict existing?']
+    F --> G{Contradiction<br/>confirmed?}
+    G -- No --> H[Store as related node<br/>RELATES_TO edge]
+    G -- Yes --> I[calculateAuthority<br/>incoming vs existing]
+    I --> J{delta ><br/>AUTHORITY_THRESHOLD?}
+    J -- Yes --> K[Auto-supersede<br/>+ notify author<br/>+ store reason]
+    J -- No --> L[Surface to human:<br/>A Supersede / B Coexist / C Reject]
+    L --> M[Resolution stored<br/>CONFLICTS_WITH resolved<br/>Full audit trail preserved]
 ```
 
 ### Authority Scoring
@@ -615,27 +703,14 @@ Quorum connects to Jira and Confluence via the published Atlassian MCP server. T
 
 ### Architecture
 
-```
-Quorum enrichment trigger
-        ↓
-Atlassian MCP Server (published by Atlassian, OAuth auth)
-        ↓
-Atlassian Cloud (Jira + Confluence)
-        ↓
-Raw Atlassian content
-        ↓
-Quorum Enrichment Agent (Claude)
-  → extracts decisions, requirements, constraints, patterns
-  → identifies supersede relationships
-  → diagrams handled separately via image → Mermaid flow (human-assisted)
-        ↓
-Quorum Governance Pipeline (same pipeline as always)
-  → conflict check
-  → enters DRAFT
-  → reviewer notified
-        ↓
-Graph updated with enriched provenance
-  (source: jira:AUTH-247 or confluence:page_id)
+```mermaid
+graph TD
+    T[Quorum enrichment trigger] --> M[Atlassian MCP Server<br/>OAuth auth]
+    M --> AC[Atlassian Cloud<br/>Jira + Confluence]
+    AC --> R[Raw Atlassian content]
+    R --> EA[Quorum Enrichment Agent - Claude<br/>extracts decisions, requirements,<br/>constraints, patterns;<br/>diagrams via image to Mermaid flow]
+    EA --> GP[Quorum Governance Pipeline<br/>conflict check → DRAFT → reviewer notified]
+    GP --> G[Graph updated with enriched provenance<br/>source: jira:AUTH-247 or confluence:page_id]
 ```
 
 ### Enrichment Triggers

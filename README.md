@@ -51,41 +51,26 @@ Quorum checks existing knowledge graph
 - **Authority-weighted writes** — a junior engineer's addition does not silently overwrite a senior architect's ADR
 - **Self-evolving** — Claude Code skill reflects after every task and adds learnings automatically
 - **Human at the fork** — agents operate autonomously on established knowledge; humans only intervene at genuine ambiguity
+- **Quorum Gateway** — Express service that fronts Graphiti and PostgreSQL with ES256 JWT, GitHub OAuth, and S3-backed per-project configuration
+- **Quorum Dashboard** — React SPA for browsing the knowledge graph, resolving conflicts, reviewing drafts, and editing project config — with session expiry handling and re-auth flows built in
 - **Export to human** — everything Quorum knows, exportable as Markdown or Confluence markup
 
 ---
 
 ## Architecture
 
+```mermaid
+graph LR
+    Agent[Claude Code<br/>AI Agents] -->|MCP stdio| Quorum[Quorum MCP Server]
+    Human[Dashboard<br/>browser] --> Gateway[Quorum Gateway<br/>JWT + S3 config]
+    Quorum --> Gateway
+    Gateway --> Graphiti[Graphiti<br/>temporal KG]
+    Graphiti --> FalkorDB[(FalkorDB)]
+    Gateway --> PG[(PostgreSQL<br/>audit)]
+    Gateway --> S3[(S3<br/>project config)]
 ```
-Claude Code / AI Agents
-        │ MCP (stdio)
-        ▼
-┌─────────────────────┐
-│  Quorum MCP Server  │──→  QUORUM_GATEWAY_URL (optional)
-│  (Node.js)          │                │
-├─────────────────────┤                ▼
-│  Governance Layer   │    ┌─────────────────────┐
-│  Conflict detection │    │  Quorum Gateway      │
-│  Authority weights  │    │  (Express :3001)     │
-│  Provenance track   │    │  JWT auth, S3 config │
-│  Confidence scores  │    │  GraphQL proxy        │
-└──────────┬──────────┘    └─────────┬───────────┘
-           │                         │
-┌──────────▼──────────┐   ┌──────────▼──────────┐
-│  Graphiti Engine    │   │  LocalStack / AWS S3 │
-└──────────┬──────────┘   └─────────────────────┘
-           │
-┌──────────▼──────────┐
-│  FalkorDB / Neo4j   │
-│  / AWS Neptune      │
-└─────────────────────┘
-          │
-┌──────────▼──────────┐
-│  Quorum Dashboard   │
-│  (React :3002)      │
-└─────────────────────┘
-```
+
+The **Quorum MCP Server** speaks MCP stdio with Claude Code and AI agents. The **Quorum Gateway** (Express :3001) handles GitHub OAuth, issues ES256 JWTs, serves project config from S3, and proxies authenticated traffic to Graphiti and PostgreSQL. The **Quorum Dashboard** (React :3002, served via Nginx) is the human-facing surface for graph exploration, conflict resolution, draft review, audit timelines, and project configuration.
 
 ---
 
