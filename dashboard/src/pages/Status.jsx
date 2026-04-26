@@ -19,11 +19,11 @@ export default function Status() {
 
       {/* Service health */}
       <Card title="Service health">
-        <ServiceIndicator name="Gateway"    status={gatewayOk ? 'healthy' : 'unavailable'} detail="This page loaded" />
-        <ServiceIndicator name="Graphiti"   status={components.graphiti   ?? 'unknown'} />
-        <ServiceIndicator name="FalkorDB"   status={components.graphiti === 'connected' ? 'connected' : 'unknown'} detail="via Graphiti" />
-        <ServiceIndicator name="PostgreSQL" status={components.postgresql ?? 'unknown'} />
-        <ServiceIndicator name="Quorum MCP" status="connected" detail={`v${health?.version ?? '—'}`} />
+        <ServiceIndicator name="Gateway"    status={gatewayOk ? 'healthy' : 'unavailable'} detail="API reachable" />
+        <ServiceIndicator name="PostgreSQL" status={components.postgresql} />
+        <ServiceIndicator name="Graphiti"   status={components.graphiti} />
+        <ServiceIndicator name="FalkorDB"   status={components.falkordb} detail="TCP :6379" />
+        <ServiceIndicator name="S3 / Config bucket" status={components.s3} />
       </Card>
 
       {/* Operational indicators */}
