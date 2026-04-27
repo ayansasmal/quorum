@@ -31,13 +31,16 @@
     "audit:scan-harddeletes": "node scripts/audit-scan-harddeletes.js",
     "job:decay": "node scripts/decay-confidence.js",
     "job:archive": "node scripts/archive-audit.js",
-    "job:recheck": "node scripts/recheck-conflicts.js"
+    "job:recheck": "node scripts/recheck-conflicts.js",
+    "mcp:install": "claude mcp add quorum -- node \"$PWD/src/server.js\"",
+    "skill:install": "mkdir -p \"${INIT_CWD:-.}/.claude/skills\" && cp \"$PWD/skill/SKILL.md\" \"${INIT_CWD:-.}/.claude/skills/quorum.md\" && echo \"Quorum skill installed → ${INIT_CWD:-.}/.claude/skills/quorum.md\"",
+    "quorum:install": "npm run mcp:install && npm run skill:install"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1032.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "14.0.3",
-    "express": "4.22.1",
+    "express": "^5.2.1",
     "jose": "5.10.0",
     "pg": "8.20.0",
     "uuid": "^14.0.0",
@@ -46,5 +49,9 @@
   "devDependencies": {
     "@vitest/coverage-v8": "4.1.2",
     "vitest": "4.1.2"
+  },
+  "overrides": {
+    "fast-xml-parser": "^5.7.2",
+    "hono": "^4.12.15"
   }
 }
