@@ -45,7 +45,7 @@ graph TD
 ## Current State (v0.2)
 
 **Built and working:**
-- MCP server with 9 tools: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`
+- MCP server with 10 tools: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`
 - Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, rate limiting, JWKS endpoint
 - Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status
 - Dual-store audit pipeline (PostgreSQL + Graphiti) with SHA256 tamper-evident chain
