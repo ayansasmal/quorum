@@ -47,7 +47,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quorum"]
+      test: ["CMD-SHELL", "pg_isready -U quorum -d quorum_audit"]
       interval: 10s
       timeout: 5s
       retries: 5
