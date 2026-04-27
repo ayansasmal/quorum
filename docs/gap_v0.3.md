@@ -1,8 +1,8 @@
 # Quorum — Gap Analysis v0.3
 
 > Written after the v0.2 + dashboard session (April 2026).
-> Traces the full adoption journey end-to-end: discovery → install → first run →
-> daily use → operational maturity. Gaps are ordered by act and rated by severity.
+> Revised after critical analysis to strip over-engineering and replace dashboard-first
+> solutions with the simplest change that closes the gap.
 >
 > **Status legend:** ✅ Resolved in this session · ⏳ Pending · 🎯 v0.3 target
 >
@@ -13,6 +13,25 @@
 
 ---
 
+## Structural Patterns Avoided in This Plan
+
+Three over-engineering patterns appear repeatedly in gap analyses for tools at this stage.
+This plan explicitly avoids them:
+
+1. **Dashboard-first reflex.** A dashboard panel is real work. Most observability problems
+   are solved by surfacing data in existing flows — SKILL.md output, server logs, startup
+   messages — before building new UI.
+
+2. **Infrastructure for infrastructure.** Cron sidecars, GHCR-published images, GitHub Actions
+   for features not yet validated manually — these are maintenance obligations, not features.
+   They come after the core behaviour is proven, not before.
+
+3. **Conflating detection with resolution.** Several gaps are two problems: knowing it is
+   broken, and fixing it. This plan solves detection first. Remediation follows once you
+   can see the problem.
+
+---
+
 ## What v0.2 + this session already fixed
 
 | What improved | Impact on friction |
@@ -20,22 +39,21 @@
 | **Dashboard** (React, conflict review UI, knowledge browse) | Engineers can manage knowledge without CLI — visual entry point lowers the "what does this do?" question |
 | **`npm run quorum:install`** — one command for MCP + skill | Eliminates the two-step copy-paste install that tripped most people up |
 | **`npm run docker:rebuild/clean/ps`** | Common ops no longer require reading the setup.sh source |
-| **LocalStack persistence detection** in `setup.sh` | Silent data loss on container restart now warned at startup — engineers know before they lose work |
-| **Gateway healthcheck fix** (200 or 503) | Stack no longer deadlocks when external LocalStack is in use — was a P0 show-stopper for local dev |
-| **LLM prompt extraction** to markdown files | Prompts are now editable without touching code — reduces "can I tweak the AI?" friction for teams |
-| **QUICKSTART.md** + lean CLAUDE.md | Gets an engineer to a running system without reading the full CLAUDE.md |
-| **`ONBOARDING.md`** with gateway setup guide | Central stack deployment is now documented step-by-step |
+| **LocalStack persistence detection** in `setup.sh` | Silent data loss on container restart now warned at startup |
+| **Gateway healthcheck fix** (200 or 503) | Stack no longer deadlocks when external LocalStack is in use — was a P0 show-stopper |
+| **LLM prompt extraction** to markdown files | Prompts are editable without touching code |
+| **QUICKSTART.md** + lean CLAUDE.md | Gets an engineer to a running system without reading the full architecture docs |
+| **`ONBOARDING.md`** with gateway setup guide | Central stack deployment is documented step-by-step |
+| **In-memory OAuth token injection** (`authenticate()` MCP tool) | Re-auth handled by Claude Code via mcp-playwright — no shell file writes, no engineer interruption |
 
 **Revised adoption friction rating: 3/5** (up from 2/5)
 
-The dashboard alone moves the needle. A visual interface with pending decisions, conflict review, and knowledge browsing is the single highest-leverage adoption driver — engineers see the value immediately without needing to read documentation. The install scripts and healthcheck fix remove two of the top three first-run failure modes.
-
 What holds it at 3/5 rather than 4/5:
-- Stack still requires 6 Docker containers (Graphiti dependency makes lightweight impossible today)
-- `reflect()` runs silently — no feedback loop, no observability into whether self-evolution is working
-- Confidence decay is designed but not automated — knowledge staleness silently accumulates
+- Stack still requires 6 Docker containers (Graphiti is not optional today)
+- `reflect()` output is never surfaced to the engineer — the self-evolution loop is invisible
+- Confidence decay is designed but runs manually — knowledge staleness accumulates silently
 - No npx zero-config entry (still requires git clone + npm install)
-- LLM is a hard dependency in the critical path — no fallback when OpenAI is down
+- LLM is a hard dependency in the governance critical path — no retry, no fallback
 
 ---
 
@@ -44,38 +62,51 @@ What holds it at 3/5 rather than 4/5:
 ### GAP-24 · No npx zero-config entry point `HIGH` 🎯 v0.3
 
 **Friction:** "How do I try this?" currently requires cloning the repo. For OSS tools
-the bar is `npx quorum start`. The friction drop from "clone + read setup docs" to
-"one command that works" is the difference between 10 stars and 1000 stars on GitHub.
+the bar is `npx quorum start`.
+
+**What the original plan got wrong:** `npx quorum start` still requires Docker. Solving the
+entry point without solving the stack size (GAP-25) moves the error one step later — the
+command crashes with "Docker not found" or times out pulling 6 images. GAP-25 must ship first.
 
 **Resolution:**
-1. Publish `quorum` to npm with `"bin": { "quorum": "./cli.js" }` already wired
-2. `npx quorum start` → checks Docker, runs `docker compose up` via bundled compose file
-3. `npx quorum init` → creates `.quorum` file in current directory
-4. Include bundled `docker-compose.yml` in the npm package (not the full repo)
-5. Guard: if `node_modules/` is absent, auto-run `npm install` silently
+1. Publish `quorum` to npm with `"bin": { "quorum": "./cli.js" }`
+2. `cli.js` is a thin wrapper: `npx quorum start` → `docker compose -f <bundled-compose> up -d`
+3. The bundled `docker-compose.yml` in the npm package is the lite compose (GAP-25) — not the
+   full 6-container stack
+4. `npx quorum init` creates a `.quorum` file in the current directory
 
-**Scope:** `package.json` publish config, `.npmignore`, README update, test with `npx --yes`
+Defer all guard logic (auto-`npm install`, Docker version checks) until the basic flow is validated.
+
+**Scope:** `cli.js`, `package.json` publish config, `.npmignore`, README update.
+Blocked on GAP-25.
 
 ---
 
 ### GAP-25 · No lightweight "try it now" stack `MEDIUM` 🎯 v0.3
 
-**Friction:** 6 Docker containers (FalkorDB + PostgreSQL + Graphiti + Gateway + Dashboard +
-Quorum) is a significant ask for a solo engineer evaluating the tool on a MacBook.
+**Friction:** 6 Docker containers is a significant ask for a solo engineer evaluating the tool.
 Graphiti alone pulls in a Python ML environment.
 
-**Resolution — `quorum:start:lite` mode:**
-- Use SQLite for the audit store (already optional — pg driver swappable)
-- Use an in-process mock graph client (`src/graph/mock-client.js`) for local dev when
-  `QUORUM_LITE=true` — stores episodes in SQLite, no Graphiti sidecar required
-- Conflict detection degrades gracefully (semantic similarity via local embeddings or disabled)
-- Full stack remains the production path; lite is explicitly for evaluation
+**What the original plan got wrong:** A `src/graph/mock-client.js` that mirrors the Graphiti API
+over SQLite is a second graph implementation to maintain forever. Every new Graphiti method
+needs a mock equivalent. The mock drifts silently from production behaviour.
+
+**Resolution — graceful degradation, not a second code path:**
+1. In `src/graph/client.js`, if `pingGraphiti()` at startup returns false, set a module-level
+   `graphitiAvailable = false` flag
+2. All graph call functions check the flag; if false, return `{ results: [], degraded: true }`
+   immediately — no mock, no SQLite, just a short-circuit
+3. Add `docker-compose.lite.yml` — the existing compose file with the `graphiti` and `falkordb`
+   services removed
+4. Add `QUICKSTART.md` section: "Try without the full stack"
+
+Engineers get a working audit store and key-value `recall()` without semantic search.
+Conflict detection degrades gracefully (no semantic similarity, LLM-only path or skip).
 
 **Files to add/modify:**
-- `src/graph/mock-client.js` — in-process episode store over SQLite
-- `src/server.js` — switch client based on `QUORUM_LITE` env var
-- `docker-compose.lite.yml` — just PostgreSQL (or SQLite) + Quorum, no Graphiti/FalkorDB
-- QUICKSTART.md — add "Try without Docker" section
+- `src/graph/client.js` — `graphitiAvailable` flag, short-circuit in graph functions
+- `docker-compose.lite.yml` — stripped compose
+- `QUICKSTART.md` — lite-stack section
 
 ---
 
@@ -83,74 +114,80 @@ Graphiti alone pulls in a Python ML environment.
 
 ### GAP-26 · `reflect()` has no observability `HIGH` 🎯 v0.3
 
-**Friction:** The self-evolution loop is the core value proposition. But right now:
-- Engineers cannot tell whether `reflect()` extracted anything after a task
-- No dashboard panel shows reflect activity over time
-- The skill calls `reflect()` post-task but the result is swallowed — Claude reports
-  "no team-specific knowledge identified" but this is invisible in any UI
+**Friction:** The self-evolution loop is the core value proposition. Engineers cannot tell
+whether `reflect()` extracted anything. The skill calls it post-task but the result is swallowed.
+
+**What the original plan got wrong:** A "Reflect Activity" dashboard panel is the wrong fix
+for a SKILL.md problem. `reflect()` already returns a structured result — Claude just doesn't
+report it to the engineer. That is a skill instruction issue, not a UI gap.
 
 **Resolution:**
-1. **Dashboard panel** — "Reflect Activity" timeline: last 7 days of reflect calls,
-   extraction rate (extracted / calls), top topics being learned, avg items per reflect
-2. **SKILL.md guidance** — instruct Claude to always report the reflect() result to the
-   user at session end ("Added 2 knowledge items to DRAFT — pending review")
-3. **Audit entries** for reflect calls should be queryable via `GET /api/audit?tool=reflect`
-4. **Weekly reflect digest** (optional) — `quorum reflect digest` CLI shows what the team
-   has been learning automatically
+Add one instruction to `skill/SKILL.md` under "After Task":
+
+> After calling `reflect()`, always report the result to the engineer inline:
+> "reflect() extracted N items — pending your review at http://localhost:3002/pending"
+> or "reflect() found no new knowledge to store this session."
+
+That is the complete fix for v0.3.
+
+A dashboard "Reflect Activity" timeline (extraction rate, top topics, weekly digest) is a
+v1.0 analytics feature. Do not build it before engineers are actually using `reflect()`.
 
 **Files to modify:**
-- `dashboard/src/pages/` — add ReflectActivity panel to overview
-- `src/gateway/routes/` — `GET /api/audit` with `tool` filter
-- `skill/SKILL.md` — session-end summary instructions
-- `src/tools/reflect.js` — ensure audit entries are tagged `tool: 'reflect'`
+- `skill/SKILL.md` — one sentence under "After Task"
 
 ---
 
 ### GAP-27 · Confidence decay not automated `HIGH` 🎯 v0.3
 
-**Friction:** The confidence decay model is fully designed (−0.005/week without access,
-−0.1 on conflict, +0.01 on recall). The `job:decay` npm script exists. But:
-- No cron is set up automatically — it must be run manually or added to a scheduler externally
-- No dashboard visibility into stale knowledge
-- Knowledge nodes that have not been recalled in 6 months silently accumulate, lowering
-  signal-to-noise as the graph grows
+**Friction:** The `job:decay` npm script exists but must be run manually. Knowledge staleness
+accumulates silently.
 
-**Resolution:**
-1. **Docker Compose cron sidecar** — add a lightweight `cron` service to `docker-compose.yml`
-   that runs `node scripts/decay-confidence.js` weekly and `node scripts/archive-audit.js` monthly
-2. **Dashboard stale panel** — "Knowledge Health" section: count by confidence tier
-   (high/medium/low), last-accessed distribution, nodes below 0.3 flagged for review
-3. **K8s CronJob** — add `helm/quorum/templates/jobs/decay.yaml` CronJob manifest
-4. **CLI report** — `quorum decay status` shows last run time, nodes decayed, current distribution
+**What the original plan got wrong:** A Docker Compose cron sidecar is a new container with
+its own lifecycle, logs, and failure modes. A K8s CronJob manifest is fine for production
+but premature for v0.3. Neither is needed — the gateway process is already always running.
 
-**Files to add/modify:**
-- `docker-compose.yml` — cron service or `command` override on quorum container
-- `helm/quorum/templates/jobs/decay-cronjob.yaml`
-- `dashboard/src/pages/` — Knowledge Health panel
-- `scripts/decay-confidence.js` — add `--report` flag for status output
+**Resolution — `setInterval` in the gateway server:**
+1. On gateway startup, read `last_decay_run` timestamp from a config row in PostgreSQL
+2. If `now - last_decay_run > 7 days`, run `decayConfidence()` immediately and update the timestamp
+3. Set a `setInterval` for 24h to re-check; fire decay if the 7-day window has elapsed
+4. Log the result: `[Quorum] Decay run: N nodes updated, M archived`
+
+No new container, no new service, no Helm manifest. It runs as long as the gateway runs.
+
+For status visibility: expose `GET /admin/decay/status` — returns last run time, nodes decayed,
+confidence distribution. No dashboard panel needed; engineers can curl it or check the logs.
+
+**Files to modify:**
+- `src/gateway/server.js` — add decay scheduler on startup
+- `src/gateway/routes/admin.js` — `GET /admin/decay/status` endpoint
+- `scripts/decay-confidence.js` — add `--report` flag (reusable by both the scheduler and CLI)
 
 ---
 
-### GAP-28 · Direct-mode MCP server has no auth `MEDIUM` 🎯 v0.3
+### GAP-28 · Direct-mode MCP server has no auth `MEDIUM`
 
-**Friction:** When `QUORUM_GATEWAY_URL` is not set, the MCP server connects directly
-to PostgreSQL and Graphiti. There is no authentication on the MCP server itself —
-any process that can reach the stdio transport can write to the knowledge graph.
+**Friction:** In direct mode (no `QUORUM_GATEWAY_URL`), any process that can reach the stdio
+transport can write to the knowledge graph.
 
-This is acceptable for a single-engineer local setup but blocks multi-engineer local
-use cases (shared home lab, shared dev VM) and is a security concern in any container
-deployment where the MCP server is exposed on a port.
+**What the original plan got wrong:** The threat model is incorrect. MCP stdio transport means
+the server communicates exclusively through stdin/stdout with the process that spawned it.
+Only Claude Code (or whatever MCP client launched the server) can send messages. There is no
+network surface. An `X-Quorum-Api-Key` header only matters for HTTP/SSE transport, which
+Quorum does not use.
 
-**Resolution:**
-1. **API key auth for direct mode** — `QUORUM_API_KEY` env var; if set, the MCP server
-   requires `X-Quorum-Api-Key` header on every call (streamable HTTP transport)
-2. **Identity in direct mode** — `author` claim falls back to `git config user.name`
-   (already available via subprocess) when no JWT is present
-3. **Document the boundary** — DEPLOYMENT.md section "When to use gateway mode vs direct mode"
+**Resolution:** Document the security boundary. No code change.
+
+Add one section to `docs/DEPLOYMENT.md`:
+
+> **Direct mode vs gateway mode — security boundary**
+> Direct mode is safe for single-engineer local use. The MCP stdio transport is process-scoped:
+> only the MCP client that spawned the server can communicate with it. For shared environments
+> (shared dev VM, team server, any container exposed on a port), use gateway mode — the gateway
+> is the security perimeter, not the MCP server.
 
 **Files to modify:**
-- `src/server.js` — API key middleware for HTTP transport
-- `DEPLOYMENT.md` — auth model comparison
+- `docs/DEPLOYMENT.md` — security boundary section
 
 ---
 
@@ -158,85 +195,69 @@ deployment where the MCP server is exposed on a port.
 
 ### GAP-29 · LLM is a hard dependency in the governance critical path `HIGH` 🎯 v0.3
 
-**Friction:** `detectConflict()` calls OpenAI. If `OPENAI_API_KEY` is unset or the API
-is down, conflict detection falls through to `graphiti_unavailable: true` — meaning
-knowledge is stored with `PENDING_CONFLICT_CHECK` status. This is the correct governance
-behaviour. But:
-- No retry — a transient 500 from OpenAI permanently marks the entry as pending conflict check
-- No dashboard alert when `PENDING_CONFLICT_CHECK` entries accumulate
-- `scripts/recheck-conflicts.js` exists but must be triggered manually
-- `extractKnowledge()` in reflect.js returns `[]` silently when no API key — reflect does
-  nothing and the engineer never knows
+**Friction:** `detectConflict()` calls OpenAI with no retry. A transient 500 permanently marks
+the entry as `PENDING_CONFLICT_CHECK`. `reflect()` returns `[]` silently when no API key —
+the engineer never knows extraction did nothing.
 
-**Resolution:**
-1. **Retry with backoff** — wrap all three LLM calls (contradiction, enrichment, extraction)
-   with a 3-attempt exponential backoff before giving up
-2. **Dashboard alert badge** — `PENDING_CONFLICT_CHECK` count shown in header; red if > 5
-3. **Reflect fallback** — when no OpenAI key, `reflect()` returns the raw task summary
-   as a single DRAFT item with `confidence: 0.35` and `entity_type: 'observation'` so
-   something is captured even without LLM extraction
-4. **`recheck-conflicts` automation** — wire it into the cron sidecar (GAP-27) — run
-   daily, not just manually
-5. **Environment check at startup** — warn clearly if `OPENAI_API_KEY` is absent
+**What the original plan got wrong:** Five fixes bundled together guarantee none ship cleanly.
+The dashboard badge and recheck automation are the same infrastructure problem as GAP-27.
+Split into two atomic changes:
+
+**Resolution — two independent changes:**
+
+**Change 1: Retry wrapper** (`src/governance/conflict.js`)
+Wrap `callLLM()` with 3-attempt exponential backoff (200ms, 400ms, 800ms) before giving up.
+~15 lines. Covers all three LLM call sites (contradiction, enrichment, extraction).
+
+**Change 2: reflect() fallback** (`src/tools/reflect.js`)
+When `extractKnowledge()` returns `[]` due to missing API key or LLM error, store the raw
+task summary as a single DRAFT item:
+```js
+{ confidence: 0.35, entity_type: 'observation', content: taskSummary, tags: ['unextracted'] }
+```
+Something is captured even without LLM extraction. The `unextracted` tag makes it easy to
+find and re-process later.
+
+**Change 3: Startup env check** (`src/server.js`, 1 line)
+```js
+if (!process.env.OPENAI_API_KEY) console.error('[Quorum] WARNING: OPENAI_API_KEY not set — LLM features disabled')
+```
+
+The `PENDING_CONFLICT_CHECK` dashboard badge and `recheck-conflicts` cron automation follow
+from GAP-27's scheduler once that exists.
 
 **Files to modify:**
 - `src/governance/conflict.js` — retry wrapper
 - `src/tools/reflect.js` — fallback extraction path
-- `src/server.js` — startup env check
-- `dashboard/src/` — pending conflict badge
-- `docker-compose.yml` — recheck in cron schedule
+- `src/server.js` — startup env check (1 line)
 
 ---
 
 ### GAP-30 · `ingest_pr()` not implemented `MEDIUM` 🎯 v0.3
 
-**Friction:** `ingest_pr` appears in CLAUDE.md, ROADMAP.md, and the tool list in SKILL.md
-but the implementation is a stub. Engineers cannot extract knowledge from merged PRs —
-one of the highest-value, lowest-effort signal sources. PRs contain explicit decisions,
-review-validated patterns, and approver authority signals.
+**Friction:** PRs contain explicit decisions, review-validated patterns, and approver authority
+signals — the highest-value, lowest-effort knowledge source. The tool is a stub.
 
-**Resolution — minimal viable `ingest_pr`:**
-1. **GitHub PR fetch** — `src/pr/github.js` fetches PR description, review comments,
-   and approvals via GitHub REST API (no OAuth — personal access token in env var is sufficient)
-2. **Extraction agent** — call `extractKnowledge()` (already in reflect.js) on a
-   concatenated summary of description + review comments
-3. **Authority elevation** — if a principal architect approved the PR, extracted items
-   get `confidence: 0.85` instead of default
-4. **GitHub Action** — `.github/workflows/quorum-pr-ingest.yml` triggers on `pull_request`
-   closed + merged, calls `node src/tools/ingest_pr.js --pr-url $URL`
-5. **dry_run mode** — default true; engineer reviews extractions via dashboard before committing
+**What the original plan got wrong:** The GitHub Action inverts the dependency. Automate only
+after manual use proves the extraction quality. Running extraction on every merged PR before
+you trust the output floods the graph with noise.
 
-**Files to add/modify:**
-- `src/pr/github.js` — GitHub API client
-- `src/pr/extractor.js` — extraction logic (wraps extractKnowledge)
-- `src/tools/ingest_pr.js` — MCP tool handler (connects to authority model)
-- `.github/workflows/quorum-pr-ingest.yml` — GitHub Action trigger
-- `dashboard/src/` — review dry_run extraction results UI panel
+**Resolution — MCP tool only, dry_run default:**
+1. `src/pr/github.js` — fetch PR description, review comments, approvals via GitHub REST API
+   (no OAuth for public repos; `GITHUB_TOKEN` env var for private)
+2. `src/pr/extractor.js` — call `extractKnowledge()` on description + review comment concat;
+   if a principal architect approved, elevate extracted `confidence` by +0.10
+3. `src/tools/ingest_pr.js` — MCP tool: `ingest_pr({ pr_url, dry_run: true })`
+   - `dry_run: true` (default) returns would-be DRAFTs for review without storing anything
+   - `dry_run: false` stores them via `remember()`
 
----
-
-### GAP-31 · Notification delivery not implemented `MEDIUM` 🎯 v0.3
-
-**Friction:** The governance model requires humans to act on conflicts and DRAFT reviews.
-Currently, the only notification mechanism is "check the dashboard". There is no push.
-Conflicts can accumulate for days without anyone knowing.
-
-**Resolution — pragmatic notification layer:**
-- **Slack webhook** — `QUORUM_SLACK_WEBHOOK_URL` env var; when set, posts a message on:
-  - New conflict detected (with brief + link to dashboard)
-  - DRAFT pending review > 24h
-  - `PENDING_CONFLICT_CHECK` entries accumulating (> 5)
-- **Email** (optional) — `QUORUM_ALERT_EMAIL` + SMTP vars; daily digest of pending actions
-- **GitHub issue** (optional) — create issue in the project repo for each conflict, labelled
-  `quorum:conflict`, with decision brief in the body; closes when resolved
-- **Webhook generic** — `QUORUM_NOTIFY_WEBHOOK_URL` for custom integrations (Teams, PagerDuty)
+Engineers call it via Claude: "Ingest the knowledge from this PR: https://github.com/..."
+The GitHub Action comes after extraction quality is validated manually.
 
 **Files to add:**
-- `src/notify/slack.js` — Slack webhook delivery
-- `src/notify/index.js` — notification router (checks which channels are configured)
-- Wired into `remember.js` (conflict detected), `review.js` (approved/rejected),
-  `src/tools/pending.js` (stale pending check)
-- `.env.example` — notification vars documented
+- `src/pr/github.js`
+- `src/pr/extractor.js`
+- `src/tools/ingest_pr.js`
 
 ---
 
@@ -244,126 +265,153 @@ Conflicts can accumulate for days without anyone knowing.
 
 ### GAP-32 · Graphiti version not pinned `MEDIUM` 🎯 v0.3
 
-**Friction:** `Dockerfile.graphiti` builds from `getzep/graphiti` main branch via
-sparse clone. This is fine for local dev but is a reliability risk for teams:
-- Any breaking change in Graphiti main silently breaks the Quorum stack on the next `docker build`
-- No rollback path — you can't `docker pull` a pinned Graphiti image because Graphiti
-  has no published Docker image on Docker Hub
-- `docker compose build --no-cache` after a Graphiti breaking change is a frustrating mystery
+**Friction:** `Dockerfile.graphiti` builds from Graphiti main. Any breaking change silently
+breaks the stack on the next `docker build`. No rollback path.
+
+**What the original plan got wrong:** Publishing a `quorum-graphiti` GHCR image with its own
+CI workflow means owning Graphiti's build pipeline. When Graphiti ships a fix, you must
+rebuild and push before Quorum users can get it. That is a maintenance obligation that
+outweighs the reliability benefit it provides.
 
 **Resolution:**
-1. **Pin to a git SHA or tag** in `Dockerfile.graphiti`: `ARG GRAPHITI_REF=v0.3.x`
-   with `git clone --branch $GRAPHITI_REF` (sparse clone to `mcp_server/` only)
-2. **Makefile / Renovate bot rule** — add a Dependabot `pip` entry for the graphiti package
-   so upgrades are deliberate, not accidental
-3. **Integration smoke test** — `npm run test:graphiti-integration` hits the Graphiti
-   healthcheck and attempts a test `add_episode` + `search_nodes` round trip
-4. **Publish a `quorum-graphiti` Docker image** — build Graphiti with a specific SHA,
-   push to GitHub Container Registry; compose uses `ghcr.io/quorum/graphiti:sha-abc123`
+1. Pin to a specific git SHA in `Dockerfile.graphiti`:
+   ```dockerfile
+   ARG GRAPHITI_REF=<sha>
+   # To upgrade: update GRAPHITI_REF to the desired commit SHA and rebuild.
+   ```
+2. Add a `.github/dependabot.yml` Dockerfile entry so SHA bumps are proposed as PRs,
+   not discovered by breakage
+
+No GHCR image publishing. No separate CI workflow.
 
 **Files to modify:**
-- `Dockerfile.graphiti` — parameterise the git ref
-- `.github/workflows/build.yml` — publish graphiti image to GHCR
-- `docker-compose.yml` — pin to GHCR image in non-dev environments
+- `Dockerfile.graphiti` — parameterise the git ref, add upgrade comment
 - `.github/dependabot.yml` — Dockerfile SHA bump rule
 
 ---
 
 ### GAP-33 · `group_id` isolation not enforced at the graph layer `LOW` 🎯 v0.3
 
-**Friction:** The gateway enforces `project_id` on PostgreSQL queries (GAP-10). But
-Graphiti's `group_id` isolation relies on the caller providing the right value — there
-is no server-side enforcement. A misconfigured `QUORUM_GROUP_ID` could read across
-project boundaries.
+**Friction:** Graphiti's `group_id` isolation relies on the caller providing the right value.
+A misconfigured `QUORUM_GROUP_ID` could read across project boundaries.
+
+**What the original plan got wrong:** The gateway Graphiti route likely already overwrites
+`group_ids` from the JWT. The actual gap is the missing test.
 
 **Resolution:**
-1. **Gateway validates group_id claim** — the JWT payload includes `group_id` from the
-   project config; the Graphiti proxy route (`src/gateway/routes/graphiti.js`) overwrites
-   `group_ids` in the request body with the JWT-derived value — caller cannot specify their own
-2. **Add integration test** — verify that a request with a tampered `group_ids` value is
-   rejected or silently rewritten to the JWT-bound value
-3. **Document the isolation model** — DEPLOYMENT.md section "Multi-team isolation guarantees"
+1. Verify `src/gateway/routes/graphiti.js` overwrites `group_ids` in the proxied request body
+   with the JWT-derived value — add the two-line overwrite if absent
+2. Add one integration test: send a Graphiti request with a tampered `group_ids` value,
+   assert the gateway rewrote it to the JWT-bound value before forwarding
+3. Add one paragraph to `docs/DEPLOYMENT.md`: "Multi-team isolation guarantees"
 
 **Files to modify:**
-- `src/gateway/routes/graphiti.js` — overwrite `group_ids` from JWT claim
-- `tests/governance/isolation.test.js` — new test file
+- `src/gateway/routes/graphiti.js` — verify/add `group_ids` overwrite (2 lines if missing)
+- `tests/governance/isolation.test.js` — new test
+- `docs/DEPLOYMENT.md` — isolation guarantee documentation
 
 ---
 
-### GAP-34 · No LLM accuracy regression suite for prompts `LOW` 🎯 v0.3
+### GAP-34 · No LLM accuracy regression suite for prompts `LOW`
 
-**Friction:** Three LLM prompts now live in `src/prompts/` and are easy to edit.
-This is good for maintenance. But there are no tests that catch regressions when prompts
-are changed. A well-meaning edit to `check-contradiction.md` could silently drop the
-true-positive rate.
+**Friction:** Three LLM prompts live in `src/prompts/` and are editable. No tests catch
+regressions when prompts change.
 
-**Resolution:**
-1. **Golden dataset** — `tests/llm/conflict-golden-dataset.js` already exists (from
-   CLAUDE.md); extend it to 50+ cases with labelled expected outcomes
-2. **Prompt regression test** — `tests/llm/prompt-regression.test.js` — runs golden
-   dataset against the three prompts, asserts TP rate > 90% and FP rate < 15%
-3. **CI accuracy gate** — `npm run test:llm` in GitHub Actions on any change to
-   `src/prompts/**` (path filter to avoid running on every PR)
-4. **Model upgrade guard** — store the model name in the golden dataset; if `LLM_MODEL_NAME`
-   changes, rerun the suite and flag if accuracy drops > 2%
+**What the original plan got wrong:** You cannot build a TP/FP accuracy gate around a golden
+dataset that does not exist yet. Running 50+ cases against the live OpenAI API in CI is
+expensive and flaky. The accuracy regression is a v1.0 concern.
 
-**Files to add:**
-- `tests/llm/prompt-regression.test.js`
-- Extend `tests/llm/conflict-golden-dataset.js`
-- `.github/workflows/test.yml` — add path-filtered LLM accuracy job
+**Resolution — snapshot tests on prompt rendering, not LLM output:**
+1. Unit-test that `buildConflictPrompt(node1, node2)` produces the expected string —
+   pure function, no API calls
+2. Unit-test that the LLM response parser handles all output shapes Graphiti returns
+   (object, array, null, malformed JSON)
+3. Add 5–10 labelled fixture cases as a manual validation script (`scripts/validate-prompts.js`)
+   run by humans before a model upgrade — not in CI
+
+A proper TP/FP accuracy gate with 50+ golden cases is added at v1.0 once real usage data
+exists to build the dataset from.
+
+**Files to add/modify:**
+- `tests/governance/prompt-rendering.test.js` — new unit tests
+- `scripts/validate-prompts.js` — manual accuracy check (no CI gate)
 
 ---
 
 ## Priority Order — v0.3 Work
 
+Ordered by value-to-effort ratio:
+
 ```
-P1 — Self-evolution observability (core value prop visibility)
-  🎯 GAP-26  reflect() dashboard panel + SKILL.md session-end summary
+P0 — Already resolved (no work needed)
+  ✅ GAP-28  Document direct-mode security boundary (DEPLOYMENT.md)
 
-P1 — Resilience (reliability of governance critical path)
-  🎯 GAP-29  LLM retry, reflect fallback, recheck automation, startup warn
+P1 — Highest leverage, smallest change
+  🎯 GAP-26  One sentence in SKILL.md — reflect() result always reported to engineer
+  🎯 GAP-29  Retry wrapper (conflict.js) + reflect() fallback + startup env check
 
-P2 — Automated operations (knowledge health without manual effort)
-  🎯 GAP-27  Confidence decay cron + dashboard health panel
+P2 — Core reliability
+  🎯 GAP-33  group_id overwrite verification + isolation test
+  🎯 GAP-32  Pin Graphiti SHA + Dependabot rule
 
-P2 — Growth signal (highest value knowledge source)
-  🎯 GAP-30  ingest_pr() MVP: GitHub fetch + extraction + dry run + GitHub Action
+P3 — Operational automation
+  🎯 GAP-27  setInterval decay in gateway + /admin/decay/status endpoint
 
-P3 — Notifications (close the "check the dashboard" loop)
-  🎯 GAP-31  Slack webhook + stale pending alert
+P4 — Stack simplification (enables npx entry point)
+  🎯 GAP-25  Graphiti graceful degradation + docker-compose.lite.yml
+  🎯 GAP-24  npx quorum start (blocked on GAP-25)
 
-P3 — Zero-config adoption (OSS growth)
-  🎯 GAP-24  npx quorum start
+P5 — New knowledge source
+  🎯 GAP-30  ingest_pr() MCP tool, dry_run mode only
 
-P4 — Security hardening
-  🎯 GAP-28  Direct-mode MCP auth (API key)
-  🎯 GAP-33  group_id isolation enforcement at gateway
+P6 — Test infrastructure
+  🎯 GAP-34  Prompt rendering unit tests + manual validation script
 
-P5 — Operational reliability
-  🎯 GAP-32  Graphiti version pinning + GHCR image
-  🎯 GAP-34  LLM prompt regression suite
-
-DEFERRED — Evaluation only
-  GAP-25  Lightweight stack (no Graphiti) — evaluate after usage data
+DEFERRED — v1.0
+  GAP-26 dashboard  Reflect Activity panel (after reflect() usage proven)
+  GAP-27 K8s        Helm CronJob manifest (after decay is proven in gateway)
+  GAP-29 badge      PENDING_CONFLICT_CHECK dashboard badge (after GAP-27 cron)
+  GAP-30 action     GitHub Action for PR ingest (after extraction quality validated)
+  GAP-31            Notifications — skipped per explicit decision
+  GAP-34 gate       LLM accuracy CI gate (after golden dataset exists from real usage)
 ```
+
+---
+
+## Estimated v0.3 Effort
+
+| Gap | Change | Effort |
+|-----|--------|--------|
+| GAP-26 | One sentence in SKILL.md | 5 min |
+| GAP-28 | Paragraph in DEPLOYMENT.md | 15 min |
+| GAP-29 | Retry wrapper + reflect fallback + startup warn | 4h |
+| GAP-33 | group_id overwrite verify + 1 test | 4h |
+| GAP-32 | Pin Graphiti SHA + Dependabot | 1h |
+| GAP-27 | setInterval decay + status endpoint | 3h |
+| GAP-25 | Graceful degradation flag + lite compose | 4h |
+| GAP-24 | npx cli.js wrapper | 3h |
+| GAP-30 | ingest_pr() MCP tool, 3 files | 1d |
+| GAP-34 | Prompt rendering unit tests | 4h |
+| **Total** | | **~4 days** |
 
 ---
 
 ## Adoption Friction Reassessment
 
-| Dimension | Before this session | After this session | v0.3 target |
-|-----------|---------------------|--------------------|-------------|
-| First install | 2/5 | 3/5 (install script, healthcheck fix) | 4/5 (npx) |
+| Dimension | v0.2 | After this session | v0.3 target |
+|-----------|------|-------------------|-------------|
+| First install | 2/5 | 3/5 (install script, healthcheck fix) | 4/5 (npx after GAP-25) |
 | First run | 2/5 | 3/5 (QUICKSTART, persistence warn) | 4/5 (lite stack) |
 | Understanding the value | 2/5 | 4/5 (dashboard, visual conflict review) | 4/5 |
-| Daily use for engineers | 3/5 | 3/5 | 4/5 (reflect observability, notifications) |
-| Operational maturity | 2/5 | 2/5 | 3/5 (decay cron, Graphiti pin) |
+| Daily use for engineers | 3/5 | 3/5 | 4/5 (reflect observability, LLM resilience) |
+| Operational maturity | 2/5 | 2/5 | 3/5 (decay automation, Graphiti pin) |
 | **Overall** | **2/5** | **3/5** | **4/5** |
 
-The gap from 3 to 4 is closed by: `reflect()` observability (engineers trust what they
-cannot see only so long before they turn it off), Slack notifications (knowledge that
-requires manual dashboard checking gets ignored), and `npx` entry point (OSS tools that
-require cloning don't get evaluated). These are the three highest-leverage items for v0.3.
+The gap from 3 to 4 is closed by three changes: `reflect()` result surfaced in SKILL.md
+(engineers trust what they cannot see only so long before they turn it off), LLM retry and
+fallback (governance reliability degrades gracefully instead of silently failing), and the
+lite stack + npx entry point (OSS tools that require cloning don't get evaluated).
 
-The gap from 4 to 5 is closed at v1.0 by: npx zero-config setup, hosted documentation,
-and at least one public case study proving the value in production.
+The gap from 4 to 5 is closed at v1.0 by: hosted documentation, at least one public case
+study, and the analytics features (reflect dashboard, decay health panel) that prove the
+self-evolution loop is working in production.
