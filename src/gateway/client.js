@@ -84,6 +84,22 @@ export class GatewayClient {
   }
 
   /**
+   * Verify the current token by exchanging it for a JWT.
+   * Used by the authenticate() MCP tool to confirm auth works immediately.
+   * @returns {Promise<{ sub: string, project: string, role: string|null, team: string|null, expiresIn: number }>}
+   */
+  async verifyAuth() {
+    const t = await this._getToken()
+    return {
+      sub:       t.sub,
+      project:   t.project,
+      role:      t.role,
+      team:      t.team,
+      expiresIn: Math.floor((t.expiresAt - Date.now()) / 1000),
+    }
+  }
+
+  /**
    * Return the resolved identity from the current JWT.
    * Used by server.js to build the session identity without re-calling GitHub.
    * @returns {Promise<import('../identity/resolver.js').ResolvedIdentity>}
@@ -301,14 +317,46 @@ export class GatewayClient {
 }
 
 /**
- * Singleton gateway client — created once at MCP startup if QUORUM_GATEWAY_URL is set.
+ * Singleton gateway client — created lazily on first use.
  * @type {GatewayClient | null}
  */
 let _client = null
 
 /**
+ * Runtime-injected GitHub OAuth token.
+ * Set by the authenticate() MCP tool after an OAuth login via mcp-playwright.
+ * Stored in-memory only — cleared when the MCP process restarts, requiring re-auth.
+ * @type {string | null}
+ */
+let _runtimeToken = null
+
+/** @type {string | null} */
+let _runtimeProjectId = null
+
+/**
+ * Inject a GitHub OAuth token at runtime (from the authenticate() MCP tool).
+ * Resets the singleton so the next tool call creates a fresh client with
+ * the new token. Token is in-memory only — MCP restart requires re-auth.
+ *
+ * @param {string | null} githubToken - GitHub OAuth access token (gho_...) or null to clear
+ * @param {string | null} [projectId] - Project to authenticate against
+ */
+export function setRuntimeToken(githubToken, projectId = null) {
+  _runtimeToken     = githubToken
+  _runtimeProjectId = projectId
+  _client           = null  // Force recreation of the singleton with the new token
+}
+
+/**
  * Create and return the gateway client singleton.
- * Returns null if QUORUM_GATEWAY_URL is not set (direct mode).
+ * Returns null when:
+ *   - QUORUM_GATEWAY_URL is not set (direct mode — no gateway)
+ *   - QUORUM_GATEWAY_URL is set but no token is available yet (call authenticate() first)
+ *
+ * Token resolution order:
+ *   1. Runtime token injected via authenticate() MCP tool (in-memory, process-scoped)
+ *   2. QUORUM_GITHUB_TOKEN env var (fallback for environments that pre-set it)
+ *
  * @returns {GatewayClient | null}
  */
 export function getGatewayClient() {
@@ -317,27 +365,21 @@ export function getGatewayClient() {
   const url = process.env.QUORUM_GATEWAY_URL
   if (!url) return null
 
-  // TODO(v0.3/GAP-28): Replace PAT exchange with OAuth-issued JWT stored locally
-  // after dashboard login (e.g. ~/.quorum/token). For now QUORUM_GITHUB_TOKEN is
-  // still accepted as a transitional mechanism — it works because /auth/token accepts
-  // any valid GitHub token (PAT or OAuth access token) with read:user scope.
-  const token     = process.env.QUORUM_GITHUB_TOKEN
-  const projectId = process.env.QUORUM_PROJECT_ID ?? 'default'
+  const token     = _runtimeToken ?? process.env.QUORUM_GITHUB_TOKEN ?? null
+  const projectId = _runtimeProjectId ?? process.env.QUORUM_PROJECT_ID ?? 'default'
 
-  if (!token) {
-    throw new Error(
-      'QUORUM_GATEWAY_URL is set but no auth token found. ' +
-      'Set QUORUM_GITHUB_TOKEN temporarily, or log in via the dashboard and ' +
-      'export the JWT as QUORUM_GITHUB_TOKEN until OAuth-based MCP auth lands in v0.3.'
-    )
-  }
+  if (!token) return null  // Not authenticated yet — authenticate() tool will set the token
 
   _client = new GatewayClient(url, token, projectId)
   return _client
 }
 
 /** Reset singleton (for testing). */
-export function _resetGatewayClient() { _client = null }
+export function _resetGatewayClient() {
+  _client           = null
+  _runtimeToken     = null
+  _runtimeProjectId = null
+}
 
 /** URL-encode a path segment. */
 function enc(s) { return encodeURIComponent(s) }

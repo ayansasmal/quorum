@@ -31,6 +31,7 @@ import { ping as pingGraphiti } from './graph/client.js'
 import { loadConfig, stopConfigPoller } from './config/loader.js'
 import { resolveIdentity } from './identity/resolver.js'
 import { getGatewayClient } from './gateway/client.js'
+import * as authenticate from './tools/authenticate.js'
 
 import * as remember from './tools/remember.js'
 import * as recall from './tools/recall.js'
@@ -47,21 +48,28 @@ import * as pending from './tools/pending.js'
 // direct pg.Pool. Tool handlers are unaware of the difference — both expose
 // the same interface for the operations they use.
 
-const gatewayClient = getGatewayClient()
+// Pool resolved at startup for direct mode. In gateway mode the active pool is
+// re-resolved on every tool call (see registerTools) so authenticate() takes effect
+// immediately without a server restart.
+const pool = process.env.QUORUM_GATEWAY_URL
+  ? null  // Gateway mode — pool is resolved dynamically via getGatewayClient()
+  : new pg.Pool({
+      host:                    process.env.POSTGRES_HOST     ?? 'localhost',
+      port:                    parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
+      database:                process.env.POSTGRES_DB       ?? 'quorum_audit',
+      user:                    process.env.POSTGRES_USER     ?? 'quorum',
+      password:                process.env.POSTGRES_PASSWORD ?? 'quorum_local',
+      max:                     10,
+      idleTimeoutMillis:       30000,
+      connectionTimeoutMillis: 5000,
+    })
 
-const pool = gatewayClient ?? new pg.Pool({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
-  database: process.env.POSTGRES_DB ?? 'quorum_audit',
-  user: process.env.POSTGRES_USER ?? 'quorum',
-  password: process.env.POSTGRES_PASSWORD ?? 'quorum_local',
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-})
-
-if (gatewayClient) {
-  console.error(`[Quorum] Gateway mode: routing DB + Graphiti through ${process.env.QUORUM_GATEWAY_URL}`)
+if (process.env.QUORUM_GATEWAY_URL) {
+  const hasToken = !!(process.env.QUORUM_GITHUB_TOKEN)
+  console.error(`[Quorum] Gateway mode: ${process.env.QUORUM_GATEWAY_URL}`)
+  if (!hasToken) {
+    console.error('[Quorum] ℹ  No token at startup — call authenticate() to log in via GitHub OAuth')
+  }
 }
 
 // ── MCP Server ─────────────────────────────────────────────────────────────────
@@ -72,28 +80,52 @@ const server = new McpServer({
 })
 
 const tools = [
-  { name: 'remember',  def: remember },
-  { name: 'recall',    def: recall },
-  { name: 'search',    def: search },
-  { name: 'forget',    def: forget },
-  { name: 'history',   def: history },
-  { name: 'review',    def: review },
-  { name: 'reflect',   def: reflect },
-  { name: 'export',    def: exportTool },
-  { name: 'pending',   def: pending },
+  { name: 'remember',     def: remember },
+  { name: 'recall',       def: recall },
+  { name: 'search',       def: search },
+  { name: 'forget',       def: forget },
+  { name: 'history',      def: history },
+  { name: 'review',       def: review },
+  { name: 'reflect',      def: reflect },
+  { name: 'export',       def: exportTool },
+  { name: 'pending',      def: pending },
+  { name: 'authenticate', def: authenticate },
 ]
 
 /**
  * Register all tools with the MCP server.
  * Identity is captured in the closure and injected into every handler call —
  * it is never sourced from tool input.
+ *
+ * Pool resolution is deferred to call time (not startup) so that the
+ * authenticate() tool can inject a token at runtime and subsequent tool calls
+ * transparently pick up the new gateway client.
+ *
  * @param {import('./identity/resolver.js').ResolvedIdentity} identity
  */
 function registerTools(identity) {
   for (const { name, def } of tools) {
     server.tool(name, def.schema.shape ?? def.schema, async (input) => {
       try {
-        const result = await def.handler(pool, input, identity)
+        // Resolve at call time — picks up any token injected by authenticate()
+        const activePool = getGatewayClient() ?? pool
+
+        // In gateway mode, if no client exists yet, only authenticate() is allowed
+        if (process.env.QUORUM_GATEWAY_URL && !getGatewayClient() && name !== 'authenticate') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error:   'not_authenticated',
+                message: 'Quorum is in gateway mode but no auth token is available. Call authenticate() first.',
+                hint:    'Ask Claude to run the Quorum OAuth login flow using mcp-playwright.',
+              }),
+            }],
+            isError: true,
+          }
+        }
+
+        const result = await def.handler(activePool, input, identity)
         return {
           content: [
             {
@@ -116,8 +148,9 @@ function registerTools(identity) {
 
 async function verifyStoreSync() {
   // In gateway mode, count entries via gateway REST API
-  const pgCount = gatewayClient
-    ? await gatewayClient.countEntries().catch(() => -1)
+  const gw = getGatewayClient()
+  const pgCount = gw
+    ? await gw.countEntries().catch(() => -1)
     : await countEntries(pool).catch(() => -1)
   if (pgCount === -1) {
     console.error('[Quorum] WARNING: Could not reach audit store')
@@ -146,8 +179,10 @@ async function startup() {
     console.error('[Quorum] WARNING: Could not verify audit chain:', err.message)
   }
 
-  // 2. Verify stores are reachable
-  await verifyStoreSync()
+  // 2. Verify stores are reachable (skip in gateway mode if not authenticated yet)
+  if (!process.env.QUORUM_GATEWAY_URL || getGatewayClient()) {
+    await verifyStoreSync()
+  }
 
   // 3. Load config from S3 / local file / env fallback
   // Config must be loaded before identity resolution (identity maps roles from config)
@@ -161,8 +196,9 @@ async function startup() {
   // 4. Resolve caller identity — once per session, injected into all tool calls
   // In gateway mode, identity comes from the JWT (verified by the gateway).
   // In direct mode, identity is resolved locally via the 4-layer chain.
-  const identity = gatewayClient
-    ? await gatewayClient.getIdentity()
+  const activeGatewayClient = getGatewayClient()
+  const identity = activeGatewayClient
+    ? await activeGatewayClient.getIdentity()
     : await resolveIdentity()
   console.error(`[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'})`)
 

@@ -97,15 +97,14 @@ When auth fails, run this flow **without interrupting the engineer**:
 6. Extract the token from the URL fragment:
      window.location.hash  →  parse "oauth" param  →  gho_<token>
 
-7. Write to shell profile (~/.zshrc or ~/.bashrc):
-     export QUORUM_GITHUB_TOKEN=gho_<token>
+7. Call the authenticate() MCP tool:
+     authenticate({ github_token: "gho_<token>", project_id: "<id>" })
+     The token is stored in-memory in the MCP process — no files are written.
+     If the MCP server restarts, re-auth will be required again.
 
-8. Source the profile in the current shell:
-     source ~/.zshrc   (or ~/.bashrc)
+8. Retry the original operation that triggered the auth failure.
 
-9. Retry the original operation that triggered the auth failure.
-
-10. Inform: "Quorum re-auth complete — continuing."
+9. Inform: "Quorum re-auth complete — continuing."
 ```
 
 ### First-time setup (no QUORUM_GATEWAY_URL)
