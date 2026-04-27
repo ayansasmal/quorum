@@ -317,11 +317,19 @@ export function getGatewayClient() {
   const url = process.env.QUORUM_GATEWAY_URL
   if (!url) return null
 
+  // TODO(v0.3/GAP-28): Replace PAT exchange with OAuth-issued JWT stored locally
+  // after dashboard login (e.g. ~/.quorum/token). For now QUORUM_GITHUB_TOKEN is
+  // still accepted as a transitional mechanism — it works because /auth/token accepts
+  // any valid GitHub token (PAT or OAuth access token) with read:user scope.
   const token     = process.env.QUORUM_GITHUB_TOKEN
   const projectId = process.env.QUORUM_PROJECT_ID ?? 'default'
 
   if (!token) {
-    throw new Error('QUORUM_GATEWAY_URL is set but QUORUM_GITHUB_TOKEN is missing')
+    throw new Error(
+      'QUORUM_GATEWAY_URL is set but no auth token found. ' +
+      'Set QUORUM_GITHUB_TOKEN temporarily, or log in via the dashboard and ' +
+      'export the JWT as QUORUM_GITHUB_TOKEN until OAuth-based MCP auth lands in v0.3.'
+    )
   }
 
   _client = new GatewayClient(url, token, projectId)

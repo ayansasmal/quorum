@@ -163,45 +163,22 @@ aws s3 cp quorum.config.json s3://your-quorum-bucket/my-project/config.json
 
 ---
 
-## Step 4 — Get a Quorum JWT
+## Step 4 — Verify the config by logging in
 
-Quorum uses short-lived ES256 JWTs issued by the gateway. The MCP server handles
-this automatically — but it's useful to fetch one manually to verify the config upload
-worked.
+Open the dashboard and sign in with GitHub OAuth to confirm your config was uploaded
+correctly and your membership is recognised:
 
-You need a **GitHub personal access token** (PAT) with `read:user` scope:
+1. Open **http://localhost:3002** in your browser
+2. Click **Sign in with GitHub** — completes the OAuth flow automatically
+3. Enter your `project_id` when prompted on first login
+4. If login succeeds, your config is valid and your `github_username` is recognised
 
-1. Go to: https://github.com/settings/tokens
-2. Create a PAT — scope: `read:user` only
-3. Copy the token
+That's it — no personal access tokens, no manual token exchange. The dashboard handles
+the full OAuth flow and issues a short-lived ES256 JWT scoped to your project.
 
-Exchange it for a Quorum JWT:
-
-```bash
-curl -s -X POST http://localhost:3001/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{
-    "github_token": "ghp_your_token_here",
-    "project_id":   "my-project"
-  }' | python3 -m json.tool
-```
-
-Success looks like:
-
-```json
-{
-  "token": "eyJ...",
-  "expires_in": 3600,
-  "sub": "alice",
-  "project": "my-project",
-  "role": "principal_architect",
-  "team": "platform"
-}
-```
-
-If you see `"Member 'alice-gh' not found in project 'my-project'"`, your
-`github_username` in the config doesn't match the GitHub username on the PAT.
-Check both and re-upload the config.
+> **If login fails with "Member not found":** your `github_username` in the config
+> doesn't match your actual GitHub username. Edit the config and re-upload it (Step 3),
+> then try again.
 
 ---
 
@@ -209,21 +186,20 @@ Check both and re-upload the config.
 
 ### 5a — Set environment variables
 
-The Quorum MCP server needs two variables. Set them in your shell profile
+The Quorum MCP server needs one variable. Set it in your shell profile
 (`~/.zshrc`, `~/.bashrc`, etc.) or in a `.env` file in your project:
 
 ```bash
 export QUORUM_GATEWAY_URL=http://localhost:3001
-export QUORUM_GITHUB_TOKEN=ghp_your_token_here
 ```
 
 `QUORUM_GATEWAY_URL` tells the MCP server where to reach the gateway.
-`QUORUM_GITHUB_TOKEN` is your PAT — the MCP server exchanges it for a JWT at startup
-(one HTTP call, no manual JWT management needed).
+Identity is resolved automatically from your git config (`git config user.email`)
+and matched against your team's `github_username` in the project config.
 
-> **Security note:** The gateway verifies the GitHub token on every JWT request,
-> so engineers only need the PAT and the gateway URL. They never see PostgreSQL
-> credentials, S3 keys, or the graph database password.
+> **Security note:** Engineers only need the gateway URL. They never handle
+> PostgreSQL credentials, S3 keys, or the graph database password — those are
+> held exclusively by the gateway.
 
 ### 5b — Add Quorum to Claude Code
 
@@ -303,14 +279,16 @@ s3://quorum-configs/
   my-project/config.json        ← group_id: "my-project"
 ```
 
-Each engineer connects with their own `project_id` in the token exchange:
+Each engineer sets `QUORUM_GATEWAY_URL` and, on first dashboard login, selects
+their `project_id`. The gateway scopes all graph and audit operations to that project
+automatically via the `group_id` claim in the JWT.
 
 ```bash
-# Alice works on project-alpha
-curl -X POST .../auth/token -d '{"github_token":"...","project_id":"project-alpha"}'
+# Alice — set gateway URL, then open the dashboard and select project-alpha
+export QUORUM_GATEWAY_URL=http://localhost:3001
 
-# Bob works on project-beta
-curl -X POST .../auth/token -d '{"github_token":"...","project_id":"project-beta"}'
+# Bob — same gateway URL, selects project-beta in the dashboard
+export QUORUM_GATEWAY_URL=http://localhost:3001
 ```
 
 Knowledge, conflicts, audit logs, and pending decisions are all scoped per project.
@@ -349,13 +327,15 @@ match any `github_username` in the config. Check your config and re-upload.
 
 **Config changes not reflected after re-upload**
 
-The gateway caches configs in memory. Invalidate it:
+The gateway caches configs in memory. Easiest fix — restart the gateway:
 ```bash
-# Get a JWT first, then:
-curl -X POST http://localhost:3001/config/<project_id>/invalidate \
-  -H "Authorization: Bearer <jwt>"
+docker compose restart gateway
 ```
-Or restart the gateway: `docker compose restart gateway`
+Or, if you have a JWT from the dashboard (visible in browser devtools → Application → Local Storage):
+```bash
+curl -X POST http://localhost:3001/config/<project_id>/invalidate \
+  -H "Authorization: Bearer <jwt_from_dashboard>"
+```
 
 **MCP server can't reach the gateway**
 
@@ -381,7 +361,7 @@ If they diverge, the JWT carries one value but the graph search uses another.
 | 1. Create config | `cp quorum.config.example.json quorum.config.json` + edit |
 | 2. Validate | `curl -X POST localhost:3001/config/validate -d @quorum.config.json` |
 | 3. Upload | `awslocal s3 cp quorum.config.json s3://quorum-configs/<id>/config.json` |
-| 4. Test auth | `curl -X POST localhost:3001/auth/token -d '{"github_token":"...","project_id":"..."}'` |
+| 4. Verify auth | Open http://localhost:3002 → Sign in with GitHub → select project_id |
 | 5. MCP | `claude mcp add quorum -- node /path/to/quorum/src/server.js` |
 | 6. Skill | `cp skill/SKILL.md <your-project>/.claude/skills/quorum.md` |
 | 7. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |

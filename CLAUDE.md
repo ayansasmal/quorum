@@ -36,7 +36,7 @@ graph TD
 - Engineers connect the MCP server directly via `claude mcp add quorum`
 - The dashboard connects through the gateway (GitHub OAuth → ES256 JWT → BFF API)
 - In gateway mode, the MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
-- Identity chain: `QUORUM_GITHUB_TOKEN` → git email → `QUORUM_AUTHOR` → anonymous (first match wins)
+- Identity chain: git email → `QUORUM_AUTHOR` → anonymous (first match wins); dashboard uses GitHub OAuth
 
 > Full detail: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -117,8 +117,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 ```bash
 # MCP server (set in shell or .env)
 QUORUM_GATEWAY_URL=http://localhost:3001   # enables gateway mode
-QUORUM_GITHUB_TOKEN=ghp_...               # identity layer 1 (most authoritative)
-QUORUM_AUTHOR=username                    # identity layer 3 (CI contexts)
+QUORUM_AUTHOR=username                    # identity override (CI contexts; default: git email)
 
 # Gateway (set in docker-compose or deployment env)
 QUORUM_GATEWAY_PORT=3001
