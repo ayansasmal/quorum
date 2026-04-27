@@ -76,7 +76,7 @@ The **Quorum MCP Server** speaks MCP stdio with Claude Code and AI agents. The *
 
 ## Quick Start
 
-> **Full step-by-step guide:** [QUICKSTART.md](QUICKSTART.md)
+> **Full step-by-step guide:** [QUICKSTART.md](docs/QUICKSTART.md)
 
 **Prerequisites:** Node.js 20+, Docker Desktop, `pip install awscli-local`, OpenAI API key
 
@@ -175,4 +175,4 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Apache 2.0 licensed.
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Apache 2.0 licensed.

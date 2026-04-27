@@ -38,7 +38,7 @@ graph TD
 - In gateway mode, the MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
 - Identity chain: `QUORUM_GITHUB_TOKEN` → git email → `QUORUM_AUTHOR` → anonymous (first match wins)
 
-> Full detail: [ARCHITECTURE.md](ARCHITECTURE.md)
+> Full detail: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 
@@ -57,7 +57,7 @@ graph TD
 
 **Not yet built (v0.3+):** PR ingestion, Atlassian integration
 
-> [ROADMAP.md](ROADMAP.md)
+> [ROADMAP.md](docs/ROADMAP.md)
 
 ---
 
@@ -108,7 +108,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 | Atomic ACTIVE transition | Old version → SUPERSEDED and new → ACTIVE in one transaction |
 | Bidirectional audit↔version | Every version record carries `created_by_audit`; every audit entry carries `version_id` |
 
-> Test strategy: [TESTING.md](TESTING.md)
+> Test strategy: [TESTING.md](docs/TESTING.md)
 
 ---
 
@@ -148,7 +148,7 @@ cp skill/SKILL.md .claude/skills/quorum.md
 npm test
 ```
 
-> [QUICKSTART.md](QUICKSTART.md) · [ONBOARDING.md](ONBOARDING.md) · [DEPLOYMENT.md](DEPLOYMENT.md)
+> [QUICKSTART.md](docs/QUICKSTART.md) · [ONBOARDING.md](docs/ONBOARDING.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ---
 
@@ -156,11 +156,11 @@ npm test
 
 | Document | Contents |
 |----------|----------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Component design, Graphiti integration, versioning model, governance flows, entity schema |
-| [TESTING.md](TESTING.md) | Constitutional coverage, test strategy, mocking, CI enforcement |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Helm chart, Crossplane IaC, LocalStack, production config |
-| [QUICKSTART.md](QUICKSTART.md) | Local setup walkthrough with troubleshooting |
-| [ONBOARDING.md](ONBOARDING.md) | Connect an existing project to a running Quorum stack |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines, PR process |
-| [ROADMAP.md](ROADMAP.md) | v0.2 → v1.0 feature roadmap |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component design, Graphiti integration, versioning model, governance flows, entity schema |
+| [TESTING.md](docs/TESTING.md) | Constitutional coverage, test strategy, mocking, CI enforcement |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Helm chart, Crossplane IaC, LocalStack, production config |
+| [QUICKSTART.md](docs/QUICKSTART.md) | Local setup walkthrough with troubleshooting |
+| [ONBOARDING.md](docs/ONBOARDING.md) | Connect an existing project to a running Quorum stack |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Contribution guidelines, PR process |
+| [ROADMAP.md](docs/ROADMAP.md) | v0.2 → v1.0 feature roadmap |
 | [skill/references/](skill/references/) | Tool schemas, conflict guide, knowledge guidelines, onboarding protocol |
