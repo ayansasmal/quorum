@@ -44,22 +44,44 @@ async function extractKnowledge(taskSummary, decisionsMade = [], patternsUsed = 
     return []
   }
 
-  const prompt = `You are extracting reusable engineering knowledge from a completed task.
+  const systemPrompt = `You are a conservative knowledge extractor for an engineering knowledge graph. You extract reusable, team-specific engineering knowledge from a completed task summary.
 
-Task summary: "${taskSummary}"
-${decisionsMade.length ? `Explicit decisions: ${decisionsMade.join(', ')}` : ''}
-${patternsUsed.length ? `Patterns used: ${patternsUsed.join(', ')}` : ''}
+RULES:
+- Base your extraction ONLY on the text provided. Do not infer unstated context, invent technical facts, or draw on information outside this prompt.
+- Over-extraction is worse than under-extraction. If in doubt, do not extract. Returning zero items is a valid and often correct answer.
+- Quality test: ask "If a senior engineer asked 'why did we do X?', would this entry be the answer?" If no, do not extract it.
+- Do NOT extract: generic programming concepts, language/framework basics, implementation details of a single function, debugging steps, temporary workarounds you intend to revert, obvious conclusions (e.g. "we used a for-loop"), restatements of the task itself.
+- Do NOT extract secrets, credentials, API keys, tokens, passwords, personally identifiable information (PII), or security-sensitive configuration values. If a value of this kind appears in the task summary, omit the corresponding item entirely.
+- Extract a maximum of 3 items. Fewer is better when content is thin.
 
-Extract up to 3 pieces of reusable engineering knowledge. For each item return JSON with:
-- topic: domain (e.g. auth, api, db, infra, testing)
-- key: short kebab-case identifier (e.g. token-refresh-strategy)
-- content: the knowledge in 1-3 sentences
-- entity_type: one of Decision, Pattern, Constraint, Runbook, Requirement
-- confidence: 0.35 (generalising from one case), 0.55 (extracting a pattern), or 0.75 (echoing explicit decision)
-- mode: "echoing" | "extracting" | "generalising"
+OUTPUT SCHEMA (return exactly this shape, no extra fields):
+{
+  "items": [
+    {
+      "topic": string,           // one of: auth | api | db | infra | testing | security | payments — or another short domain word if none of these fit
+      "key": string,             // kebab-case, specific enough to be unique (e.g. "jwt-refresh-on-expiry", NOT "auth-approach")
+      "content": string,         // the knowledge in 1-3 sentences
+      "entity_type": string,     // one of: Decision | Pattern | Constraint | Runbook | Requirement
+      "confidence": number,      // 0.35 (generalising from one case) | 0.55 (extracting a pattern) | 0.75 (echoing an explicit decision)
+      "mode": string             // one of: "echoing" | "extracting" | "generalising" — must align with confidence
+    }
+  ]
+}
 
-Only extract team-specific knowledge. Do not extract generic programming concepts.
-Return a JSON array. If nothing is worth capturing, return an empty array [].`
+CONSTRAINTS:
+- Return a JSON OBJECT with an "items" array. Do not return a bare array.
+- items length: 0 to 3 inclusive. Empty array {"items": []} is correct when nothing meets the quality bar.
+- mode must match confidence: 0.75 → "echoing", 0.55 → "extracting", 0.35 → "generalising".
+- Do not add extra fields at any level.
+- Do not explain your reasoning outside the JSON.
+- Reply with only valid JSON.`
+
+  const userPrompt = `Task summary:
+"${taskSummary}"
+${decisionsMade.length ? `\nExplicit decisions made:\n- ${decisionsMade.join('\n- ')}` : ''}
+${patternsUsed.length ? `\nPatterns used:\n- ${patternsUsed.join('\n- ')}` : ''}
+
+Extract reusable engineering knowledge per the rules. Return the JSON object as specified.`
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -69,9 +91,12 @@ Return a JSON array. If nothing is worth capturing, return an empty array [].`
     },
     body: JSON.stringify({
       model: LLM_MODEL,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
       max_tokens: 800,
-      temperature: 0.2,
+      temperature: 0,
       response_format: { type: 'json_object' },
     }),
   })
@@ -80,9 +105,9 @@ Return a JSON array. If nothing is worth capturing, return an empty array [].`
 
   try {
     const data = await response.json()
-    const text = data.choices?.[0]?.message?.content ?? '[]'
+    const text = data.choices?.[0]?.message?.content ?? '{}'
     const parsed = JSON.parse(text)
-    return Array.isArray(parsed) ? parsed : (parsed.items ?? parsed.knowledge ?? [])
+    return Array.isArray(parsed) ? parsed : (parsed.items ?? [])
   } catch {
     return []
   }
