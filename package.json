@@ -15,6 +15,11 @@
     "./cli": "./cli.js"
   },
   "scripts": {
+    "docker:start": "./scripts/setup.sh docker",
+    "docker:rebuild": "./scripts/setup.sh docker rebuild",
+    "docker:clean": "./scripts/setup.sh docker clean",
+    "docker:clean:all": "./scripts/setup.sh docker clean --volumes",
+    "docker:ps": "./scripts/setup.sh docker ps",
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "start:gateway": "node src/gateway/server.js",

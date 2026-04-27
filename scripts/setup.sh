@@ -69,6 +69,7 @@ check_localstack_conflict() {
   # Our own Compose-managed service — already running, nothing to do.
   if [[ "$conflict" == *"localstack"* && "$conflict" == *"quorum"* ]]; then
     ok "Compose-managed LocalStack already running ($conflict)"
+    check_localstack_persistence "$conflict"
     return 0
   fi
 
@@ -76,12 +77,39 @@ check_localstack_conflict() {
   if [[ "$conflict" == *"localstack"* ]]; then
     ok "LocalStack already running ($conflict) — reusing it"
     EXTERNAL_LOCALSTACK="$conflict"
+    check_localstack_persistence "$conflict"
     return 0
   fi
 
   # Unknown container on port 4566 — warn and let Docker handle it.
   warn "Container '$conflict' is already using port 4566."
   warn "If 'docker compose up' fails, stop it first: docker stop $conflict"
+}
+
+# Detect whether a LocalStack container is running with persistence enabled.
+# Persistence requires either PERSISTENCE=1 env var or a volume mounted at
+# /var/lib/localstack. Without it, S3 data (project configs) is lost on restart.
+check_localstack_persistence() {
+  local container="$1"
+
+  local persistence_env
+  persistence_env=$(docker inspect "$container" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | grep "^PERSISTENCE=" | cut -d= -f2)
+
+  local data_volume
+  data_volume=$(docker inspect "$container" \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/localstack"}}{{.Source}}{{end}}{{end}}' \
+    2>/dev/null)
+
+  if [[ "$persistence_env" == "1" ]] || [[ -n "$data_volume" ]]; then
+    ok "LocalStack persistence: ENABLED — S3 configs survive restarts"
+    [[ -n "$data_volume" ]] && info "  Data volume: $data_volume"
+  else
+    warn "LocalStack persistence: DISABLED — S3 configs will be lost on container restart"
+    warn "  To enable: set PERSISTENCE=1 and mount a volume at /var/lib/localstack"
+    warn "  After any LocalStack restart, re-run: ./scripts/init-localstack.sh"
+  fi
 }
 
 # ── docker mode ───────────────────────────────────────────────────────────────
@@ -204,6 +232,94 @@ cmd_docker() {
   echo ""
 }
 
+# ── docker rebuild ────────────────────────────────────────────────────────────
+# Rebuild all custom images (gateway, graphiti, quorum, dashboard) from scratch,
+# then restart the stack. Skips LocalStack — existing data is preserved.
+# Use after Dockerfile or source code changes that don't hot-reload.
+
+cmd_docker_rebuild() {
+  header "Quorum — Rebuild Docker Images"
+  check_docker
+  cd "$PROJECT_ROOT"
+
+  EXTERNAL_LOCALSTACK=""
+  check_localstack_conflict
+
+  info "Stopping stack (keeping volumes)..."
+  docker compose down --remove-orphans 2>/dev/null || true
+
+  info "Rebuilding images without cache..."
+  docker compose build --no-cache --parallel gateway quorum-dashboard quorum graphiti
+
+  if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
+    info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
+    docker compose up -d --scale localstack=0
+    info "Connecting $EXTERNAL_LOCALSTACK to Docker network quorum_default..."
+    docker network connect --alias localstack quorum_default "$EXTERNAL_LOCALSTACK" 2>/dev/null \
+      && ok "$EXTERNAL_LOCALSTACK connected to quorum_default" \
+      || ok "$EXTERNAL_LOCALSTACK already in quorum_default"
+  else
+    docker compose up -d
+  fi
+
+  ok "Rebuild complete"
+  docker compose ps
+}
+
+# ── docker clean ──────────────────────────────────────────────────────────────
+# Stop the stack and remove containers + custom images.
+# Data volumes (postgres_data, falkordb_data, localstack_data) are preserved
+# so you don't lose graph data or S3 configs.
+# Use --volumes / -v to also wipe data volumes (full reset).
+
+cmd_docker_clean() {
+  local wipe_volumes=false
+  [[ "${2:-}" == "--volumes" || "${2:-}" == "-v" ]] && wipe_volumes=true
+
+  header "Quorum — Clean Docker Stack"
+  check_docker
+  cd "$PROJECT_ROOT"
+
+  if $wipe_volumes; then
+    warn "Wiping containers, images, AND data volumes (postgres + falkordb + localstack)"
+    docker compose down --remove-orphans --volumes 2>/dev/null || true
+  else
+    info "Stopping containers (data volumes preserved)..."
+    docker compose down --remove-orphans 2>/dev/null || true
+  fi
+
+  info "Removing custom Quorum images..."
+  docker images --filter "label=com.docker.compose.project=quorum" -q \
+    | xargs docker rmi -f 2>/dev/null \
+    || true
+  # Also remove by name in case labels aren't set
+  for img in quorum-quorum quorum-gateway quorum-quorum-dashboard quorum-graphiti; do
+    docker rmi -f "$img" 2>/dev/null || true
+  done
+
+  ok "Clean complete"
+  if $wipe_volumes; then
+    ok "Data volumes wiped — next 'setup.sh docker' will start fresh"
+  else
+    ok "Data volumes preserved — run 'setup.sh docker' to restart"
+  fi
+}
+
+# ── docker ps ─────────────────────────────────────────────────────────────────
+# Show current status of all Quorum containers with health state.
+
+cmd_docker_ps() {
+  cd "$PROJECT_ROOT"
+  check_docker
+  echo ""
+  docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+  echo ""
+  # LocalStack persistence check for any running LocalStack
+  local ls_container
+  ls_container=$(docker ps --filter "publish=4566" --format "{{.Names}}" 2>/dev/null | head -1)
+  [[ -n "$ls_container" ]] && check_localstack_persistence "$ls_container"
+}
+
 # ── k8s mode ──────────────────────────────────────────────────────────────────
 # Delegates to scripts/k8s-setup.sh with the remaining arguments.
 # Infrastructure (S3) is managed by Crossplane — see crossplane/ for manifests.
@@ -220,18 +336,36 @@ cmd_help() {
   echo ""
   echo -e "${BOLD}Quorum Setup${NC}"
   echo ""
-  echo "  ./scripts/setup.sh docker          Start full stack via Docker Compose"
-  echo "  ./scripts/setup.sh k8s             Deploy to Docker Desktop Kubernetes"
-  echo "  ./scripts/setup.sh k8s teardown    Remove all K8s resources"
-  echo "  ./scripts/setup.sh k8s status      Show current K8s deployment state"
-  echo "  ./scripts/setup.sh k8s build       Rebuild gateway image only"
+  echo -e "  ${BOLD}Docker Compose (local dev)${NC}"
+  echo "  ./scripts/setup.sh docker              Start full stack"
+  echo "  ./scripts/setup.sh docker rebuild      Rebuild all images --no-cache, then start"
+  echo "  ./scripts/setup.sh docker clean        Stop stack + remove images (keep volumes)"
+  echo "  ./scripts/setup.sh docker clean -v     Stop stack + remove images AND volumes (full wipe)"
+  echo "  ./scripts/setup.sh docker ps           Show container status + LocalStack persistence"
   echo ""
-  echo "  Infrastructure (S3 buckets, IAM) — Crossplane only:"
+  echo -e "  ${BOLD}Kubernetes${NC}"
+  echo "  ./scripts/setup.sh k8s                 Deploy to Docker Desktop Kubernetes"
+  echo "  ./scripts/setup.sh k8s teardown        Remove all K8s resources"
+  echo "  ./scripts/setup.sh k8s status          Show current K8s deployment state"
+  echo "  ./scripts/setup.sh k8s build           Rebuild gateway image only"
+  echo ""
+  echo -e "  ${BOLD}npm shortcuts${NC}"
+  echo "  npm run docker:start                   → setup.sh docker"
+  echo "  npm run docker:rebuild                 → setup.sh docker rebuild"
+  echo "  npm run docker:clean                   → setup.sh docker clean"
+  echo "  npm run docker:ps                      → setup.sh docker ps"
+  echo ""
+  echo -e "  ${BOLD}LocalStack persistence${NC}"
+  echo "  Enable with: PERSISTENCE=1 and a volume at /var/lib/localstack"
+  echo "  Without it, S3 project configs are lost on container restart."
+  echo "  After any LocalStack restart: ./scripts/init-localstack.sh"
+  echo ""
+  echo -e "  ${BOLD}Infrastructure (S3 buckets, IAM) — Crossplane only${NC}"
   echo "    kubectl apply -f crossplane/provider/"
   echo "    kubectl apply -f crossplane/bucket/"
   echo "    kubectl apply -f crossplane/objects/"
   echo ""
-  echo "  CronJob runners (also available as npm run job:*):"
+  echo -e "  ${BOLD}CronJob runners (also available as npm run job:*)${NC}"
   echo "    node scripts/decay-confidence.js [--dry-run]"
   echo "    node scripts/archive-audit.js    [--dry-run]"
   echo "    node scripts/recheck-conflicts.js"
@@ -241,7 +375,17 @@ cmd_help() {
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 case "$COMMAND" in
-  docker) cmd_docker ;;
+  docker)
+    SUBCOMMAND="${2:-start}"
+    case "$SUBCOMMAND" in
+      start|"")  cmd_docker ;;
+      rebuild)   cmd_docker_rebuild ;;
+      clean)     cmd_docker_clean "$@" ;;
+      ps)        cmd_docker_ps ;;
+      *)
+        echo -e "${RED}Unknown docker subcommand: $SUBCOMMAND${NC}" >&2
+        cmd_help; exit 1 ;;
+    esac ;;
   k8s)    shift; cmd_k8s "${@}" ;;
   help|--help|-h) cmd_help ;;
   *)
