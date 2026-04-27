@@ -120,11 +120,16 @@ services:
         condition: service_healthy
       graphiti:
         condition: service_healthy
+      localstack:
+        condition: service_healthy
+        required: false   # setup.sh may reuse an external LocalStack; skip if absent
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      # Accept 200 (healthy) or 503 (degraded) — both mean the gateway is alive.
+      # curl -f would kill the container whenever any downstream component is down.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/health | grep -qE '^(200|503)$'"]
       interval: 30s
       timeout: 10s
-      start_period: 15s
+      start_period: 30s
       retries: 3
 
   # Quorum Dashboard — React/Vite app served by Nginx.
