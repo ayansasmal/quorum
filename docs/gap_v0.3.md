@@ -165,29 +165,45 @@ confidence distribution. No dashboard panel needed; engineers can curl it or che
 
 ---
 
-### GAP-28 · Direct-mode MCP server has no auth `MEDIUM`
+### GAP-28 · Component communication security model `MEDIUM` ✅ Already secured
 
-**Friction:** In direct mode (no `QUORUM_GATEWAY_URL`), any process that can reach the stdio
-transport can write to the knowledge graph.
+**Status:** No gap in gateway mode. Direct mode has a documented, acceptable trust boundary.
 
-**What the original plan got wrong:** The threat model is incorrect. MCP stdio transport means
-the server communicates exclusively through stdin/stdout with the process that spawned it.
-Only Claude Code (or whatever MCP client launched the server) can send messages. There is no
-network surface. An `X-Quorum-Api-Key` header only matters for HTTP/SSE transport, which
-Quorum does not use.
+**Full communication map:**
 
-**Resolution:** Document the security boundary. No code change.
+| Leg | Protocol | Auth |
+|-----|----------|------|
+| Claude Code → MCP server | stdio (process spawn) | Process-scoped — only the spawning process can communicate |
+| MCP server → Gateway | HTTP | ES256 JWT (`authenticate()` tool: `gho_` OAuth token → JWT exchange at `POST /auth/token`) |
+| Gateway → PostgreSQL | TCP | Database credentials (user/password) |
+| Gateway → Graphiti | HTTP (Docker internal network) | JWT-gated proxy — `verifyJwt` middleware enforces JWT on every request; `group_id` claim injected server-side, caller cannot override |
+| Gateway → S3/LocalStack | HTTPS | AWS credentials |
+| Browser → Gateway | HTTPS | ES256 JWT (GitHub OAuth flow) |
 
-Add one section to `docs/DEPLOYMENT.md`:
+Every leg in gateway mode is authenticated. The `authenticate()` MCP tool (shipped in v0.2)
+completes the MCP → Gateway leg — Claude Code exchanges a GitHub OAuth token for a short-lived
+ES256 JWT without any manual token management by the engineer.
 
-> **Direct mode vs gateway mode — security boundary**
-> Direct mode is safe for single-engineer local use. The MCP stdio transport is process-scoped:
-> only the MCP client that spawned the server can communicate with it. For shared environments
-> (shared dev VM, team server, any container exposed on a port), use gateway mode — the gateway
-> is the security perimeter, not the MCP server.
+**Direct mode (no `QUORUM_GATEWAY_URL`) trust model:**
+
+| Leg | Auth |
+|-----|------|
+| Claude Code → MCP server | Process-scoped stdio |
+| MCP server → PostgreSQL | Database credentials |
+| MCP server → Graphiti | HTTP, no token — trust via Docker network isolation |
+
+The MCP → Graphiti leg in direct mode has no token. This is acceptable: Graphiti is not
+exposed on a host port by default in `docker-compose.yml` — it is only reachable within
+the Docker network. The trust boundary is the Docker network, not a credential.
+
+**Resolution:** Document the security model. No code change needed.
+
+Add one section to `docs/DEPLOYMENT.md` covering the table above and noting:
+- Gateway mode is the correct choice for any multi-engineer or shared environment
+- Direct mode is single-engineer local only; Graphiti network isolation is the perimeter
 
 **Files to modify:**
-- `docs/DEPLOYMENT.md` — security boundary section
+- `docs/DEPLOYMENT.md` — component security model section
 
 ---
 
