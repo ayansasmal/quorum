@@ -59,6 +59,66 @@ the over-extraction guard and quality bar.
 
 ---
 
+## Authentication
+
+Quorum requires a valid JWT. Auth failures are transient — handle them
+automatically so the engineer stays focused on their task.
+
+### Detecting auth failure
+
+Any of these means auth needs to be (re-)established:
+
+| Signal | Source |
+|--------|--------|
+| `QUORUM_GATEWAY_URL is set but QUORUM_GITHUB_TOKEN is missing` | MCP startup error |
+| `401 Unauthorized` or `jwt_expired` from any tool call | Tool error response |
+| `QUORUM_GITHUB_TOKEN` not set in shell | `echo $QUORUM_GITHUB_TOKEN` returns empty |
+
+### Re-auth flow (use mcp-playwright)
+
+When auth fails, run this flow **without interrupting the engineer**:
+
+```
+1. Inform: "Quorum auth expired — handling re-auth, back in a moment."
+
+2. Read QUORUM_GATEWAY_URL (default: http://localhost:3001)
+   Read QUORUM_PROJECT_ID (default: default)
+
+3. Use mcp-playwright to open:
+     {QUORUM_GATEWAY_URL}/auth/github?project_id={QUORUM_PROJECT_ID}
+
+4. Wait for the GitHub OAuth page to load.
+   If the engineer is not already logged into GitHub, they will need to
+   approve — tell them: "Please approve the GitHub login in the browser."
+
+5. After GitHub redirects back, the URL will be:
+     http://localhost:3002/login#oauth=gho_<token>&project_id=<id>
+
+6. Extract the token from the URL fragment:
+     window.location.hash  →  parse "oauth" param  →  gho_<token>
+
+7. Write to shell profile (~/.zshrc or ~/.bashrc):
+     export QUORUM_GITHUB_TOKEN=gho_<token>
+
+8. Source the profile in the current shell:
+     source ~/.zshrc   (or ~/.bashrc)
+
+9. Retry the original operation that triggered the auth failure.
+
+10. Inform: "Quorum re-auth complete — continuing."
+```
+
+### First-time setup (no QUORUM_GATEWAY_URL)
+
+If `QUORUM_GATEWAY_URL` is also missing, the MCP server is running in
+**direct mode** (no gateway). In direct mode, auth is not required — skip
+the re-auth flow entirely. Identity comes from `git config user.email`.
+
+If the engineer wants gateway mode, ask them to set `QUORUM_GATEWAY_URL`
+and then run the re-auth flow above.
+
+---
+
 ## Onboarding a New Project
 
 **Trigger phrases:** "add this project to Quorum", "onboard this project",
