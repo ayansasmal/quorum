@@ -184,22 +184,52 @@ the full OAuth flow and issues a short-lived ES256 JWT scoped to your project.
 
 ## Step 5 — Connect Claude Code
 
-### 5a — Set environment variables
+### 5a — Authenticate via GitHub OAuth (CLI login with Playwright)
 
-The Quorum MCP server needs one variable. Set it in your shell profile
-(`~/.zshrc`, `~/.bashrc`, etc.) or in a `.env` file in your project:
+Authentication is GitHub OAuth — no personal access tokens needed.
+Use the `mcp-playwright` MCP server to open the dashboard, complete the
+GitHub login, and extract your OAuth token automatically.
+
+Ask Claude to run the following flow (or run it yourself if you have
+Playwright wired up directly):
+
+```
+1. Open http://localhost:3001/auth/github?project_id=<your_project_id>
+2. Wait for the GitHub OAuth page to load and log in
+3. After GitHub redirects back, the URL will contain:
+     http://localhost:3002/login#oauth=gho_<token>&project_id=<id>
+4. Extract the oauth token from the URL fragment
+5. Export it as QUORUM_GITHUB_TOKEN
+```
+
+With `mcp-playwright`, Claude does this automatically:
+
+```
+Ask Claude:
+  "Log me into Quorum for project my-project.
+   Open http://localhost:3001/auth/github?project_id=my-project,
+   complete the GitHub login, extract the oauth token from the URL
+   fragment, and set QUORUM_GITHUB_TOKEN in my shell profile."
+```
+
+Claude will use Playwright to open the browser, wait for you to approve
+the GitHub OAuth screen, then read `window.location.hash` to extract the
+token and write it to `~/.zshrc` (or whichever shell profile you use).
+
+Once extracted, set it in your shell:
 
 ```bash
 export QUORUM_GATEWAY_URL=http://localhost:3001
+export QUORUM_GITHUB_TOKEN=gho_<extracted_token>
 ```
 
-`QUORUM_GATEWAY_URL` tells the MCP server where to reach the gateway.
-Identity is resolved automatically from your git config (`git config user.email`)
-and matched against your team's `github_username` in the project config.
+> **Note:** `gho_` tokens are GitHub OAuth access tokens — they work
+> identically to PATs at the `/auth/token` endpoint. They expire when you
+> revoke the Quorum OAuth App from your GitHub account settings.
 
-> **Security note:** Engineers only need the gateway URL. They never handle
-> PostgreSQL credentials, S3 keys, or the graph database password — those are
-> held exclusively by the gateway.
+> **Security note:** Engineers only need the gateway URL and their OAuth
+> token. They never handle PostgreSQL credentials, S3 keys, or the graph
+> database password — those are held exclusively by the gateway.
 
 ### 5b — Add Quorum to Claude Code
 
@@ -361,10 +391,11 @@ If they diverge, the JWT carries one value but the graph search uses another.
 | 1. Create config | `cp quorum.config.example.json quorum.config.json` + edit |
 | 2. Validate | `curl -X POST localhost:3001/config/validate -d @quorum.config.json` |
 | 3. Upload | `awslocal s3 cp quorum.config.json s3://quorum-configs/<id>/config.json` |
-| 4. Verify auth | Open http://localhost:3002 → Sign in with GitHub → select project_id |
-| 5. MCP | `claude mcp add quorum -- node /path/to/quorum/src/server.js` |
-| 6. Skill | `cp skill/SKILL.md <your-project>/.claude/skills/quorum.md` |
-| 7. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
+| 4. Verify config | Open http://localhost:3002 → Sign in with GitHub → confirm project loads |
+| 5. CLI auth | Ask Claude: open `/auth/github?project_id=<id>` via Playwright → extract `gho_` token → `QUORUM_GITHUB_TOKEN` |
+| 6. MCP | `export QUORUM_GATEWAY_URL=http://localhost:3001` then `claude mcp add quorum -- node /path/to/quorum/src/server.js` |
+| 7. Skill | `cp skill/SKILL.md <your-project>/.claude/skills/quorum.md` |
+| 8. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
 
 ---
 
