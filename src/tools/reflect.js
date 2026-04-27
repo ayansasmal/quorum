@@ -107,7 +107,7 @@ Extract reusable engineering knowledge per the rules. Return the JSON object as 
     const data = await response.json()
     const text = data.choices?.[0]?.message?.content ?? '{}'
     const parsed = JSON.parse(text)
-    return Array.isArray(parsed) ? parsed : (parsed.items ?? [])
+    return parsed.items ?? []
   } catch {
     return []
   }

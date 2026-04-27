@@ -240,7 +240,16 @@ Produce the JSON reviewer brief as specified.`
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const data = await response.json()
-    return JSON.parse(data.choices?.[0]?.message?.content ?? '{}')
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}')
+    // Clamp array lengths to the bounds stated in the prompt so a non-compliant
+    // model response never silently passes through with 0 or 10 items.
+    const risks = Array.isArray(parsed.risks_if_approved) ? parsed.risks_if_approved : []
+    const questions = Array.isArray(parsed.questions_for_reviewer) ? parsed.questions_for_reviewer : []
+    return {
+      ...parsed,
+      risks_if_approved:        risks.slice(0, 4).length >= 2 ? risks.slice(0, 4) : risks.slice(0, 4).concat(Array(Math.max(0, 2 - risks.length)).fill('Review this aspect carefully before deciding.')),
+      questions_for_reviewer:   questions.slice(0, 3).length >= 2 ? questions.slice(0, 3) : questions.slice(0, 3).concat(Array(Math.max(0, 2 - questions.length)).fill('Is the incoming knowledge correct in this context?')),
+    }
   } catch (err) {
     console.error(`[Quorum:conflict] Enrichment LLM call failed: ${err.message}`)
     return {
