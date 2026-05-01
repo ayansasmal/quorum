@@ -29,6 +29,8 @@ graph TD
     GW -->|JWT-gated proxy| Graphiti[Graphiti MCP\nPython :8001]
     GW --> PG
     GW -->|HeadBucket / GetObject| S3[S3 / LocalStack\nProject configs]
+    GW -->|read-through cache| DDB[(DynamoDB / LocalStack\nConfigs + Memberships)]
+    S3 -->|POST /sync/configs| DDB
     Graphiti --> FalkorDB[(FalkorDB\n:6379)]
 ```
 
@@ -46,14 +48,17 @@ graph TD
 
 **Built and working:**
 - MCP server with 10 tools: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`
-- Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, rate limiting, JWKS endpoint
+- Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, DynamoDB read-through cache, rate limiting, JWKS endpoint
 - Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status
+- Netflix-style project selector: `POST /auth/projects` (GitHub token discovery) + `POST /auth/switch` (JWT-based switching, no re-OAuth)
+- DynamoDB layer: `quorum-configs` table (config cache with TTL) + `quorum-user-projects` table (membership index with GSI)
+- `POST /sync/configs`: EventBridge-compatible S3→DDB full sync (dual auth: sync token or `principal_architect` JWT)
 - Dual-store audit pipeline (PostgreSQL + Graphiti) with SHA256 tamper-evident chain
 - Governance: conflict detection (semantic + LLM), authority weighting, confidence decay, human-in-the-loop
 - Versioning: append-only, bidirectional audit↔version references, `triggered_by` on every write
 - Multi-project isolation via `group_id` scoping in every graph operation
 - Self-evolving skill: `skill/SKILL.md` (minimal) + `skill/references/`
-- Local dev: Docker Compose + LocalStack S3
+- Local dev: Docker Compose + LocalStack (S3 + DynamoDB)
 
 **Not yet built (v0.3+):** PR ingestion, Atlassian integration
 
@@ -73,7 +78,7 @@ src/
   graph/                  ← client.js (Graphiti MCP HTTP) · schema.js · queries.js
   config/                 ← schema.js (Zod) · loader.js · migrations.js
   identity/               ← resolver.js (4-layer identity chain)
-  gateway/                ← server.js · routes/ · middleware/ · keys.js · config-cache.js
+  gateway/                ← server.js · routes/ · middleware/ · keys.js · config-cache.js · ddb.js
   export/                 ← markdown.js · confluence.js
 
 dashboard/src/
@@ -125,6 +130,9 @@ POSTGRES_HOST · POSTGRES_PORT · POSTGRES_DB · POSTGRES_USER · POSTGRES_PASSW
 GRAPHITI_URL=http://graphiti:8000
 FALKORDB_HOST=falkordb  FALKORDB_PORT=6379
 QUORUM_CONFIG_BUCKET=quorum-configs
+QUORUM_DDB_CONFIGS_TABLE=quorum-configs          # default: quorum-configs
+QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects  # default: quorum-user-projects
+QUORUM_SYNC_SECRET=<static-secret>               # EventBridge sync token (optional)
 AWS_REGION · AWS_ENDPOINT_URL · AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY
 
 # Graphiti sidecar (Python container — local dev uses OpenAI)

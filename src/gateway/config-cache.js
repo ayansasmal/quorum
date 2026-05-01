@@ -21,12 +21,22 @@ const cache = new Map()
 let s3Client = null
 
 /**
+ * Lazy S3Client singleton honouring AWS_ENDPOINT_URL (LocalStack) and AWS_REGION.
  * @returns {S3Client}
  */
 function getS3() {
   if (!s3Client) {
+    const endpoint = process.env.AWS_ENDPOINT_URL
     s3Client = new S3Client({
-      region: process.env.AWS_REGION ?? 'ap-southeast-2',
+      region:         process.env.AWS_REGION ?? 'us-east-1',
+      endpoint:       endpoint || undefined,
+      forcePathStyle: !!endpoint,
+      credentials:    endpoint
+        ? {
+            accessKeyId:     process.env.AWS_ACCESS_KEY_ID     ?? 'test',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
+          }
+        : undefined,
     })
   }
   return s3Client
