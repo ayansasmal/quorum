@@ -21,6 +21,7 @@ import { SignJWT } from 'jose'
 import { getKeys } from '../keys.js'
 import { loadProjectConfig } from '../config-cache.js'
 import { verifyJwt } from '../middleware/verify-jwt.js'
+import { getUserProjects } from '../ddb.js'
 
 const router = Router()
 
@@ -151,6 +152,20 @@ router.post('/projects', async (req, res) => {
     return res.status(401).json({ error: 'github_auth_failed', message: err.message })
   }
 
+  // Fast path — DDB lookup. On any failure or empty result, fall through to PostgreSQL.
+  try {
+    const ddbProjects = await getUserProjects(githubLogin)
+    if (ddbProjects && ddbProjects.length > 0) {
+      return res.json({
+        projects: ddbProjects,
+        github_login: githubLogin,
+        source: 'ddb',
+      })
+    }
+  } catch {
+    // Fall through to PostgreSQL
+  }
+
   const pool = req.app.locals.pool
   try {
     const result = await pool.query(
@@ -176,7 +191,7 @@ router.post('/projects', async (req, res) => {
       }
     })
 
-    res.json({ projects, github_login: githubLogin })
+    res.json({ projects, github_login: githubLogin, source: 'db' })
   } catch (err) {
     res.status(500).json({ error: 'db_error', message: err.message })
   }

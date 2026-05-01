@@ -11,6 +11,7 @@
 
 import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { QuorumConfigSchema } from '../config/schema.js'
+import { getConfig as ddbGetConfig, putConfig as ddbPutConfig, syncProjectMembers as ddbSyncProjectMembers } from './ddb.js'
 
 const TTL_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -57,6 +58,19 @@ export async function loadProjectConfig(projectId) {
     return cached.config
   }
 
+  // DDB read-through (fast path) — skips S3 entirely on hit.
+  // DDB is best-effort: on any error we fall through to S3 silently.
+  try {
+    const ddbConfig = await ddbGetConfig(projectId)
+    if (ddbConfig) {
+      const validated = QuorumConfigSchema.parse(ddbConfig)
+      cache.set(projectId, { config: validated, etag: null, loadedAt: now })
+      return validated
+    }
+  } catch {
+    // Cache miss / validation failure — fall through to S3
+  }
+
   // Check ETag for conditional refresh
   if (cached) {
     try {
@@ -82,6 +96,23 @@ export async function loadProjectConfig(projectId) {
     etag: response.ETag ?? null,
     loadedAt: now,
   })
+
+  // DDB write-back — best-effort. Build member rows from config.members + role floors.
+  try {
+    const members = (config.members ?? []).map((m) => ({
+      github_username: m.github_username,
+      role:            m.role,
+      team:            m.team,
+      base_confidence: m.role && config.roles?.[m.role]
+        ? config.roles[m.role].base_confidence
+        : 0.5,
+    })).filter((m) => m.github_username)
+
+    await ddbPutConfig(projectId, config, response.ETag ?? null)
+    await ddbSyncProjectMembers(projectId, config.project, config.project, members)
+  } catch (err) {
+    console.error(`[Gateway] DDB write-back failed for ${projectId}: ${err.message}`)
+  }
 
   return config
 }

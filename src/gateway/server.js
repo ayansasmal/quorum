@@ -30,6 +30,7 @@
  *   GET  /api/search                    — dashboard: semantic search via Graphiti
  *   POST /api/review/:id                — dashboard: approve / reject / request_changes
  *   POST /api/bump/:topic/:key          — dashboard: confidence bump (JWT auth)
+ *   POST /sync/configs                  — trigger full S3→DDB sync (sync token or principal_architect JWT)
  *   GET  /health                        — health check
  */
 
@@ -46,6 +47,7 @@ import configRoutes    from './routes/config.js'
 import projectsRoutes  from './routes/projects.js'
 import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
+import syncRoutes      from './routes/sync.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
 import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
@@ -91,6 +93,8 @@ app.use('/config',                            configRoutes)
 app.use('/projects', verifyJwt, engineerLimit,              projectsRoutes)
 app.use('/bump',                              bumpRoutes)  // MCP server path (X-Quorum-Token)
 app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) // dashboard BFF
+// Sync route handles its own auth (sync token OR JWT principal_architect)
+app.use('/sync',                              syncRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 

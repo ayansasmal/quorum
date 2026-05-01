@@ -10,7 +10,7 @@ services:
     ports:
       - "4566:4566"
     environment:
-      - SERVICES=s3
+      - SERVICES=s3,dynamodb
       - DEFAULT_REGION=us-east-1
       - AWS_DEFAULT_REGION=us-east-1
     volumes:
@@ -99,6 +99,9 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
+      - QUORUM_DDB_CONFIGS_TABLE=${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}
+      - QUORUM_DDB_USER_PROJECTS_TABLE=${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}
+      - QUORUM_SYNC_SECRET=${QUORUM_SYNC_SECRET:-}
       # JWT signing keys — generate with openssl, store in secrets manager for production
       # Leave unset in dev: gateway generates an ephemeral key pair automatically
       - QUORUM_JWT_PRIVATE_KEY=${QUORUM_JWT_PRIVATE_KEY:-}

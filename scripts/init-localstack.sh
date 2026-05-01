@@ -104,6 +104,53 @@ else
   fi
 fi
 
+# ── DynamoDB tables ────────────────────────────────────────────────────────────
+CONFIGS_TABLE="${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}"
+USER_PROJECTS_TABLE="${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}"
+
+# quorum-configs — project config cache
+if awslocal dynamodb describe-table --table-name "$CONFIGS_TABLE" &>/dev/null 2>&1; then
+  ok "DynamoDB table already exists: $CONFIGS_TABLE"
+else
+  awslocal dynamodb create-table \
+    --table-name "$CONFIGS_TABLE" \
+    --attribute-definitions AttributeName=project_id,AttributeType=S \
+    --key-schema AttributeName=project_id,KeyType=HASH \
+    --billing-mode PAY_PER_REQUEST \
+    --region us-east-1 > /dev/null
+  # Enable TTL on the ttl attribute
+  awslocal dynamodb update-time-to-live \
+    --table-name "$CONFIGS_TABLE" \
+    --time-to-live-specification "Enabled=true,AttributeName=ttl" \
+    --region us-east-1 > /dev/null
+  ok "DynamoDB table created: $CONFIGS_TABLE"
+fi
+
+# quorum-user-projects — user→project mapping with GSI
+if awslocal dynamodb describe-table --table-name "$USER_PROJECTS_TABLE" &>/dev/null 2>&1; then
+  ok "DynamoDB table already exists: $USER_PROJECTS_TABLE"
+else
+  awslocal dynamodb create-table \
+    --table-name "$USER_PROJECTS_TABLE" \
+    --attribute-definitions \
+      AttributeName=github_username,AttributeType=S \
+      AttributeName=project_id,AttributeType=S \
+    --key-schema \
+      AttributeName=github_username,KeyType=HASH \
+      AttributeName=project_id,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST \
+    --global-secondary-indexes '[{
+      "IndexName": "ProjectMembersIndex",
+      "KeySchema": [
+        {"AttributeName":"project_id","KeyType":"HASH"},
+        {"AttributeName":"github_username","KeyType":"RANGE"}
+      ],
+      "Projection": {"ProjectionType":"ALL"}
+    }]' \
+    --region us-east-1 > /dev/null
+  ok "DynamoDB table created: $USER_PROJECTS_TABLE (GSI: ProjectMembersIndex)"
+fi
+
 # ── Show available configs ────────────────────────────────────────────────────
 echo ""
 info "Available configs in s3://$BUCKET/:"
