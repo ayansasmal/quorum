@@ -215,7 +215,9 @@ cmd_docker() {
   fi
 
   header "Seed data"
-  npm run seed
+  # Seed runs on the host — override GRAPHITI_URL from the Docker-internal default
+  # (http://graphiti:8000) to the host-facing port so fetch() can reach it.
+  GRAPHITI_URL=http://localhost:8001 npm run seed
 
   header "Setup complete"
   echo ""
