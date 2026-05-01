@@ -35,6 +35,11 @@ PROJECT_ID="${QUORUM_PROJECT_ID:-my-team}"
 CONFIG_SRC="$PROJECT_ROOT/quorum.config.example.json"
 S3_KEY="$PROJECT_ID/config.json"
 
+# Region used for all awslocal calls. Honour AWS_REGION if set (e.g. from .env),
+# otherwise default to us-east-1. All clients (ddb.js, config-cache.js, etc.)
+# use the same fallback so everything stays in the same region.
+REGION="${AWS_REGION:-us-east-1}"
+
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; NC='\033[0m'
@@ -68,7 +73,7 @@ else
   if awslocal s3api head-bucket --bucket "$BUCKET" &>/dev/null 2>&1; then
     ok "Bucket already exists: s3://$BUCKET"
   else
-    awslocal s3api create-bucket --bucket "$BUCKET" --region us-east-1 &>/dev/null
+    awslocal s3api create-bucket --bucket "$BUCKET" --region "$REGION" &>/dev/null
     ok "Bucket created: s3://$BUCKET"
   fi
 
@@ -109,7 +114,7 @@ CONFIGS_TABLE="${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}"
 USER_PROJECTS_TABLE="${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}"
 
 # quorum-configs — project config cache
-if awslocal dynamodb describe-table --table-name "$CONFIGS_TABLE" &>/dev/null 2>&1; then
+if awslocal dynamodb describe-table --table-name "$CONFIGS_TABLE" --region "$REGION" &>/dev/null 2>&1; then
   ok "DynamoDB table already exists: $CONFIGS_TABLE"
 else
   awslocal dynamodb create-table \
@@ -117,17 +122,17 @@ else
     --attribute-definitions AttributeName=project_id,AttributeType=S \
     --key-schema AttributeName=project_id,KeyType=HASH \
     --billing-mode PAY_PER_REQUEST \
-    --region us-east-1 > /dev/null
+    --region "$REGION" > /dev/null
   # Enable TTL on the ttl attribute
   awslocal dynamodb update-time-to-live \
     --table-name "$CONFIGS_TABLE" \
     --time-to-live-specification "Enabled=true,AttributeName=ttl" \
-    --region us-east-1 > /dev/null
+    --region "$REGION" > /dev/null
   ok "DynamoDB table created: $CONFIGS_TABLE"
 fi
 
 # quorum-user-projects — user→project mapping with GSI
-if awslocal dynamodb describe-table --table-name "$USER_PROJECTS_TABLE" &>/dev/null 2>&1; then
+if awslocal dynamodb describe-table --table-name "$USER_PROJECTS_TABLE" --region "$REGION" &>/dev/null 2>&1; then
   ok "DynamoDB table already exists: $USER_PROJECTS_TABLE"
 else
   awslocal dynamodb create-table \
@@ -147,7 +152,7 @@ else
       ],
       "Projection": {"ProjectionType":"ALL"}
     }]' \
-    --region us-east-1 > /dev/null
+    --region "$REGION" > /dev/null
   ok "DynamoDB table created: $USER_PROJECTS_TABLE (GSI: ProjectMembersIndex)"
 fi
 
