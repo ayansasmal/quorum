@@ -7,15 +7,16 @@ import { registerTokenGetter, registerLogout, registerRefresher } from './api/cl
 import Layout from './components/layout/Layout.jsx'
 import SessionExpiredModal from './components/session/SessionExpiredModal.jsx'
 
-// Pages — lazy-loaded to keep initial bundle small
-import Login     from './pages/Login.jsx'
-import Stats     from './pages/Stats.jsx'
-import Graph     from './pages/Graph.jsx'
-import Pending   from './pages/Pending.jsx'
-import Knowledge from './pages/Knowledge.jsx'
-import Audit     from './pages/Audit.jsx'
-import Config    from './pages/Config.jsx'
-import Status    from './pages/Status.jsx'
+// Pages
+import Login           from './pages/Login.jsx'
+import ProjectSelector from './pages/ProjectSelector.jsx'
+import Stats           from './pages/Stats.jsx'
+import Graph           from './pages/Graph.jsx'
+import Pending         from './pages/Pending.jsx'
+import Knowledge       from './pages/Knowledge.jsx'
+import Audit           from './pages/Audit.jsx'
+import Config          from './pages/Config.jsx'
+import Status          from './pages/Status.jsx'
 
 /**
  * Registers the current JWT with the API client and sets up:
@@ -23,13 +24,9 @@ import Status    from './pages/Status.jsx'
  *   - Browser notification polling (pending count change)
  */
 function AppSetup({ children }) {
-  const { token, logout, refresh, user } = useAuth()
-  const qc                               = useQueryClient()
-  const prevPendingRef                   = useRef(null)
+  const { token, logout, refresh } = useAuth()
+  const qc                         = useQueryClient()
 
-  // Register auth callbacks with the API client.
-  // - token getter re-registered whenever token changes (closure captures latest value)
-  // - logout + refresh stable references, re-registered when they change
   useEffect(() => {
     registerTokenGetter(() => token)
     registerRefresher(refresh)
@@ -39,7 +36,7 @@ function AppSetup({ children }) {
     registerLogout(logout)
   }, [logout])
 
-  // Clear all cached queries on logout
+  // Clear all cached queries on logout or project switch
   useEffect(() => {
     if (!token) qc.clear()
   }, [token, qc])
@@ -59,11 +56,20 @@ function AppSetup({ children }) {
   )
 }
 
-/** Redirect unauthenticated users to /login. */
+/**
+ * Redirect unauthenticated users to /login.
+ * Redirect users in 'selecting' phase to /select-project.
+ */
 function ProtectedRoute() {
-  const { token } = useAuth()
-  const location  = useLocation()
-  if (!token) return <Navigate to="/login" state={{ from: location }} replace />
+  const { token, authPhase } = useAuth()
+  const location             = useLocation()
+
+  if (authPhase === 'selecting') {
+    return <Navigate to="/select-project" replace />
+  }
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />
+  }
   return (
     <Layout>
       <Outlet />
@@ -71,27 +77,39 @@ function ProtectedRoute() {
   )
 }
 
+/**
+ * Guard for /select-project — redirect away if already authenticated
+ * or not yet through OAuth.
+ */
+function SelectorRoute() {
+  const { authPhase } = useAuth()
+  if (authPhase === 'authenticated') return <Navigate to="/" replace />
+  if (authPhase === 'unauthenticated') return <Navigate to="/login" replace />
+  return <ProjectSelector />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <ThemeProvider>
-      <AuthProvider>
-        <AppSetup>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route element={<ProtectedRoute />}>
-              <Route path="/"          element={<Stats />} />
-              <Route path="/graph"     element={<Graph />} />
-              <Route path="/pending"   element={<Pending />} />
-              <Route path="/knowledge" element={<Knowledge />} />
-              <Route path="/audit"     element={<Audit />} />
-              <Route path="/config"    element={<Config />} />
-              <Route path="/status"    element={<Status />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AppSetup>
-      </AuthProvider>
+        <AuthProvider>
+          <AppSetup>
+            <Routes>
+              <Route path="/login"          element={<Login />} />
+              <Route path="/select-project" element={<SelectorRoute />} />
+              <Route element={<ProtectedRoute />}>
+                <Route path="/"          element={<Stats />} />
+                <Route path="/graph"     element={<Graph />} />
+                <Route path="/pending"   element={<Pending />} />
+                <Route path="/knowledge" element={<Knowledge />} />
+                <Route path="/audit"     element={<Audit />} />
+                <Route path="/config"    element={<Config />} />
+                <Route path="/status"    element={<Status />} />
+              </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppSetup>
+        </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>
   )

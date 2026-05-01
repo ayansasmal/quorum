@@ -132,6 +132,129 @@ router.post('/token', async (req, res) => {
   })
 })
 
+// POST /auth/projects
+// Discover all projects the caller belongs to using only a GitHub OAuth token.
+// Intentionally sits outside JWT auth — this is the step BEFORE JWT issuance.
+// Used by the dashboard project selector to populate cards after OAuth.
+router.post('/projects', async (req, res) => {
+  const { github_token } = req.body ?? {}
+
+  if (!github_token) {
+    return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
+  }
+
+  // Verify GitHub token server-side — caller cannot self-assert their username
+  let githubLogin
+  try {
+    githubLogin = await verifyGitHubToken(github_token)
+  } catch (err) {
+    return res.status(401).json({ error: 'github_auth_failed', message: err.message })
+  }
+
+  const pool = req.app.locals.pool
+  try {
+    const result = await pool.query(
+      `SELECT id, slug, name, status, config_version, created_at, members
+       FROM projects
+       WHERE status = 'ACTIVE'
+         AND members @> $1::jsonb`,
+      [JSON.stringify([{ github_username: githubLogin }])],
+    )
+
+    const projects = result.rows.map((row) => {
+      const member = row.members.find(
+        (m) => m.github_username?.toLowerCase() === githubLogin.toLowerCase(),
+      )
+      return {
+        id:           row.id,
+        slug:         row.slug,
+        name:         row.name,
+        role:         member?.role  ?? null,
+        team:         member?.team  ?? null,
+        member_count: row.members.length,
+        created_at:   row.created_at,
+      }
+    })
+
+    res.json({ projects, github_login: githubLogin })
+  } catch (err) {
+    res.status(500).json({ error: 'db_error', message: err.message })
+  }
+})
+
+// POST /auth/switch
+// Switch the active project scope without re-authenticating with GitHub.
+// The existing JWT proves identity; this issues a new JWT scoped to the target project.
+// Verifies membership in the target project before issuing.
+router.post('/switch', verifyJwt, async (req, res) => {
+  const { project_id } = req.body ?? {}
+  const caller         = req.user.sub
+
+  if (!project_id) {
+    return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
+  }
+
+  const pool = req.app.locals.pool
+  let row
+  try {
+    const result = await pool.query(
+      `SELECT id, slug, name, members
+       FROM projects
+       WHERE (id = $1 OR slug = $1) AND status = 'ACTIVE'`,
+      [project_id],
+    )
+    row = result.rows[0]
+  } catch (err) {
+    return res.status(500).json({ error: 'db_error', message: err.message })
+  }
+
+  if (!row) {
+    return res.status(404).json({
+      error:   'project_not_found',
+      message: `Project '${project_id}' not found`,
+    })
+  }
+
+  const member = row.members.find(
+    (m) => m.github_username?.toLowerCase() === caller.toLowerCase(),
+  )
+  if (!member) {
+    return res.status(403).json({
+      error:   'not_a_member',
+      message: `You are not a member of project '${project_id}'`,
+    })
+  }
+
+  const role           = member.role ?? null
+  const team           = member.team ?? null
+  const baseConfidence = member.base_confidence ?? 0.7
+
+  const { privateKey, kid } = getKeys()
+  const token = await new SignJWT({
+    sub:             caller,
+    project:         row.slug,
+    role,
+    team,
+    method:          'jwt_switch',
+    base_confidence: baseConfidence,
+  })
+    .setProtectedHeader({ alg: 'ES256', kid })
+    .setIssuedAt()
+    .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
+    .setIssuer('quorum-gateway')
+    .sign(privateKey)
+
+  res.json({
+    token,
+    expires_in:      TOKEN_TTL_SECONDS,
+    sub:             caller,
+    project:         row.slug,
+    role,
+    team,
+    base_confidence: baseConfidence,
+  })
+})
+
 // POST /auth/refresh
 // Exchange a still-valid Quorum JWT for a fresh one — no GitHub re-auth needed.
 // The existing JWT IS the proof of identity; we just extend the expiry.
