@@ -125,21 +125,17 @@ router.use((req, res, next) => {
   return verifyJwt(req, res, next)
 })
 
-// POST /sync/configs
-router.post('/configs', async (req, res) => {
-  if (!authSync(req)) {
-    return res.status(403).json({
-      error:   'forbidden',
-      message: 'Sync requires X-Quorum-Sync-Token or principal_architect JWT',
-    })
-  }
-
+/**
+ * Sync all project configs from S3 to DynamoDB.
+ * Exported so startup() can call it directly without going through HTTP.
+ * Non-fatal — logs errors but never throws.
+ * @returns {Promise<{ synced: number, failed: Array<{project_id: string, error: string}>, duration_ms: number }>}
+ */
+export async function syncAllConfigs() {
   const bucket = process.env.QUORUM_CONFIG_BUCKET
   if (!bucket) {
-    return res.status(500).json({
-      error:   'config_error',
-      message: 'QUORUM_CONFIG_BUCKET not set',
-    })
+    console.error('[Gateway] syncAllConfigs: QUORUM_CONFIG_BUCKET not set — skipping')
+    return { synced: 0, failed: [], duration_ms: 0 }
   }
 
   const startedAt = Date.now()
@@ -160,25 +156,38 @@ router.post('/configs', async (req, res) => {
       token = result.IsTruncated ? result.NextContinuationToken : undefined
     } while (token)
   } catch (err) {
-    return res.status(502).json({
-      error:   's3_list_failed',
-      message: err.message,
-    })
+    console.error(`[Gateway] syncAllConfigs: S3 list failed — ${err.message}`)
+    return { synced: 0, failed: [], duration_ms: Date.now() - startedAt }
   }
 
   // 2. Sync each project (concurrency 5)
   const results = await inBatches(projectIds, SYNC_CONCURRENCY, (id) => syncOneProject(bucket, id))
 
-  const failed = results
-    .filter((r) => !r.ok)
-    .map((r) => ({ project_id: r.project_id, error: r.error }))
+  const failed = results.filter((r) => !r.ok).map((r) => ({ project_id: r.project_id, error: r.error }))
   const synced = results.length - failed.length
 
-  res.json({
-    synced,
-    failed,
-    duration_ms: Date.now() - startedAt,
-  })
+  return { synced, failed, duration_ms: Date.now() - startedAt }
+}
+
+// POST /sync/configs
+router.post('/configs', async (req, res) => {
+  if (!authSync(req)) {
+    return res.status(403).json({
+      error:   'forbidden',
+      message: 'Sync requires X-Quorum-Sync-Token or principal_architect JWT',
+    })
+  }
+
+  if (!process.env.QUORUM_CONFIG_BUCKET) {
+    return res.status(500).json({
+      error:   'config_error',
+      message: 'QUORUM_CONFIG_BUCKET not set',
+    })
+  }
+
+  const result = await syncAllConfigs()
+
+  res.json(result)
 })
 
 export default router

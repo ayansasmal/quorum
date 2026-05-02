@@ -47,7 +47,7 @@ import configRoutes    from './routes/config.js'
 import projectsRoutes  from './routes/projects.js'
 import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
-import syncRoutes      from './routes/sync.js'
+import syncRoutes, { syncAllConfigs } from './routes/sync.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
 import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
@@ -229,7 +229,18 @@ async function startup() {
     process.exit(1)
   }
 
-  // 3. Start HTTP server
+  // 3. Sync S3 configs → DynamoDB (non-fatal — warms the cache on restart)
+  try {
+    const { synced, failed, duration_ms } = await syncAllConfigs()
+    if (synced > 0 || failed.length > 0) {
+      console.error(`[Gateway] ✓ DDB sync complete — ${synced} synced, ${failed.length} failed (${duration_ms}ms)`)
+      for (const f of failed) console.error(`[Gateway]   ✗ ${f.project_id}: ${f.error}`)
+    }
+  } catch (err) {
+    console.error(`[Gateway] DDB sync failed (non-fatal): ${err.message}`)
+  }
+
+  // 4. Start HTTP server
   app.listen(PORT, () => {
     console.error(`[Gateway] ✓ Listening on port ${PORT}`)
     console.error(`[Gateway] JWKS: http://localhost:${PORT}/.well-known/jwks.json`)
