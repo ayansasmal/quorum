@@ -14,6 +14,11 @@ logs/
 .claude/
 .claire/
 
+# Local project configs — contain real github_usernames and git emails.
+# Copy quorum.config.example.json to configs/<project-id>.json to get started.
+# These are uploaded to LocalStack S3 by init-localstack.sh and never go in git.
+configs/*.json
+
 # Crossplane real credentials (never commit)
 crossplane/credentials/aws-creds-secret.yaml
 

@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
-# init-localstack.sh — Bootstrap LocalStack S3 for local Docker Compose dev
+# init-localstack.sh — Bootstrap LocalStack for local Docker Compose dev
 #
 # Called by setup.sh docker after the stack is healthy.
 # Runs on the HOST machine (uses awslocal → localhost:4566).
 #
 # Usage:
-#   ./scripts/init-localstack.sh             # full bootstrap (create bucket + upload)
-#   ./scripts/init-localstack.sh --read-only # list configs only, no writes
+#   ./scripts/init-localstack.sh               # full bootstrap
+#   ./scripts/init-localstack.sh --skip-bucket # skip bucket creation (external LS)
+#
+# Project configs:
+#   Place one JSON file per project in configs/<project-id>.json.
+#   Copy quorum.config.example.json as a starting point.
+#   These are gitignored (contain real usernames/emails).
 #
 # Environment:
-#   QUORUM_CONFIG_BUCKET   bucket name            (default: quorum-configs)
-#   QUORUM_PROJECT_ID      team config prefix     (default: my-team)
+#   QUORUM_CONFIG_BUCKET   bucket name  (default: quorum-configs)
+#   AWS_REGION             AWS region   (default: us-east-1)
 #
 # Requirements:
 #   pip install awscli-local   (provides awslocal command)
 #
 # Idempotency:
-#   - Bucket creation is skipped if the bucket already exists.
-#   - Config upload is skipped if the key already exists in the bucket.
-#     This preserves configs managed by other workflows (e.g. Crossplane).
+#   - Bucket/table creation is skipped if they already exist.
+#   - Config uploads always overwrite — configs/ is the local source of truth.
 # =============================================================================
 
 set -euo pipefail
@@ -27,13 +31,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-READ_ONLY=false
-[[ "${1:-}" == "--read-only" ]] && READ_ONLY=true
+SKIP_BUCKET=false
+[[ "${1:-}" == "--skip-bucket" ]] && SKIP_BUCKET=true
 
 BUCKET="${QUORUM_CONFIG_BUCKET:-quorum-configs}"
-PROJECT_ID="${QUORUM_PROJECT_ID:-my-team}"
-CONFIG_SRC="$PROJECT_ROOT/quorum.config.example.json"
-S3_KEY="$PROJECT_ID/config.json"
+CONFIGS_DIR="$PROJECT_ROOT/configs"
 
 # Region used for all awslocal calls. Honour AWS_REGION if set (e.g. from .env),
 # otherwise default to us-east-1. All clients (ddb.js, config-cache.js, etc.)
@@ -64,11 +66,10 @@ until awslocal s3api list-buckets &>/dev/null 2>&1; do
 done
 ok "LocalStack reachable"
 
-# ── Create bucket + upload config (skipped in read-only mode) ─────────────────
-if $READ_ONLY; then
-  ok "Read-only mode — skipping bucket creation and config upload"
+# ── Create S3 bucket (skipped when using external LocalStack) ─────────────────
+if $SKIP_BUCKET; then
+  ok "Skipping bucket creation — using external LocalStack"
 else
-  # Create bucket if it does not exist
   info "Checking bucket s3://$BUCKET ..."
   if awslocal s3api head-bucket --bucket "$BUCKET" &>/dev/null 2>&1; then
     ok "Bucket already exists: s3://$BUCKET"
@@ -76,37 +77,39 @@ else
     awslocal s3api create-bucket --bucket "$BUCKET" --region "$REGION" &>/dev/null
     ok "Bucket created: s3://$BUCKET"
   fi
+fi
 
-  # Upload example config only if the key does not already exist.
-  # Skipping preserves configs written by other workflows (Crossplane, CI, etc.)
-  info "Checking s3://$BUCKET/$S3_KEY ..."
-  if awslocal s3api head-object --bucket "$BUCKET" --key "$S3_KEY" &>/dev/null 2>&1; then
-    ok "Config already exists at s3://$BUCKET/$S3_KEY — skipping upload"
-  elif [[ -f "$CONFIG_SRC" ]]; then
-    info "Uploading $CONFIG_SRC → s3://$BUCKET/$S3_KEY ..."
+# ── Upload project configs from configs/ ──────────────────────────────────────
+# Each configs/<project-id>.json → s3://$BUCKET/<project-id>/config.json.
+# Always overwrites — configs/ is the local source of truth.
+if [[ -d "$CONFIGS_DIR" ]] && compgen -G "$CONFIGS_DIR/*.json" > /dev/null 2>&1; then
+  for config_file in "$CONFIGS_DIR"/*.json; do
+    project_id="$(basename "$config_file" .json)"
+    s3_key="$project_id/config.json"
+    info "Uploading $project_id → s3://$BUCKET/$s3_key ..."
     upload_attempt=0 upload_ok=false
     until $upload_ok; do
       if awslocal s3api put-object \
           --bucket       "$BUCKET" \
-          --key          "$S3_KEY" \
-          --body         "$CONFIG_SRC" \
+          --key          "$s3_key" \
+          --body         "$config_file" \
           --content-type application/json &>/dev/null 2>&1; then
         upload_ok=true
       else
         upload_attempt=$((upload_attempt + 1))
         if [[ $upload_attempt -ge 3 ]]; then
-          warn "Upload failed after 3 attempts — skipping (non-fatal)"
-          warn "To upload manually: awslocal s3api put-object --bucket $BUCKET --key $S3_KEY --body $CONFIG_SRC"
+          warn "Upload failed after 3 attempts — skipping $project_id (non-fatal)"
           break
         fi
         warn "Upload attempt $upload_attempt failed — retrying in 3 s..."
         sleep 3
       fi
     done
-    $upload_ok && ok "Config uploaded: s3://$BUCKET/$S3_KEY"
-  else
-    warn "Source file not found: $CONFIG_SRC — skipping upload"
-  fi
+    $upload_ok && ok "Config uploaded: s3://$BUCKET/$s3_key"
+  done
+else
+  warn "No configs found in $CONFIGS_DIR"
+  warn "Add project configs as configs/<project-id>.json (copy quorum.config.example.json)"
 fi
 
 # ── DynamoDB tables ────────────────────────────────────────────────────────────
@@ -165,9 +168,4 @@ awslocal s3api list-objects --bucket "$BUCKET" \
 
 echo ""
 ok "LocalStack S3 ready"
-if $READ_ONLY; then
-  warn "Using external LocalStack — set QUORUM_PROJECT_ID in .env to one of the prefixes above"
-  info "Example: QUORUM_PROJECT_ID=platform-team"
-else
-  info "Gateway config: QUORUM_PROJECT_ID=$PROJECT_ID (change in .env if needed)"
-fi
+info "Set QUORUM_PROJECT_ID in .env to one of the project IDs listed above"

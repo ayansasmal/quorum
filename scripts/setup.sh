@@ -200,12 +200,12 @@ cmd_docker() {
   header "LocalStack S3"
   if command -v awslocal &>/dev/null; then
     if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
-      # External LocalStack is owned by another workflow (e.g. Crossplane).
-      # Read-only: list available configs so the operator can set QUORUM_PROJECT_ID.
-      info "Using external LocalStack — listing available configs (read-only)..."
-      bash "$SCRIPT_DIR/init-localstack.sh" --read-only
+      # External LocalStack — skip bucket creation (owned by another workflow)
+      # but still upload configs and create DDB tables.
+      info "Using external LocalStack — uploading configs and creating DDB tables..."
+      bash "$SCRIPT_DIR/init-localstack.sh" --skip-bucket
     else
-      info "Bootstrapping S3 bucket in LocalStack..."
+      info "Bootstrapping LocalStack bucket, configs, and DDB tables..."
       bash "$SCRIPT_DIR/init-localstack.sh"
     fi
   else
