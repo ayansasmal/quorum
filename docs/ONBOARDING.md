@@ -1,6 +1,6 @@
-# Onboarding a Local Project to Quorum
+# Onboarding a Project to Quorum
 
-> This guide walks you through connecting an existing local project to a running Quorum
+> This guide walks you through connecting an existing project to a running Quorum
 > stack so that Claude Code (or any MCP client) can read and write governed engineering
 > knowledge scoped to your team.
 >
@@ -17,8 +17,8 @@ stack. Onboarding a project means:
 
 1. Writing a `quorum.config.json` that describes the team (members, roles, domains)
 2. Uploading that config to the S3 bucket the gateway reads from
-3. Pointing the Quorum MCP server at your project
-4. Installing the Quorum skill in your project so Claude Code uses it automatically
+3. Verifying your membership works via the dashboard
+4. Connecting Claude Code to the gateway and installing the Quorum skill
 
 All four steps take under 10 minutes.
 
@@ -37,7 +37,7 @@ Edit `quorum.config.json`:
 
 ```jsonc
 {
-  // Unique identifier for this project — used as the S3 key and the graph group_id.
+  // Unique identifier for this project — used as the S3 key prefix and the JWT group_id.
   // Use lowercase letters, numbers, and hyphens only. No spaces.
   "project": "my-project",
   "group_id": "my-project",
@@ -46,14 +46,14 @@ Edit `quorum.config.json`:
   // github_username must match exactly — the gateway verifies it against GitHub.
   "members": [
     {
-      "name": "alice",
+      "name": "Alice",
       "team": "platform",
       "role": "principal_architect",
       "github_username": "alice-gh",
       "git_email": "alice@example.com"
     },
     {
-      "name": "bob",
+      "name": "Bob",
       "team": "backend",
       "role": "senior_engineer",
       "github_username": "bob-gh",
@@ -62,7 +62,7 @@ Edit `quorum.config.json`:
   ],
 
   // Role definitions — controls base confidence weight for each role.
-  // You can add or remove roles. Every role used in `members` must appear here.
+  // Every role used in `members` must appear here.
   "roles": {
     "principal_architect": { "base_confidence": 0.90 },
     "senior_engineer":     { "base_confidence": 0.80 },
@@ -72,204 +72,154 @@ Edit `quorum.config.json`:
 
   // Domain-specific overrides (optional).
   // Omit a domain to use the global thresholds below.
-  // required_reviewer_teams: changes to this domain must be reviewed by someone
-  //   from at least one of these teams before the knowledge becomes ACTIVE.
   "domains": {
     "auth": {
-      "conflict_threshold": 0.90,
-      "required_reviewer_teams": ["platform"]
+      "conflict_threshold": 0.90
     }
   },
 
   // Global governance thresholds.
-  // conflict_threshold: semantic similarity above which two knowledge nodes are
-  //   flagged as potentially conflicting (0–1). Start at 0.85.
+  // conflict_threshold: semantic similarity above which two nodes are flagged as
+  //   potentially conflicting (0–1). Start at 0.85 and tune once you have real data.
   // authority_threshold: authority delta above which a conflict is auto-resolved
   //   in favour of the higher-authority author (0–1). Start at 0.20.
   "thresholds": {
     "conflict_threshold": 0.85,
     "authority_threshold": 0.20
-  }
+  },
+
+  // Set to true to allow any GitHub-authenticated user to browse this project's
+  // knowledge in read-only guest mode (no authority, no writes).
+  "guest_access": false
 }
 ```
 
-> **Tip:** Keep `conflict_threshold` at 0.85 until you have real knowledge in the graph.
-> You can tune it once you see what kinds of false positives (or missed conflicts)
-> your team produces.
-
 ---
 
-## Step 2 — Validate the config
-
-Before uploading, validate the config against the Quorum schema:
-
-```bash
-curl -s -X POST http://localhost:3001/config/validate \
-  -H "Content-Type: application/json" \
-  -d @quorum.config.json | python3 -m json.tool
-```
-
-A valid config returns:
-
-```json
-{
-  "valid": true,
-  "summary": {
-    "project": "my-project",
-    "members": 2,
-    "roles": 4,
-    "domains": 1,
-    "member_names": ["alice", "bob"],
-    "role_names": ["principal_architect", "senior_engineer", "engineer", "junior"],
-    "domain_names": ["auth"],
-    "thresholds": { "conflict": 0.85, "authority": 0.20 }
-  }
-}
-```
-
-If `valid` is `false`, the response includes a list of `errors` with paths and messages.
-Fix them before continuing.
-
----
-
-## Step 3 — Upload the config to S3
+## Step 2 — Upload the config to S3
 
 The gateway reads project configs from an S3 bucket at the key
 `<project_id>/config.json`. For local development, the bucket lives in LocalStack.
 
 ```bash
-# Upload using awslocal (LocalStack-aware AWS CLI wrapper)
 awslocal s3 cp quorum.config.json \
-  s3://quorum-configs/my-project/config.json \
-  --endpoint-url http://localhost:4566
+  s3://quorum-configs/my-project/config.json
 ```
-
-> **Don't have `awslocal`?**
-> ```bash
-> pip install awscli-local
-> ```
 
 Verify the upload:
 
 ```bash
-awslocal s3 ls s3://quorum-configs/ --recursive --endpoint-url http://localhost:4566
-# 2026-01-01 00:00:00   1234 my-project/config.json
+awslocal s3 ls s3://quorum-configs/ --recursive
+# 2026-01-01 00:00:00  1234 my-project/config.json
 ```
 
-**Production / real S3:** replace `awslocal` with `aws` and omit `--endpoint-url`:
+Then trigger a gateway sync so the config is cached in DynamoDB immediately
+(otherwise it picks up on the next restart):
+
+```bash
+curl -s -X POST http://localhost:3001/sync/configs \
+  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}" | python3 -m json.tool
+# { "synced": 1, "failed": [], "duration_ms": 45 }
+```
+
+> If `QUORUM_SYNC_SECRET` is not set, you can also just restart the gateway:
+> `docker compose restart gateway`
+
+**Production / real S3:** replace `awslocal` with `aws`:
 ```bash
 aws s3 cp quorum.config.json s3://your-quorum-bucket/my-project/config.json
 ```
 
 ---
 
-## Step 4 — Verify the config by logging in
+## Step 3 — Verify your membership via the dashboard
 
-Open the dashboard and sign in with GitHub OAuth to confirm your config was uploaded
-correctly and your membership is recognised:
+Open the dashboard and sign in with GitHub OAuth to confirm the config was uploaded
+correctly and your `github_username` is recognised:
 
 1. Open **http://localhost:3002** in your browser
 2. Click **Sign in with GitHub** — completes the OAuth flow automatically
-3. Enter your `project_id` when prompted on first login
-4. If login succeeds, your config is valid and your `github_username` is recognised
+3. Your project appears as a card in the project picker — click it to enter
+4. If login succeeds you are now inside your project's workspace
 
-That's it — no personal access tokens, no manual token exchange. The dashboard handles
-the full OAuth flow and issues a short-lived ES256 JWT scoped to your project.
-
-> **If login fails with "Member not found":** your `github_username` in the config
-> doesn't match your actual GitHub username. Edit the config and re-upload it (Step 3),
-> then try again.
+> **If your project card doesn't appear:** the config wasn't synced yet — run the
+> `POST /sync/configs` call from Step 2 again, then refresh.
+>
+> **If login fails with "not a member":** your `github_username` in the config
+> doesn't exactly match your GitHub account username. Edit the config, re-upload
+> (Step 2), and sync again.
 
 ---
 
-## Step 5 — Connect Claude Code
+## Step 4 — Connect Claude Code
 
-### 5a — Authenticate via GitHub OAuth (CLI login with Playwright)
-
-Authentication is GitHub OAuth — no personal access tokens needed.
-Use the `mcp-playwright` MCP server to open the dashboard, complete the
-GitHub login, and extract your OAuth token automatically.
-
-Ask Claude to run the following flow (or run it yourself if you have
-Playwright wired up directly):
-
-```
-1. Open http://localhost:3001/auth/github?project_id=<your_project_id>
-2. Wait for the GitHub OAuth page to load and log in
-3. After GitHub redirects back, the URL will contain:
-     http://localhost:3002/login#oauth=gho_<token>&project_id=<id>
-4. Extract the oauth token from the URL fragment
-5. Export it as QUORUM_GITHUB_TOKEN
-```
-
-With `mcp-playwright`, Claude does this automatically:
-
-```
-Ask Claude:
-  "Log me into Quorum for project my-project.
-   Open http://localhost:3001/auth/github?project_id=my-project,
-   complete the GitHub login, extract the oauth token from the URL
-   fragment, and set QUORUM_GITHUB_TOKEN in my shell profile."
-```
-
-Claude will use Playwright to open the browser, wait for you to approve
-the GitHub OAuth screen, then read `window.location.hash` to extract the
-token and write it to `~/.zshrc` (or whichever shell profile you use).
-
-Once extracted, set it in your shell:
-
-```bash
-export QUORUM_GATEWAY_URL=http://localhost:3001
-export QUORUM_GITHUB_TOKEN=gho_<extracted_token>
-```
-
-> **Note:** `gho_` tokens are GitHub OAuth access tokens — they work
-> identically to PATs at the `/auth/token` endpoint. They expire when you
-> revoke the Quorum OAuth App from your GitHub account settings.
-
-> **Security note:** Engineers only need the gateway URL and their OAuth
-> token. They never handle PostgreSQL credentials, S3 keys, or the graph
-> database password — those are held exclusively by the gateway.
-
-### 5b — Add Quorum to Claude Code
+### 4a — Add the Quorum MCP server
 
 ```bash
 # Replace /path/to/quorum with your actual clone path
 claude mcp add quorum -- node /path/to/quorum/src/server.js
 ```
 
+Set the gateway URL in your shell profile so the MCP server knows where to send requests:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export QUORUM_GATEWAY_URL=http://localhost:3001
+```
+
 Verify Claude can see the tools:
 
 ```bash
 claude mcp list
+# quorum: remember, recall, search, reflect, history, export, forget, review, pending, authenticate
 ```
 
-You should see `quorum` with tools: `remember`, `recall`, `search`, `reflect`,
-`history`, `export`, `forget`, `review`.
+### 4b — Authenticate the MCP server
 
-### 5c — Install the Quorum skill in your project
+The MCP server needs its own JWT — separate from the dashboard session.
+When Claude Code starts a session in a project that has the Quorum skill loaded,
+it will detect a missing auth token and run the re-auth flow automatically:
 
-The skill file tells Claude Code *when* and *how* to use Quorum's tools automatically
-(session-start protocol, reflect after tasks, etc.).
+1. It opens the GitHub OAuth URL in a browser window
+2. You approve the GitHub login (one click if already logged in)
+3. Claude extracts the `gho_` token and calls `authenticate({ github_token, project_id })`
+4. The JWT is stored in-memory for the session
+
+You can also trigger this manually:
+
+```
+Ask Claude: "Authenticate me with Quorum for project my-project."
+```
+
+> **Note:** The MCP server holds the JWT in memory only — it is never written to
+> disk. If the MCP server process restarts, re-auth runs automatically on the next
+> tool call.
+
+### 4c — Install the Quorum skill (user-level)
+
+The skill file tells Claude Code *when* and *how* to use Quorum's tools automatically —
+session-start protocol, recall before decisions, reflect after tasks.
+
+Install it at the **user level** so it is active in every project on your machine
+without any per-repo setup:
 
 ```bash
-# From inside your project directory
-mkdir -p .claude/skills
-cp /path/to/quorum/skill/SKILL.md .claude/skills/quorum.md
+mkdir -p ~/.claude/skills
+cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
 ```
 
-Commit this file to your project repo so the whole team gets it:
+That's all. No per-project changes, no commits needed. Every Claude Code session
+on your machine now has the Quorum skill available.
 
-```bash
-git add .claude/skills/quorum.md
-git commit -m "chore: add Quorum skill for governed engineering memory"
-```
+> If you prefer project-level installation (e.g. to pin a specific skill version
+> per repo), copy to `.claude/skills/quorum.md` inside the project instead and
+> commit it.
 
 ---
 
-## Step 6 — Verify the connection
+## Step 5 — Verify the connection
 
-Start a new Claude Code session in your project directory and ask:
+Start a new Claude Code session in any project directory and ask:
 
 ```
 What pending Quorum decisions are there?
@@ -283,7 +233,7 @@ Then try storing a knowledge node:
 ```
 Remember that we use cursor-based pagination for all list endpoints.
 Topic: api, key: pagination-strategy.
-Author: alice, confidence: 0.85.
+Confidence: 0.85.
 ```
 
 And retrieve it:
@@ -292,7 +242,7 @@ And retrieve it:
 Recall api:pagination-strategy
 ```
 
-If both round-trip correctly, Quorum is fully wired to your project.
+If both round-trip correctly, Quorum is fully wired.
 
 ---
 
@@ -309,99 +259,72 @@ s3://quorum-configs/
   my-project/config.json        ← group_id: "my-project"
 ```
 
-Each engineer sets `QUORUM_GATEWAY_URL` and, on first dashboard login, selects
-their `project_id`. The gateway scopes all graph and audit operations to that project
-automatically via the `group_id` claim in the JWT.
-
-```bash
-# Alice — set gateway URL, then open the dashboard and select project-alpha
-export QUORUM_GATEWAY_URL=http://localhost:3001
-
-# Bob — same gateway URL, selects project-beta in the dashboard
-export QUORUM_GATEWAY_URL=http://localhost:3001
-```
-
-Knowledge, conflicts, audit logs, and pending decisions are all scoped per project.
-There is no cross-project bleed.
-
----
-
-## Dashboard access
-
-The Quorum dashboard shows all knowledge, pending decisions, and audit logs for
-your project:
-
-1. Open **http://localhost:3002** in your browser
-2. Click **Sign in with GitHub** — this uses the same OAuth flow
-3. On first login, enter your `project_id` when prompted
-
-The dashboard reads the `project` claim from your JWT and automatically scopes
-all queries to your project's knowledge graph.
+The dashboard's project picker shows all projects your GitHub account has access to
+(either as a member or as a guest if `guest_access: true`). You switch projects by
+clicking **Switch Project** in the header — no re-authentication with GitHub required.
 
 ---
 
 ## Troubleshooting
 
-**`Config not found` when fetching JWT**
+**Project card not visible in the dashboard**
 
-The gateway couldn't find your config in S3. Check:
+Run the sync and check it picked up your config:
 ```bash
-awslocal s3 ls s3://quorum-configs/<project_id>/ --endpoint-url http://localhost:4566
+curl -s -X POST http://localhost:3001/sync/configs \
+  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}" | python3 -m json.tool
 ```
-If empty, re-run the upload in Step 3.
+If `failed` contains your project ID, check the S3 key matches `<project_id>/config.json`.
 
-**`Member '<github_username>' not found in project`**
+**"not a member" on login**
 
-Your GitHub username (as returned by `GET https://api.github.com/user`) doesn't
-match any `github_username` in the config. Check your config and re-upload.
+Your `github_username` in the config (case-sensitive) must match exactly what
+`GET https://api.github.com/user` returns for your account:
+```bash
+curl -s -H "Authorization: Bearer <your_github_token>" \
+  https://api.github.com/user | python3 -c "import sys,json; print(json.load(sys.stdin)['login'])"
+```
 
 **Config changes not reflected after re-upload**
 
-The gateway caches configs in memory. Easiest fix — restart the gateway:
+The gateway caches configs in memory for 5 minutes. Trigger an immediate invalidation:
 ```bash
+curl -s -X POST http://localhost:3001/sync/configs \
+  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}"
+# or simply:
 docker compose restart gateway
-```
-Or, if you have a JWT from the dashboard (visible in browser devtools → Application → Local Storage):
-```bash
-curl -X POST http://localhost:3001/config/<project_id>/invalidate \
-  -H "Authorization: Bearer <jwt_from_dashboard>"
 ```
 
 **MCP server can't reach the gateway**
 
 ```bash
-# Check QUORUM_GATEWAY_URL is set in the shell Claude Code runs in
-echo $QUORUM_GATEWAY_URL
-
-# Test the gateway is reachable
-curl http://localhost:3001/health
+echo $QUORUM_GATEWAY_URL          # must be set
+curl http://localhost:3001/health  # must return {"status":"ok"}
 ```
 
-**Knowledge is visible across projects**
+**Knowledge visible across projects**
 
-Check that `group_id` in your config matches `project` — they should be identical.
-If they diverge, the JWT carries one value but the graph search uses another.
+Check that `project` and `group_id` in your config are identical — they must match.
+If they diverge, the JWT carries one value but config lookups use another.
 
 ---
 
 ## Summary
 
-| Step | Command / Action |
-|------|-----------------|
-| 1. Create config | `cp quorum.config.example.json quorum.config.json` + edit |
-| 2. Validate | `curl -X POST localhost:3001/config/validate -d @quorum.config.json` |
-| 3. Upload | `awslocal s3 cp quorum.config.json s3://quorum-configs/<id>/config.json` |
-| 4. Verify config | Open http://localhost:3002 → Sign in with GitHub → confirm project loads |
-| 5. CLI auth | Ask Claude: open `/auth/github?project_id=<id>` via Playwright → extract `gho_` token → `QUORUM_GITHUB_TOKEN` |
-| 6. MCP | `export QUORUM_GATEWAY_URL=http://localhost:3001` then `claude mcp add quorum -- node /path/to/quorum/src/server.js` |
-| 7. Skill | `cp skill/SKILL.md <your-project>/.claude/skills/quorum.md` |
-| 8. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
+| Step | Action |
+|------|--------|
+| 1. Create config | Edit `quorum.config.json` from the example |
+| 2. Upload | `awslocal s3 cp quorum.config.json s3://quorum-configs/<id>/config.json` + sync |
+| 3. Verify | Open `http://localhost:3002` → sign in → confirm your project card appears |
+| 4. MCP | `claude mcp add quorum -- node /path/to/quorum/src/server.js` + `QUORUM_GATEWAY_URL` |
+| 5. Skill | `cp skill/SKILL.md ~/.claude/skills/quorum.md` |
+| 6. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
 
 ---
 
 ## Next steps
 
 - [QUICKSTART.md](QUICKSTART.md) — Get Quorum itself running (if not already)
-- [skill/SKILL.md](skill/SKILL.md) — How Claude Code uses Quorum tools during sessions
+- [skill/SKILL.md](../skill/SKILL.md) — How Claude Code uses Quorum tools during sessions
 - [ARCHITECTURE.md](ARCHITECTURE.md) — How governance, versioning, and conflict resolution work
 - [DEPLOYMENT.md](DEPLOYMENT.md) — Helm / production deployment

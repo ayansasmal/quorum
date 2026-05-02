@@ -71,7 +71,7 @@ The first run takes 3–5 minutes (Docker image pulls). Subsequent runs are unde
 
 ```
 ✓ All services healthy
-✓ LocalStack S3 ready — gateway will use s3://quorum-configs/my-team/config.json
+✓ LocalStack S3 ready
 ✓ Seed complete
 
   Add Quorum to Claude Code:
@@ -118,12 +118,12 @@ claude mcp list
 ```
 
 Once connected, Claude Code automatically uses Quorum's tools during sessions.
-The `skill/SKILL.md` file documents how Claude is expected to use them — copy it
-to your project's `.claude/skills/` folder:
+The `skill/SKILL.md` file documents how Claude is expected to use them — install it
+at the **user level** so it is active in every project without any per-repo setup:
 
 ```bash
-mkdir -p .claude/skills
-cp /path/to/quorum/skill/SKILL.md .claude/skills/quorum.md
+mkdir -p ~/.claude/skills
+cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
 ```
 
 ---

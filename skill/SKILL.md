@@ -82,22 +82,22 @@ When auth fails, run this flow **without interrupting the engineer**:
 1. Inform: "Quorum auth expired — handling re-auth, back in a moment."
 
 2. Read QUORUM_GATEWAY_URL (default: http://localhost:3001)
-   Read QUORUM_PROJECT_ID (default: default)
 
 3. Use mcp-playwright to open:
-     {QUORUM_GATEWAY_URL}/auth/github?project_id={QUORUM_PROJECT_ID}
+     {QUORUM_GATEWAY_URL}/auth/github
 
 4. Wait for the GitHub OAuth page to load.
    If the engineer is not already logged into GitHub, they will need to
    approve — tell them: "Please approve the GitHub login in the browser."
 
 5. After GitHub redirects back, the URL will be:
-     http://localhost:3002/login#oauth=gho_<token>&project_id=<id>
+     http://localhost:3002/login#oauth=gho_<token>
 
 6. Extract the token from the URL fragment:
      window.location.hash  →  parse "oauth" param  →  gho_<token>
 
-7. Call the authenticate() MCP tool:
+7. Ask the engineer which project to authenticate with if not obvious from
+   context. Then call the authenticate() MCP tool:
      authenticate({ github_token: "gho_<token>", project_id: "<id>" })
      The token is stored in-memory in the MCP process — no files are written.
      If the MCP server restarts, re-auth will be required again.
