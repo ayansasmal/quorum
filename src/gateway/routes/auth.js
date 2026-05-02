@@ -111,12 +111,16 @@ router.post('/token', async (req, res) => {
     ? config.roles[role].base_confidence
     : 0.5
 
+  // Derive the canonical project slug from the config (group_id is the authoritative
+  // identifier — consistent with /auth/switch which also uses config.group_id).
+  const slug = config.group_id ?? project_id
+
   // 4. Sign ES256 JWT
   const { privateKey, kid } = getKeys()
 
   const token = await new SignJWT({
     sub:             githubLogin,
-    project:         project_id,
+    project:         slug,
     role,
     team,
     method:          'github_token',
@@ -132,7 +136,7 @@ router.post('/token', async (req, res) => {
     token,
     expires_in:      TOKEN_TTL_SECONDS,
     sub:             githubLogin,
-    project:         project_id,
+    project:         slug,
     role,
     team,
     base_confidence: baseConfidence,
