@@ -22,6 +22,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  ScanCommand,
   BatchWriteItemCommand,
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
@@ -136,6 +137,34 @@ export async function getUserProjects(githubUsername) {
     })
   } catch (err) {
     console.error(`[Gateway] ddb.getUserProjects(${githubUsername}) failed: ${err.message}`)
+    return []
+  }
+}
+
+/**
+ * Scan the quorum-configs table for projects that have guest_access enabled.
+ * Full-table scan — configs table is expected to be small (< 1000 items).
+ * Returns best-effort: errors return [] and fall through to S3.
+ * @returns {Promise<Array<{ project_id: string, project_name: string | null, project_slug: string | null }>>}
+ */
+export async function getGuestProjects() {
+  try {
+    const result = await getDdb().send(new ScanCommand({
+      TableName:                 CONFIGS_TABLE,
+      FilterExpression:          '#cfg.#ga = :t',
+      ExpressionAttributeNames:  { '#cfg': 'config', '#ga': 'guest_access' },
+      ExpressionAttributeValues: marshall({ ':t': true }),
+    }))
+    return (result.Items ?? []).map((raw) => {
+      const item = unmarshall(raw)
+      return {
+        project_id:   item.project_id,
+        project_name: item.config?.project  ?? null,
+        project_slug: item.config?.group_id ?? item.project_id,
+      }
+    })
+  } catch (err) {
+    console.error(`[Gateway] ddb.getGuestProjects() failed: ${err.message}`)
     return []
   }
 }

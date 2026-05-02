@@ -436,6 +436,9 @@ export function AuthProvider({ children }) {
   }, [])
 
   const isExpired = token ? (decodeJwt(token)?.exp ?? 0) * 1000 < Date.now() : false
+  // Guest = authenticated but role is null (not a member of the current project,
+  // or authenticated user with no project membership at all).
+  const isGuest   = user ? user.role === null : false
 
   return (
     <AuthContext.Provider value={{
@@ -453,6 +456,7 @@ export function AuthProvider({ children }) {
       error,
       setError,
       isExpired,
+      isGuest,
       reauthNeeded,
       completeReauth,
     }}>

@@ -70,6 +70,18 @@ function RoleBadge({ role }) {
   )
 }
 
+/**
+ * Shown when the user has read-only guest access to a project.
+ * Rendered instead of RoleBadge when project.is_guest === true.
+ */
+function GuestBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-gray-400/20 text-gray-400 border-gray-400/30">
+      guest
+    </span>
+  )
+}
+
 // ── Project card ───────────────────────────────────────────────────────────────
 
 /**
@@ -111,8 +123,8 @@ function ProjectCard({ project, onSelect, loading }) {
         </p>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <RoleBadge role={project.role} />
-          {project.team && (
+          {project.is_guest ? <GuestBadge /> : <RoleBadge role={project.role} />}
+          {!project.is_guest && project.team && (
             <span className="text-xs text-gray-500">{project.team}</span>
           )}
         </div>

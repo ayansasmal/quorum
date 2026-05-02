@@ -57,6 +57,16 @@ function AppSetup({ children }) {
 }
 
 /**
+ * Guard for member-only routes (/pending, /audit, /config, /status).
+ * Guests (role === null) are redirected to / rather than shown a blank or 403.
+ */
+function MemberRoute() {
+  const { isGuest } = useAuth()
+  if (isGuest) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
+/**
  * Redirect unauthenticated users to /login.
  * Redirect users in 'selecting' phase to /select-project.
  */
@@ -100,11 +110,13 @@ export default function App() {
               <Route element={<ProtectedRoute />}>
                 <Route path="/"          element={<Stats />} />
                 <Route path="/graph"     element={<Graph />} />
-                <Route path="/pending"   element={<Pending />} />
                 <Route path="/knowledge" element={<Knowledge />} />
-                <Route path="/audit"     element={<Audit />} />
-                <Route path="/config"    element={<Config />} />
-                <Route path="/status"    element={<Status />} />
+                <Route element={<MemberRoute />}>
+                  <Route path="/pending" element={<Pending />} />
+                  <Route path="/audit"   element={<Audit />} />
+                  <Route path="/config"  element={<Config />} />
+                  <Route path="/status"  element={<Status />} />
+                </Route>
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

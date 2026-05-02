@@ -15,17 +15,17 @@ import { useAuth }  from '../../context/AuthContext.jsx'
 import { useStats } from '../../api/stats.js'
 
 const NAV = [
-  { to: '/',          icon: BarChart2, label: 'Stats'     },
-  { to: '/graph',     icon: GitBranch, label: 'Graph'     },
-  { to: '/pending',   icon: List,      label: 'Pending',  badge: true },
-  { to: '/knowledge', icon: BookOpen,  label: 'Knowledge' },
-  { to: '/audit',     icon: Clock,     label: 'Audit'     },
-  { to: '/config',    icon: Settings,  label: 'Config'    },
-  { to: '/status',    icon: Activity,  label: 'Status'    },
+  { to: '/',          icon: BarChart2, label: 'Stats',     guestOk: true  },
+  { to: '/graph',     icon: GitBranch, label: 'Graph',     guestOk: true  },
+  { to: '/pending',   icon: List,      label: 'Pending',   badge: true    },
+  { to: '/knowledge', icon: BookOpen,  label: 'Knowledge', guestOk: true  },
+  { to: '/audit',     icon: Clock,     label: 'Audit'                     },
+  { to: '/config',    icon: Settings,  label: 'Config'                    },
+  { to: '/status',    icon: Activity,  label: 'Status'                    },
 ]
 
 export default function Sidebar() {
-  const { logout } = useAuth()
+  const { logout, isGuest } = useAuth()
   const { data: stats } = useStats()
   const pendingCount = stats?.pending?.total ?? 0
 
@@ -38,7 +38,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-0.5 px-2">
-        {NAV.map(({ to, icon: Icon, label, badge }) => (
+        {NAV.filter((item) => !isGuest || item.guestOk).map(({ to, icon: Icon, label, badge }) => (
           <NavLink
             key={to}
             to={to}

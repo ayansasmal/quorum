@@ -74,6 +74,11 @@ export const QuorumConfigSchema = z.object({
   domains: z.record(z.string(), DomainConfigSchema).default({}),
   thresholds: ThresholdsSchema.default({}),
   notifications: NotificationsSchema.optional(),
+  /**
+   * Allow any GitHub-authenticated user to read this project's knowledge as a guest.
+   * Guests have role: null — read-only dashboard, all writes forced to DRAFT.
+   */
+  guest_access: z.boolean().default(false),
 })
 
 /** @typedef {import('zod').infer<typeof QuorumConfigSchema>} QuorumConfig */

@@ -21,7 +21,7 @@ import { SignJWT } from 'jose'
 import { getKeys } from '../keys.js'
 import { loadProjectConfig } from '../config-cache.js'
 import { verifyJwt } from '../middleware/verify-jwt.js'
-import { getUserProjects } from '../ddb.js'
+import { getUserProjects, getGuestProjects } from '../ddb.js'
 
 const router = Router()
 
@@ -94,10 +94,17 @@ router.post('/token', async (req, res) => {
     })
   }
 
-  // 3. Look up member — anonymous if not in config (read-only access, all writes DRAFT)
+  // 3. Look up member — reject if not a member and project does not allow guest access
   const member = findMember(config, githubLogin)
-  const role   = member?.role ?? null
-  const team   = member?.team ?? null
+  if (member === null && config.guest_access !== true) {
+    return res.status(403).json({
+      error:   'not_a_member',
+      message: `You are not a member of project '${project_id}'`,
+    })
+  }
+
+  const role = member?.role ?? null
+  const team = member?.team ?? null
 
   // Base confidence from role (used by local Quorum's authority resolution)
   const baseConfidence = role && config.roles?.[role]
@@ -152,20 +159,45 @@ router.post('/projects', async (req, res) => {
     return res.status(401).json({ error: 'github_auth_failed', message: err.message })
   }
 
-  // Fast path — DDB lookup. On any failure or empty result, fall through to PostgreSQL.
-  // Normalize to the same shape the PostgreSQL path returns so the frontend
-  // doesn't need to know which store answered.
+  // Fast path — member projects from DDB + guest-accessible projects merged.
+  // Falls through to PostgreSQL only if combined result is empty or DDB errors.
   try {
-    const ddbProjects = await getUserProjects(githubLogin)
-    if (ddbProjects && ddbProjects.length > 0) {
-      const projects = ddbProjects.map((p) => ({
+    const [ddbProjects, guestProjects] = await Promise.all([
+      getUserProjects(githubLogin),
+      getGuestProjects(),
+    ])
+
+    // Build member map (project_id → normalized project)
+    const memberMap = new Map()
+    for (const p of ddbProjects ?? []) {
+      memberMap.set(p.project_id, {
         id:           p.project_id,
         slug:         p.project_slug ?? p.project_id,
         name:         p.project_name ?? p.project_id,
         role:         p.role         ?? null,
         team:         p.team         ?? null,
-        member_count: null,   // not stored in DDB — omit gracefully
-      }))
+        member_count: null,
+        is_guest:     false,
+      })
+    }
+
+    // Merge guest-accessible projects — member entry wins on conflict
+    for (const g of guestProjects ?? []) {
+      if (!memberMap.has(g.project_id)) {
+        memberMap.set(g.project_id, {
+          id:           g.project_id,
+          slug:         g.project_slug ?? g.project_id,
+          name:         g.project_name ?? g.project_id,
+          role:         null,
+          team:         null,
+          member_count: null,
+          is_guest:     true,
+        })
+      }
+    }
+
+    const projects = [...memberMap.values()]
+    if (projects.length > 0) {
       return res.json({ projects, github_login: githubLogin, source: 'ddb' })
     }
   } catch {
@@ -194,6 +226,7 @@ router.post('/projects', async (req, res) => {
         team:         member?.team  ?? null,
         member_count: row.members.length,
         created_at:   row.created_at,
+        is_guest:     false,
       }
     })
 
