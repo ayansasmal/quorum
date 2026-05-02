@@ -24,26 +24,50 @@ authority weighting, and a tamper-evident audit trail.
 
 ## Session Start (always, without being asked)
 
-```
-pending()                    ← surface conflicts + DRAFTs awaiting review
-search("<task domain>")      ← load relevant context before touching any code
+### Step 0 — Is this project connected to Quorum?
+
+```bash
+ls .quorum 2>/dev/null
 ```
 
-**Go a step further:** read the task description and infer the domains involved.
-Pull knowledge for all of them upfront:
+| Result | Action |
+|--------|--------|
+| Not found | Ask once: *"I don't see a `.quorum` file. Want me to onboard this project to Quorum?"* |
+| Found, but graph is empty (< 5 entries) | Run discovery scan — CLAUDE.md + MEMORY.md + recent git log — before Step 1 |
+| Found, graph has entries | Skip scan — go straight to Step 1 |
 
-| Task mentions | Recall domains |
-|--------------|----------------|
+---
+
+### Step 1 — Surface pending items
+
+```
+pending()    ← returns conflict_briefs and draft_reviews — handle them differently
+```
+
+| Return type | How to handle |
+|-------------|--------------|
+| `conflict_briefs` — unresolved conflicts | **Block on resolution before writing any code.** Present each conflict and get human decision. See Conflict Resolution section. |
+| `draft_reviews` — DRAFTs awaiting approval | **Do not block.** Note them: *"N DRAFT entries await your review at http://localhost:3002/pending."* Then continue. |
+
+---
+
+### Step 2 — Load relevant context
+
+Read the task and infer all domains involved. Pull knowledge for each upfront:
+
+| Task mentions | Search |
+|--------------|--------|
 | auth, login, token, session, OAuth | `search("auth")` |
 | database, query, migration, schema | `search("db")` |
 | API, endpoint, REST, HTTP | `search("api")` |
 | deploy, infra, secrets, container | `search("infra")` |
 | test, coverage, mock, integration | `search("testing")` |
 | payment, billing, subscription | `search("payments")` |
-
-If `pending()` returns items → **present them to the human and get resolution
-before writing any code**. A DRAFT conflict unresolved is a landmine.
-See [`references/conflict-resolution.md`](references/conflict-resolution.md).
+| security, vulnerability, CVE, audit, pentest | `search("security")` |
+| cache, Redis, CDN, TTL, invalidation | `search("caching")` |
+| monitoring, alerts, metrics, SLO, SLA, observability | `search("monitoring")` |
+| queue, worker, job, async, event-driven, consumer | `search("async")` |
+| **No keyword matches** | `search("<raw task description literally>")` |
 
 ---
 
@@ -53,32 +77,72 @@ Do not wait to be asked. When you encounter any of these, act immediately:
 
 ### You are about to make an implementation choice
 
+**Two-tool pattern — always in this order:**
+
 ```
-recall("topic", "key")       ← check if the team has already decided this
-search("choice description") ← find related patterns or constraints
+search("what you're about to decide")    ← find candidate keys
+recall("topic", "key")                   ← load the exact entry once you know the key
 ```
 
-Examples that should always trigger a recall:
-- Choosing an auth mechanism → `recall("auth", "token-strategy")`
-- Writing a database query → `recall("db", "connection-pooling")`
-- Designing an API response → `recall("api", "error-standards")`
-- Handling a retry → `recall("infra", "retry-strategy")`
+`search()` is for **exploration** — use it when you don't know the exact key.
+`recall()` is for **precision** — use it once `search()` has surfaced the right key.
+Never call `recall()` with a guessed key — if the key doesn't exist, you get nothing back.
+
+Examples:
+- Choosing an auth mechanism → `search("auth token")` → `recall("auth", "token-strategy")`
+- Writing a database query → `search("db connection")` → `recall("db", "connection-pooling")`
+- Designing an API response → `search("api errors")` → `recall("api", "error-standards")`
+- Handling a retry → `search("retry backoff")` → `recall("infra", "retry-strategy")`
 
 **If recalled knowledge contradicts what you were about to do** → stop, surface the
 conflict to the human, do not silently override.
+
+**Reading recalled entries — act on these signals:**
+
+| Signal in recall response | What to do |
+|--------------------------|-----------|
+| `confidence < 0.60` | Treat as hypothesis, not constraint. Flag to human before applying. |
+| `status: SUPERSEDED` | Fetch the ACTIVE version — never apply a superseded entry. |
+| `triggered_by: reflect` + `status: DRAFT` | Not yet human-approved. Verify with human before using as a hard constraint. |
+| `source: global` | Company-wide policy. Do not supersede from this project. Escalate conflicts upward. |
+
+**Before superseding any existing entry:**
+
+```
+history("topic", "key")   ← understand why prior versions were written before overwriting
+```
+
+Never supersede without reading the history. An entry may have gone through deliberate
+reversals — superseding blindly can undo months of governed decisions.
+
+---
 
 ### You discover a new constraint
 
 Call `remember()` **immediately** — do not wait for the task to finish.
 Constraints discovered mid-task are the most valuable kind; they get lost otherwise.
 
+**Key naming:** kebab-case noun-phrase, specific enough to be unique within the topic.
+Good: `connection-pool-size`. Bad: `db_stuff`, `connectionPoolingDecision`, `config`.
+
 ```javascript
 remember("domain", "key", "constraint statement", {
   confidence: 0.80,
-  tags: ["domain", "constraint-type"],
+  tags: ["domain", "constraint-type", "affected-component"],
   reason: "discovered while implementing X"
 })
 ```
+
+**Tags are cross-domain search hooks.** Tag with: the domain (`auth`), the constraint
+type (`performance`, `security`, `limit`), and affected component (`lambda`, `postgres`).
+Example: `tags: ["auth", "security", "lambda"]` makes an auth constraint findable from
+a Lambda or security search. Skip tags only for entries purely self-contained within one domain.
+
+If `remember()` returns `stored_pending_conflict_check` → tell the human:
+*"Entry stored but conflict check was deferred (Graphiti unavailable). Review at /pending
+once the graph is back — a hidden conflict may exist."*
+
+---
 
 ### You see existing knowledge being violated
 
@@ -91,13 +155,16 @@ remember("domain", "key", "corrected statement", {
 
 This creates a conflict for human review. Do not silently override existing knowledge.
 
+---
+
 ### Sensitive domains — pull everything, not just one key
 
-In `auth`, `payments`, `infra` domains: do a full domain scan before touching anything:
+In `auth`, `payments`, `infra`, `security` domains: do a full domain scan before touching anything:
 
 ```
 search("auth")      ← all auth patterns + constraints
 search("payments")  ← all payment rules
+search("security")  ← all security constraints
 ```
 
 Sensitive domain violations are the costliest to fix after the fact.
@@ -118,8 +185,10 @@ reflect("concise task summary — what was built and why", {
 })
 ```
 
-All entries enter as `DRAFT`. Tell the human: *"I've submitted N knowledge entries
-to Quorum for your review at http://localhost:3002/pending."*
+**After `reflect()` returns:**
+- Tell the human: *"I've submitted N knowledge entries to Quorum for your review at http://localhost:3002/pending."*
+- If any entry returned `conflict_detected` → do not close the session silently. Brief the human on each conflict and resolve them the same way as a mid-task conflict. See Conflict Resolution section.
+- If any entry returned `stored_pending_conflict_check` → tell the human: *"Conflict check deferred for N entries — review at /pending once Graphiti is back."*
 
 **Skip `reflect()` entirely** for: pure read sessions, abandoned tasks, sessions
 where no real architectural or design decisions were made. Over-extraction degrades
@@ -131,14 +200,23 @@ signal quality. See [`references/knowledge-guidelines.md`](references/knowledge-
 
 When a conflict is detected (`conflict_detected` in response or in `pending()`):
 
-**Do not just dump the raw conflict.** Brief the human:
+**Do not just dump the raw conflict.** Read the `brief` field in the response — it contains
+an LLM analysis of the contradiction. Use it to inform your suggested resolution. Brief
+the human like this:
 
 > "There's a conflict on `auth:token-strategy`:
 > - **Existing** (by @senior-architect, 3 months ago, confidence 0.90): 'Use session tokens'
 > - **Incoming** (your current decision, confidence 0.85): 'Use JWT for Lambda services'
 >
+> Analysis: *[brief field content — e.g., "existing rule predates Lambda adoption; new rule is likely scoped to Lambda contexts"]*
+>
 > Suggested resolution: **coexist_split** — the existing rule covers ECS services,
 > the new one covers Lambda. Want me to apply that?"
+
+If `pending()` returns a conflict with `stale_warning: true` → the underlying entry has
+changed since the conflict was raised. Surface this first:
+*"This conflict may be outdated — the underlying knowledge has been updated since it was
+flagged. Want me to re-run the conflict check rather than resolve a potentially stale one?"*
 
 Options to offer:
 | Resolution | When to suggest |
@@ -169,9 +247,9 @@ the engineer's flow for something you can fix yourself.
 
 | Signal | Meaning |
 |--------|---------|
-| `401 Unauthorized` or `jwt_expired` from any tool | Token expired |
-| `QUORUM_GATEWAY_URL` set but no token in MCP state | First-time auth needed |
-| `QUORUM_GITHUB_TOKEN` not set | PAT missing |
+| `401 Unauthorized` or `jwt_expired` from any tool | Token expired — run re-auth flow below |
+| `QUORUM_GATEWAY_URL` set but no token in MCP state | First-time auth needed — run re-auth flow below |
+| `QUORUM_GITHUB_TOKEN` not set | PAT missing — tell the human: *"Set `QUORUM_GITHUB_TOKEN` in your shell profile to a GitHub PAT (scopes: `read:user`), then restart Claude Code."* |
 
 ### Re-auth flow
 
@@ -214,9 +292,20 @@ If the engineer wants multi-project governance, they need to set `QUORUM_GATEWAY
 
 Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboarding.md).
 
-**Phase 8 is the highest-value step** — it ingests `CLAUDE.md`, `MEMORY.md`, and recent
-session transcripts as `DRAFT` knowledge, bootstrapping the team's memory from what
-already exists rather than starting from zero.
+**Phase overview:**
+1. Check for existing setup (`.quorum` file)
+2. Gather team info — project ID, members, domains, gateway URL
+3. Create + validate `<group_id>.quorum.json` config
+4. Upload config to S3
+5. Create `.quorum` discovery file via CLI
+6. Set identity (`QUORUM_GITHUB_TOKEN`) + register MCP server
+7. Install `SKILL.md` at user level (`~/.claude/skills/quorum.md`)
+8. **Ingest existing knowledge** — CLAUDE.md, MEMORY.md, session transcripts → DRAFT entries
+9. Commit `.quorum` discovery file (config is gitignored — lives in S3)
+10. Verify connection with a fresh session
+
+**Phase 8 is the highest-value step** — it bootstraps the team's memory from institutional
+knowledge that already exists, rather than starting from zero.
 
 ---
 
@@ -347,26 +436,6 @@ review them at http://localhost:3002/pending."*
 
 ---
 
-### Confidence for discovered knowledge
-
-Discovery confidence is lower than live-session confidence because the source
-may be stale or imprecise:
-
-| Source | Confidence |
-|--------|-----------|
-| CLAUDE.md / MEMORY.md — explicit decision | 0.80 |
-| README / docs — documented pattern | 0.75 |
-| Code comment — WHY-style explanation | 0.70 |
-| Config value — numeric constraint | 0.70 |
-| Test name — inferred business rule | 0.65 |
-| Git commit message | 0.65 |
-| Implicit from code structure | 0.55 |
-
-Always let the human adjust confidence before confirming — they know better than
-the file how current the knowledge is.
-
----
-
 ### Ongoing passive discovery — notice and flag
 
 Even outside a full scan, keep a passive eye open:
@@ -377,10 +446,10 @@ Even outside a full scan, keep a passive eye open:
 | A function with a surprising limit (timeout, retry, size) | Propose storing the constraint |
 | An error message that reveals a hard constraint | Propose storing it immediately |
 | A pattern repeated 3+ times with no Quorum entry | Propose storing the pattern |
-| A deprecated approach still present in old code | Propose a `forget()` or `supersede` |
+| A deprecated approach still present in old code | `search()` to find the Quorum entry → `history()` to check what depends on it → propose: *"This approach appears obsolete. The Quorum entry `topic:key` is still ACTIVE. Want me to deprecate it with `forget()`?"* |
 
-Say: *"I noticed a constraint/pattern/decision here that isn't in Quorum — want me to add it?"*
-One sentence. Low friction. Human says yes or no.
+For all except deprecated approaches: one sentence, low friction. Human says yes or no.
+*"I noticed a constraint/pattern/decision here that isn't in Quorum — want me to add it?"*
 
 ---
 
@@ -395,6 +464,9 @@ Violations are **rejected**, not warned:
 | Reason required (≥10 chars) | Always provide a meaningful reason for supersede/deprecate |
 | No self-approval | Surface to human; relay their decision via `review()` |
 | Claude writes are always DRAFT | `reflect()` and `remember()` as agent always enter DRAFT |
+| `triggered_by` always set | Set automatically by the server — if you see a `triggered_by: null` error, the server version is outdated |
+| Atomic ACTIVE transition | If an entry is stuck in PENDING_ACTIVE state, report to human — do not retry manually |
+| Bidirectional audit↔version | If `history()` returns a version with no `created_by_audit`, the audit chain is broken — escalate to human |
 
 ---
 
@@ -402,22 +474,26 @@ Violations are **rejected**, not warned:
 
 ```
 # Session start (always)
-pending()
-search("task domain")
+ls .quorum                                       ← verify project is connected
+pending()                                        ← conflicts block; drafts note-only
+search("task domain")                            ← load context before touching code
 
-# Retrieve
-recall("topic", "key")
-recall("topic", "key", { history: true })       ← full version chain
-recall("topic", "key", { at: "2024-11-30" })    ← point-in-time
-recall("topic", "key", { version: 2 })          ← specific version
+# Retrieve — always search first, then recall
+search("what you're deciding")                   ← find candidate keys
+recall("topic", "key")                           ← load exact entry once key is known
+recall("topic", "key", { history: true })        ← full version chain
+recall("topic", "key", { at: "2024-11-30" })     ← point-in-time
+recall("topic", "key", { version: 2 })           ← specific version
+history("topic", "key")                          ← ALWAYS call before superseding
 
 # Store
 remember("topic", "key", "content")
 remember("topic", "key", "content", {
   confidence: 0.85,
-  tags: ["domain", "type"],
+  tags: ["domain", "type", "component"],         ← cross-domain search hooks
   reason: "why this matters"
 })
+# → if stored_pending_conflict_check → warn human, Graphiti unavailable
 
 # Resolve conflict (conflict_id from pending() or conflict_detected response)
 remember("topic", "key", "resolved content", {
@@ -432,6 +508,8 @@ reflect("what was built and why", {
   patterns: ["..."],
   constraints: ["..."]
 })
+# → if conflict_detected in response → resolve before closing session
+# → if stored_pending_conflict_check → warn human, Graphiti unavailable
 
 # Governance
 review("approve" | "reject" | "request_changes", "topic", "key", "reason")
@@ -454,7 +532,21 @@ forget("topic", "key", "reason — min 10 chars")
 | Hypothesis — needs validation | 0.50–0.60 |
 | Uncertain — flag for review | < 0.50 — consider skipping |
 
+**For discovered knowledge** (source may be stale — use lower starting confidence):
+
+| Discovery source | Confidence |
+|-----------------|-----------|
+| CLAUDE.md / MEMORY.md — explicit decision | 0.80 |
+| README / docs — documented pattern | 0.75 |
+| Code comment — WHY-style explanation | 0.70 |
+| Config value — numeric constraint | 0.70 |
+| Test name — inferred business rule | 0.65 |
+| Git commit message | 0.65 |
+| Implicit from code structure | 0.55 |
+
 Never inflate confidence. A 0.95 that turns out wrong is more damaging than a 0.70.
+Always let the human adjust confidence before confirming discovery candidates — they
+know better than the file how current the knowledge is.
 
 ---
 
@@ -466,5 +558,5 @@ Load when you need full detail:
 |------|-------------|
 | [`references/tool-reference.md`](references/tool-reference.md) | Full parameter schemas, return shapes, edge cases |
 | [`references/conflict-resolution.md`](references/conflict-resolution.md) | Full conflict brief format, all resolution options with examples |
-| [`references/knowledge-guidelines.md`](references/knowledge-guidelines.md) | What to store, quality bar, over-extraction guard |
+| [`references/knowledge-guidelines.md`](references/knowledge-guidelines.md) | What to store, quality bar, over-extraction guard, discovery vs. reflect() |
 | [`references/onboarding.md`](references/onboarding.md) | Full 10-phase project onboarding protocol |
