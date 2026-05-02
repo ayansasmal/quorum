@@ -31,6 +31,7 @@
  *   POST /api/review/:id                — dashboard: approve / reject / request_changes
  *   POST /api/bump/:topic/:key          — dashboard: confidence bump (JWT auth)
  *   POST /sync/configs                  — trigger full S3→DDB sync (sync token or principal_architect JWT)
+ *   GET  /schema/config                 — quorum.config.schema.json for editor validation (no auth)
  *   GET  /health                        — health check
  */
 
@@ -48,6 +49,7 @@ import projectsRoutes  from './routes/projects.js'
 import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
 import syncRoutes, { syncAllConfigs } from './routes/sync.js'
+import schemaRoutes from './routes/schema.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
 import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
@@ -95,6 +97,8 @@ app.use('/bump',                              bumpRoutes)  // MCP server path (X
 app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) // dashboard BFF
 // Sync route handles its own auth (sync token OR JWT principal_architect)
 app.use('/sync',                              syncRoutes)
+// Schema endpoint — public, no auth (editor validation + autocomplete)
+app.use('/schema',                            schemaRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 

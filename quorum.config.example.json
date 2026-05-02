@@ -1,30 +1,30 @@
 {
-  "project": "my-team",
+  "$schema": "http://localhost:3001/schema/config",
   "group_id": "my-team",
   "members": [
     {
-      "name": "ayan",
+      "name": "Ayan",
       "team": "platform",
       "role": "principal_architect",
       "github_username": "ayansasmal",
       "git_email": "ayan@company.com"
     },
     {
-      "name": "alice",
+      "name": "Alice",
       "team": "security",
       "role": "senior_engineer",
       "github_username": "alice-sec",
       "git_email": "alice@company.com"
     },
     {
-      "name": "bob",
+      "name": "Bob",
       "team": "platform",
       "role": "engineer",
       "github_username": "bobsmith",
       "git_email": "bob@company.com"
     },
     {
-      "name": "carol",
+      "name": "Carol",
       "team": "backend",
       "role": "junior",
       "github_username": "carol-dev",

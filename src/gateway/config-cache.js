@@ -120,8 +120,8 @@ export async function loadProjectConfig(projectId) {
 
     await ddbPutConfig(projectId, config, response.ETag ?? null)
     // Use group_id (the S3 key prefix and JWT claim) as the canonical slug.
-    // config.project is a display name and must not be used as a lookup key.
-    await ddbSyncProjectMembers(projectId, config.project, config.group_id ?? projectId, members)
+    // config.project is an optional display name — falls back to group_id when absent.
+    await ddbSyncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
   } catch (err) {
     console.error(`[Gateway] DDB write-back failed for ${projectId}: ${err.message}`)
   }

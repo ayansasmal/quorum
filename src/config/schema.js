@@ -67,8 +67,23 @@ export const NotificationsSchema = z.object({
 
 /** Root config schema. */
 export const QuorumConfigSchema = z.object({
-  project: z.string().min(1),
-  group_id: z.string().min(1).optional(),
+  /**
+   * Canonical identifier for this project.
+   * Must be lowercase letters, numbers, and hyphens only.
+   * Used as:
+   *   - S3 key prefix: s3://<bucket>/<group_id>/config.json
+   *   - DynamoDB primary key in quorum-configs and quorum-user-projects
+   *   - JWT 'project' claim (scopes all graph and audit operations)
+   *   - Graphiti group_id (knowledge graph namespace)
+   * Must match the filename: configs/<group_id>.json
+   */
+  group_id: z.string().min(1).regex(/^[a-z0-9-]+$/, 'group_id must be lowercase letters, numbers, and hyphens only'),
+  /**
+   * Human-readable display name shown in the dashboard project picker.
+   * Optional — falls back to group_id if not provided.
+   * Unlike group_id, this may contain spaces and mixed case.
+   */
+  project: z.string().min(1).optional(),
   members: z.array(MemberSchema).default([]),
   roles: z.record(z.string(), RoleSchema).default({}),
   domains: z.record(z.string(), DomainConfigSchema).default({}),

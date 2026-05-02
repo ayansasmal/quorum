@@ -108,8 +108,8 @@ async function syncOneProject(bucket, projectId) {
 
     await putConfig(projectId, config, obj.ETag ?? null)
     // group_id is the canonical slug (S3 key prefix, JWT claim).
-    // config.project is display name only — must not be used as a lookup key.
-    await syncProjectMembers(projectId, config.project, config.group_id ?? projectId, members)
+    // config.project is an optional display name — falls back to group_id when absent.
+    await syncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
 
     return { project_id: projectId, ok: true }
   } catch (err) {

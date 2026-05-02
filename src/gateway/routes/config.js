@@ -72,7 +72,7 @@ router.post('/validate', (req, res) => {
   res.json({
     valid: true,
     summary: {
-      project:       config.project,
+      project:       config.project ?? config.group_id,
       members:       config.members.length,
       roles:         Object.keys(config.roles ?? {}).length,
       domains:       Object.keys(config.domains ?? {}).length,
