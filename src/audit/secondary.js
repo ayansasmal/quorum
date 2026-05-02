@@ -34,11 +34,29 @@ export async function writeAuditEntry(pg, entry) {
     )
     const previousHash = prevResult.rows[0]?.entry_hash ?? null
 
-    const completeEntry = buildEntryWithHash(
-      { entry_id: entry.entry_id ?? uuidv4(), ...entry },
-      previousHash,
-      chainPosition,
-    )
+    // Normalise every field that will be stored in the DB row to its canonical
+    // value BEFORE hashing. Fields omitted by callers (e.g. timestamp in
+    // compensation entries) would otherwise be absent from the hash but present
+    // when the row is read back — causing a write-time ≠ read-time hash mismatch.
+    const normalised = {
+      entry_id:        entry.entry_id ?? uuidv4(),
+      timestamp:       entry.timestamp ?? new Date().toISOString(),
+      content_hash:    entry.content_hash ?? null,
+      governance_json: entry.governance_json ?? {},
+      outcome_json:    entry.outcome_json ?? {},
+      version_impact:  entry.version_impact ?? { versions_created: [], versions_superseded: [] },
+      ...entry,
+    }
+    // Re-apply the same defaults after the spread so that a caller passing
+    // `undefined` explicitly still gets a canonical non-undefined value in the
+    // hashed object (matches what the DB will store).
+    normalised.timestamp       = normalised.timestamp       ?? new Date().toISOString()
+    normalised.content_hash    = normalised.content_hash    ?? null
+    normalised.governance_json = normalised.governance_json ?? {}
+    normalised.outcome_json    = normalised.outcome_json    ?? {}
+    normalised.version_impact  = normalised.version_impact  ?? { versions_created: [], versions_superseded: [] }
+
+    const completeEntry = buildEntryWithHash(normalised, previousHash, chainPosition)
 
     await client.query(
       `INSERT INTO audit_log (
@@ -50,14 +68,14 @@ export async function writeAuditEntry(pg, entry) {
         completeEntry.entry_id,
         completeEntry.operation,
         completeEntry.tool,
-        completeEntry.timestamp ?? new Date().toISOString(),
+        completeEntry.timestamp,
         completeEntry.author,
         completeEntry.author_role ?? 'unknown',
         completeEntry.session_id ?? null,
-        completeEntry.content_hash ?? null,
-        JSON.stringify(completeEntry.governance_json ?? {}),
-        JSON.stringify(completeEntry.outcome_json ?? {}),
-        JSON.stringify(completeEntry.version_impact ?? { versions_created: [], versions_superseded: [] }),
+        completeEntry.content_hash,
+        JSON.stringify(completeEntry.governance_json),
+        JSON.stringify(completeEntry.outcome_json),
+        JSON.stringify(completeEntry.version_impact),
         completeEntry.entry_hash,
         completeEntry.previous_hash,
         completeEntry.chain_position,

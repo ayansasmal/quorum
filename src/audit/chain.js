@@ -4,8 +4,11 @@
  * Every audit entry carries the hash of the previous entry.
  * Modifying any historical entry breaks the chain — detectable on the next verify().
  *
- * Hash input: a deterministic JSON serialisation of the entry's content fields
- * (keys sorted, entry_hash field excluded to avoid circularity).
+ * Hash input: a deterministic JSON serialisation of the entry's content fields.
+ * Keys are sorted recursively (deep-sort) to guarantee identical output regardless
+ * of field ordering in the in-memory object or after PostgreSQL JSONB round-trip.
+ * JSONB normalises key order on storage; deep-sort makes hashEntry stable across
+ * write → store → read back cycles. entry_hash is excluded to avoid circularity.
  */
 
 import { createHash } from 'node:crypto'
@@ -24,6 +27,34 @@ const HASHED_FIELDS = [
   'previous_hash',
   'chain_position',
 ]
+
+/**
+ * Recursively sort object keys so that JSON.stringify produces an identical
+ * string regardless of the key insertion order of the original object or the
+ * alphabetical reordering imposed by PostgreSQL's JSONB type.
+ *
+ * Type normalisation across PostgreSQL round-trips:
+ * - Date objects (TIMESTAMPTZ returned by pg as a JS Date) → ISO string,
+ *   matching the write-time value from new Date().toISOString().
+ * - Arrays are left in their original order (order matters for array semantics).
+ * - Plain objects have their keys sorted.
+ * - All other primitives (string, number, boolean, null) are returned unchanged.
+ *
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function deepSort(value) {
+  if (Array.isArray(value)) return value.map(deepSort)
+  if (value instanceof Date) return value.toISOString()
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((k) => [k, deepSort(value[k])]),
+    )
+  }
+  return value
+}
 
 export class ChainIntegrityViolation extends Error {
   /**
@@ -44,7 +75,8 @@ export class ChainIntegrityViolation extends Error {
 
 /**
  * Compute the SHA256 hash of an audit entry's content fields.
- * Keys are sorted for determinism. entry_hash is excluded.
+ * All keys are sorted recursively (deep-sort) for determinism across PostgreSQL
+ * JSONB round-trips. entry_hash is excluded to avoid circularity.
  * @param {Record<string, unknown>} entry
  * @returns {string} hex digest
  */
@@ -58,7 +90,7 @@ export function hashEntry(entry) {
   const sorted = Object.fromEntries(
     Object.keys(hashable)
       .sort()
-      .map((k) => [k, hashable[k]]),
+      .map((k) => [k, deepSort(hashable[k])]),
   )
   return createHash('sha256').update(JSON.stringify(sorted)).digest('hex')
 }
