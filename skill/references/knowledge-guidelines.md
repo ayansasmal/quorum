@@ -84,6 +84,26 @@ New domains are fine — just be consistent within a project.
 
 ---
 
+## Discovery mode vs. reflect() mode
+
+There are two ways knowledge enters Quorum:
+
+| Mode | When | Source | Confidence |
+|------|------|--------|-----------|
+| **reflect()** | After completing a task | Live session decisions and discoveries | 0.55–0.90 |
+| **Discovery** | First session, explicit scan, passive notice | Existing files, comments, tests, config | 0.55–0.80 |
+
+For discovery specifics — trigger table, per-source bash commands, batch presentation
+format, confidence by source, and passive notice behaviors — see the
+**Knowledge Discovery** section in `SKILL.md`.
+
+**Key difference:** `reflect()` captures what you *just decided*. Discovery captures
+what the team *already knows* but hasn't told Quorum yet.
+
+Both modes enter as `DRAFT`. Both require `search()` first to avoid duplicates.
+
+---
+
 ## The self-evolution loop
 
 ```mermaid

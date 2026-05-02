@@ -165,3 +165,45 @@ Export knowledge to human-readable format.
 **Parameters:**
 - `format` — `"markdown" | "confluence"`
 - `topic` — optional; omit for full export across all domains
+
+---
+
+## `authenticate(github_token, project_id)`
+
+Authenticate with the Quorum Gateway via GitHub OAuth token. Required in gateway mode
+(`QUORUM_GATEWAY_URL` set). Token lives in MCP process memory — never written to disk.
+
+**Parameters:**
+- `github_token` — GitHub OAuth token (`gho_...`) obtained from the dashboard OAuth flow
+- `project_id` — project slug (`group_id`) to authenticate against
+
+**Trigger:** Call when any tool returns `401 Unauthorized` or `jwt_expired`. See the
+Auth section of SKILL.md for the full re-auth flow.
+
+**Direct mode** (no `QUORUM_GATEWAY_URL`): Not required. Identity resolves from
+git config user.email → `QUORUM_AUTHOR` env var → anonymous.
+
+**Returns:**
+```json
+{ "status": "authenticated", "project": "platform-team", "role": "senior_engineer",
+  "sub": "github-username", "expires_in": 3600 }
+```
+
+---
+
+## Gateway API surface (not MCP tools — reference only)
+
+These are HTTP endpoints on the Quorum Gateway (`QUORUM_GATEWAY_URL`), not MCP tools.
+You cannot call them directly — the MCP server proxies through them automatically.
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | — | Stack health: PostgreSQL, Graphiti, FalkorDB, S3 |
+| `GET /schema/config` | — | JSON Schema (Draft 7) for `<group_id>.quorum.json` config files |
+| `POST /config/validate` | — | Validate a config file without uploading |
+| `POST /auth/github` | — | GitHub OAuth redirect entry point |
+| `POST /auth/token` | — | Exchange GitHub token + project_id for JWT |
+| `GET /auth/projects` | JWT | List projects the authenticated user belongs to |
+| `POST /auth/switch` | JWT | Switch active project context (no re-OAuth) |
+| `POST /sync/configs` | JWT/sync token | S3→DDB full config sync (EventBridge-compatible) |
+| `GET /.well-known/jwks.json` | — | JWKS endpoint for JWT verification |
