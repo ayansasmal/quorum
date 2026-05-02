@@ -232,10 +232,8 @@ async function startup() {
   // 3. Sync S3 configs → DynamoDB (non-fatal — warms the cache on restart)
   try {
     const { synced, failed, duration_ms } = await syncAllConfigs()
-    if (synced > 0 || failed.length > 0) {
-      console.error(`[Gateway] ✓ DDB sync complete — ${synced} synced, ${failed.length} failed (${duration_ms}ms)`)
-      for (const f of failed) console.error(`[Gateway]   ✗ ${f.project_id}: ${f.error}`)
-    }
+    console.error(`[Gateway] ✓ DDB sync — ${synced} synced, ${failed.length} failed (${duration_ms}ms)`)
+    for (const f of failed) console.error(`[Gateway]   ✗ ${f.project_id}: ${f.error}`)
   } catch (err) {
     console.error(`[Gateway] DDB sync failed (non-fatal): ${err.message}`)
   }
