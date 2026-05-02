@@ -114,15 +114,23 @@ awslocal s3 ls s3://quorum-configs/ --recursive
 ```
 
 Then trigger a gateway sync so the config is cached in DynamoDB immediately
-(otherwise it picks up on the next restart):
+(otherwise it picks up on the next restart). Use whichever auth you have:
 
 ```bash
+# Option A — principal_architect JWT from your dashboard session
 curl -s -X POST http://localhost:3001/sync/configs \
-  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}" | python3 -m json.tool
-# { "synced": 1, "failed": [], "duration_ms": 45 }
+  -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
+
+# Option B — static sync secret (if QUORUM_SYNC_SECRET is set in .env)
+curl -s -X POST http://localhost:3001/sync/configs \
+  -H "X-Quorum-Sync-Token: ${QUORUM_SYNC_SECRET}" | python3 -m json.tool
 ```
 
-> If `QUORUM_SYNC_SECRET` is not set, you can also just restart the gateway:
+```json
+{ "synced": 1, "failed": [], "duration_ms": 45 }
+```
+
+> If neither option is available, just restart the gateway:
 > `docker compose restart gateway`
 
 **Production / real S3:** replace `awslocal` with `aws`:
@@ -272,7 +280,7 @@ clicking **Switch Project** in the header — no re-authentication with GitHub r
 Run the sync and check it picked up your config:
 ```bash
 curl -s -X POST http://localhost:3001/sync/configs \
-  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}" | python3 -m json.tool
+  -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
 ```
 If `failed` contains your project ID, check the S3 key matches `<project_id>/config.json`.
 
@@ -290,7 +298,7 @@ curl -s -H "Authorization: Bearer <your_github_token>" \
 The gateway caches configs in memory for 5 minutes. Trigger an immediate invalidation:
 ```bash
 curl -s -X POST http://localhost:3001/sync/configs \
-  -H "X-Sync-Secret: ${QUORUM_SYNC_SECRET}"
+  -H "Authorization: Bearer <your-jwt>"
 # or simply:
 docker compose restart gateway
 ```
