@@ -15,7 +15,7 @@ Each project in Quorum is a **named namespace** (called a `group_id`) that isola
 its knowledge graph, audit log, and team configuration from other projects on the same
 stack. Onboarding a project means:
 
-1. Writing a `quorum.config.json` that describes the team (members, roles, domains)
+1. Writing a `<group_id>.quorum.json` that describes the team (members, roles, domains)
 2. Uploading that config to the S3 bucket the gateway reads from
 3. Verifying your membership works via the dashboard
 4. Connecting Claude Code to the gateway and installing the Quorum skill
@@ -29,11 +29,11 @@ All four steps take under 10 minutes.
 Copy the example config from the Quorum repo and edit it for your team:
 
 ```bash
-# From inside your project directory
-cp /path/to/quorum/quorum.config.example.json quorum.config.json
+# Replace my-project with your actual group_id
+cp /path/to/quorum/example.quorum.json my-project.quorum.json
 ```
 
-Edit `quorum.config.json`:
+Edit `my-project.quorum.json`:
 
 ```json
 {
@@ -105,7 +105,7 @@ a config without uploading it:
 ```bash
 curl -s -X POST http://localhost:3001/config/validate \
   -H "Content-Type: application/json" \
-  -d @quorum.config.json | python3 -m json.tool
+  -d @my-project.quorum.json | python3 -m json.tool
 ```
 
 A valid config returns `{ "valid": true, "summary": { ... } }`. Errors return `{ "valid": false, "errors": [...] }`.
@@ -114,19 +114,19 @@ A valid config returns `{ "valid": true, "summary": { ... } }`. Errors return `{
 
 ## Step 2 — Upload the config to S3
 
-The gateway reads project configs from an S3 bucket at the key
-`<project_id>/config.json`. For local development, the bucket lives in LocalStack.
+The gateway reads project configs from an S3 bucket using a flat key:
+`<group_id>.quorum.json`. For local development, the bucket lives in LocalStack.
 
 ```bash
-awslocal s3 cp quorum.config.json \
-  s3://quorum-configs/my-project/config.json
+awslocal s3 cp my-project.quorum.json \
+  s3://quorum-configs/my-project.quorum.json
 ```
 
 Verify the upload:
 
 ```bash
-awslocal s3 ls s3://quorum-configs/ --recursive
-# 2026-01-01 00:00:00  1234 my-project/config.json
+awslocal s3 ls s3://quorum-configs/
+# 2026-01-01 00:00:00  1234 my-project.quorum.json
 ```
 
 Then trigger a gateway sync so the config is cached in DynamoDB immediately
@@ -151,7 +151,7 @@ curl -s -X POST http://localhost:3001/sync/configs \
 
 **Production / real S3:** replace `awslocal` with `aws`:
 ```bash
-aws s3 cp quorum.config.json s3://your-quorum-bucket/my-project/config.json
+aws s3 cp my-project.quorum.json s3://your-quorum-bucket/my-project.quorum.json
 ```
 
 ---
@@ -278,9 +278,9 @@ in the JWT to scope all graph operations automatically.
 
 ```
 s3://quorum-configs/
-  project-alpha/config.json     ← group_id: "project-alpha"
-  project-beta/config.json      ← group_id: "project-beta"
-  my-project/config.json        ← group_id: "my-project"
+  project-alpha.quorum.json     ← group_id: "project-alpha"
+  project-beta.quorum.json      ← group_id: "project-beta"
+  my-project.quorum.json        ← group_id: "my-project"
 ```
 
 The dashboard's project picker shows all projects your GitHub account has access to
@@ -298,7 +298,7 @@ Run the sync and check it picked up your config:
 curl -s -X POST http://localhost:3001/sync/configs \
   -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
 ```
-If `failed` contains your project ID, check the S3 key matches `<project_id>/config.json`.
+If `failed` contains your project ID, check the S3 key matches `<group_id>.quorum.json`.
 
 **"not a member" on login**
 
@@ -328,8 +328,8 @@ curl http://localhost:3001/health  # must return {"status":"ok"}
 
 **Knowledge visible across projects**
 
-Check that `group_id` in your config matches the S3 key prefix you uploaded to
-(`s3://quorum-configs/<group_id>/config.json`). The JWT `project` claim is derived
+Check that `group_id` in your config matches the S3 key you uploaded to
+(`s3://quorum-configs/<group_id>.quorum.json`). The JWT `project` claim is derived
 from `group_id` — if they diverge, graph operations will target the wrong namespace.
 The `project` field is display-only and has no effect on routing.
 
@@ -339,8 +339,8 @@ The `project` field is display-only and has no effect on routing.
 
 | Step | Action |
 |------|--------|
-| 1. Create config | Edit `quorum.config.json` from the example |
-| 2. Upload | `awslocal s3 cp quorum.config.json s3://quorum-configs/<id>/config.json` + sync |
+| 1. Create config | Copy `example.quorum.json` → `<group_id>.quorum.json`, edit for your team |
+| 2. Upload | `awslocal s3 cp <group_id>.quorum.json s3://quorum-configs/<group_id>.quorum.json` + sync |
 | 3. Verify | Open `http://localhost:3002` → sign in → confirm your project card appears |
 | 4. MCP | `claude mcp add quorum -- node /path/to/quorum/src/server.js` + `QUORUM_GATEWAY_URL` |
 | 5. Skill | `cp skill/SKILL.md ~/.claude/skills/quorum.md` |

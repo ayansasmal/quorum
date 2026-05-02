@@ -59,7 +59,7 @@ export async function loadProjectConfig(projectId) {
     throw new Error('QUORUM_CONFIG_BUCKET not set and QUORUM_CONFIG_PATH not set')
   }
 
-  const key = `${projectId}/config.json`
+  const key = `${projectId}.quorum.json`
   const cached = cache.get(projectId)
   const now = Date.now()
 
@@ -140,14 +140,22 @@ export async function listProjectIds() {
   if (!bucket) return []
 
   const { ListObjectsV2Command } = await import('@aws-sdk/client-s3')
-  const response = await getS3().send(new ListObjectsV2Command({
-    Bucket: bucket,
-    Delimiter: '/',
-  }))
 
-  return (response.CommonPrefixes ?? [])
-    .map((p) => p.Prefix?.replace(/\/$/, ''))
-    .filter(Boolean)
+  const ids = []
+  let token
+  do {
+    const response = await getS3().send(new ListObjectsV2Command({
+      Bucket:            bucket,
+      ContinuationToken: token,
+    }))
+    for (const obj of response.Contents ?? []) {
+      const m = obj.Key?.match(/^([^/]+)\.quorum\.json$/)
+      if (m) ids.push(m[1])
+    }
+    token = response.IsTruncated ? response.NextContinuationToken : undefined
+  } while (token)
+
+  return ids
 }
 
 /**

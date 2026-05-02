@@ -10,8 +10,8 @@
 #   ./scripts/init-localstack.sh --skip-bucket # skip bucket creation (external LS)
 #
 # Project configs:
-#   Place one JSON file per project in configs/<project-id>.json.
-#   Copy quorum.config.example.json as a starting point.
+#   Place one file per project in configs/<group_id>.quorum.json.
+#   Copy example.quorum.json as a starting point.
 #   These are gitignored (contain real usernames/emails).
 #
 # Environment:
@@ -80,13 +80,14 @@ else
 fi
 
 # ── Upload project configs from configs/ ──────────────────────────────────────
-# Each configs/<project-id>.json → s3://$BUCKET/<project-id>/config.json.
+# Each configs/<group_id>.quorum.json → s3://$BUCKET/<group_id>.quorum.json (flat).
 # Always overwrites — configs/ is the local source of truth.
-if [[ -d "$CONFIGS_DIR" ]] && compgen -G "$CONFIGS_DIR/*.json" > /dev/null 2>&1; then
-  for config_file in "$CONFIGS_DIR"/*.json; do
-    project_id="$(basename "$config_file" .json)"
-    s3_key="$project_id/config.json"
-    info "Uploading $project_id → s3://$BUCKET/$s3_key ..."
+if [[ -d "$CONFIGS_DIR" ]] && compgen -G "$CONFIGS_DIR/*.quorum.json" > /dev/null 2>&1; then
+  for config_file in "$CONFIGS_DIR"/*.quorum.json; do
+    filename="$(basename "$config_file")"          # e.g. my-project.quorum.json
+    group_id="${filename%.quorum.json}"             # e.g. my-project
+    s3_key="$filename"                             # flat key: my-project.quorum.json
+    info "Uploading $group_id → s3://$BUCKET/$s3_key ..."
     upload_attempt=0 upload_ok=false
     until $upload_ok; do
       if awslocal s3api put-object \
@@ -98,7 +99,7 @@ if [[ -d "$CONFIGS_DIR" ]] && compgen -G "$CONFIGS_DIR/*.json" > /dev/null 2>&1;
       else
         upload_attempt=$((upload_attempt + 1))
         if [[ $upload_attempt -ge 3 ]]; then
-          warn "Upload failed after 3 attempts — skipping $project_id (non-fatal)"
+          warn "Upload failed after 3 attempts — skipping $group_id (non-fatal)"
           break
         fi
         warn "Upload attempt $upload_attempt failed — retrying in 3 s..."
@@ -109,7 +110,7 @@ if [[ -d "$CONFIGS_DIR" ]] && compgen -G "$CONFIGS_DIR/*.json" > /dev/null 2>&1;
   done
 else
   warn "No configs found in $CONFIGS_DIR"
-  warn "Add project configs as configs/<project-id>.json (copy quorum.config.example.json)"
+  warn "Add project configs as configs/<group_id>.quorum.json (copy example.quorum.json)"
 fi
 
 # ── DynamoDB tables ────────────────────────────────────────────────────────────
@@ -168,4 +169,4 @@ awslocal s3api list-objects --bucket "$BUCKET" \
 
 echo ""
 ok "LocalStack S3 ready"
-info "Set QUORUM_PROJECT_ID in .env to one of the project IDs listed above"
+info "Project IDs listed above — use one as the group_id when authenticating"

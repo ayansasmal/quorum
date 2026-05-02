@@ -25,10 +25,10 @@ import { fileURLToPath } from 'node:url'
 
 const router = Router()
 
-/** Absolute path to the schema file (relative to this source file: ../../../ = repo root). */
+/** Absolute path to the schema file — lives in src/config/ alongside the Zod schema. */
 const SCHEMA_PATH = resolve(
   fileURLToPath(import.meta.url),
-  '../../../../quorum.config.schema.json',
+  '../../../config/quorum.schema.json',
 )
 
 /** Cached schema object — loaded once on first request. */

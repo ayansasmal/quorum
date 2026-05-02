@@ -106,7 +106,7 @@ Every `/graphiti/*` call is intercepted by JWT middleware. The Gateway:
 
 ### S3-Backed Project Config
 
-Project configs live at `s3://quorum-configs/<group_id>/config.json`. The Gateway caches
+Project configs live at `s3://quorum-configs/<group_id>.quorum.json` (flat bucket — no subdirectories). The Gateway caches
 them in-process (5-minute TTL) with a DDB read-through fast path. Configs are validated
 against the Zod schema on every load — an invalid config is a hard startup failure for
 that project.

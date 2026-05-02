@@ -91,7 +91,7 @@ async function syncOneProject(bucket, projectId) {
   try {
     const obj = await getS3().send(new GetObjectCommand({
       Bucket: bucket,
-      Key:    `${projectId}/config.json`,
+      Key:    `${projectId}.quorum.json`,
     }))
     const body = await obj.Body.transformToString()
     const raw  = JSON.parse(body)
@@ -142,7 +142,7 @@ export async function syncAllConfigs() {
 
   const startedAt = Date.now()
 
-  // 1. List all */config.json keys
+  // 1. List all <group_id>.quorum.json keys (flat bucket — no subdirectories)
   let projectIds = []
   try {
     let token
@@ -152,7 +152,7 @@ export async function syncAllConfigs() {
         ContinuationToken: token,
       }))
       for (const obj of result.Contents ?? []) {
-        const m = obj.Key?.match(/^([^/]+)\/config\.json$/)
+        const m = obj.Key?.match(/^([^/]+)\.quorum\.json$/)
         if (m) projectIds.push(m[1])
       }
       token = result.IsTruncated ? result.NextContinuationToken : undefined
