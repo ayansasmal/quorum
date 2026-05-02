@@ -378,18 +378,18 @@ export function AuthProvider({ children }) {
   /**
    * Return to the project selector without re-doing GitHub OAuth.
    * Uses the cached project list from sessionStorage.
-   * Clears the current JWT so ProtectedRoute redirects to selector.
+   *
+   * Intentionally keeps the current JWT in state — the token is still valid and
+   * switchTo() needs it to call POST /auth/switch. Clearing it here would route
+   * ProjectSelector into the selectProject() path which requires the original
+   * gho_ OAuth token (long gone after first login) → "session expired" error.
+   *
+   * ProtectedRoute redirects to /select-project on authPhase === 'selecting'
+   * regardless of whether a token is present.
    */
   const switchProject = useCallback(() => {
-    clearTimeout(expiryTimerRef.current)
-    clearTimeout(backgroundRefreshTimerRef.current)
-    setToken(null)
-    setUser(null)
     setReauthNeeded(false)
-    clearStoredSession()
-    // Keep availableProjects and PROJECTS_KEY — selector uses the cached list
-    // pendingOauthTokenRef stays null; selectProject() won't work without a gho_ token
-    // switchTo() handles the actual project change — switchProject() just shows the UI
+    // Keep availableProjects, token, user — selector uses the list, switchTo() uses the token
     setAuthPhase('selecting')
   }, [])
 

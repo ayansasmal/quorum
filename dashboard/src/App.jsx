@@ -24,7 +24,7 @@ import Status          from './pages/Status.jsx'
  *   - Browser notification polling (pending count change)
  */
 function AppSetup({ children }) {
-  const { token, logout, refresh } = useAuth()
+  const { token, authPhase, logout, refresh } = useAuth()
   const qc                         = useQueryClient()
 
   useEffect(() => {
@@ -37,9 +37,11 @@ function AppSetup({ children }) {
   }, [logout])
 
   // Clear all cached queries on logout or project switch
+  // authPhase 'selecting' means a switch is in progress — clear so the
+  // next project loads fresh data even if the token didn't change.
   useEffect(() => {
-    if (!token) qc.clear()
-  }, [token, qc])
+    if (!token || authPhase === 'selecting') qc.clear()
+  }, [token, authPhase, qc])
 
   // Browser notification: request permission once on login
   useEffect(() => {
