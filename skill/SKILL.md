@@ -18,6 +18,7 @@ authority weighting, and a tamper-evident audit trail.
 3. Capture decisions and constraints the moment they are made — not at the end
 4. Extract and submit learnable knowledge after the task — via `reflect()`
 5. Relay human conflict resolutions — you cannot self-approve
+6. Discover latent knowledge in existing files and surface candidates for human confirmation
 
 ---
 
@@ -216,6 +217,170 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 **Phase 8 is the highest-value step** — it ingests `CLAUDE.md`, `MEMORY.md`, and recent
 session transcripts as `DRAFT` knowledge, bootstrapping the team's memory from what
 already exists rather than starting from zero.
+
+---
+
+## Knowledge Discovery — Surface Latent Knowledge
+
+Quorum's graph is only as good as what gets into it. Most institutional knowledge
+lives in files that already exist — `CLAUDE.md`, `MEMORY.md`, README sections,
+ADRs, code comments, test names, config values. This section tells you when and
+how to scan for it and surface candidates for human confirmation before storing.
+
+**Golden rule: always `search()` before proposing. Never suggest storing something
+that is already in Quorum.**
+
+---
+
+### When to run discovery
+
+| Trigger | What to scan |
+|---------|-------------|
+| First session in a project | `CLAUDE.md`, `MEMORY.md`, `README.md`, `docs/` |
+| Human says "onboard this project" | Full scan — all sources below |
+| Human says "what should we add to Quorum?" | Full scan |
+| You open a file with dense comments or ADR-style notes | That file |
+| You read a long test file | Extract business rules from test names + assertions |
+| You read a config file (limits, thresholds, pool sizes) | Extract constraints |
+| Human pastes a decision, email, or Slack thread | Extract immediately |
+
+---
+
+### What to look for in each source
+
+#### `CLAUDE.md` / `MEMORY.md`
+These files are the richest source. Read them fully and extract:
+- Any sentence stating a technical decision or rationale
+- Any "we use X because Y" or "always do X" or "never do Y"
+- Any constraint with a number (timeout, pool size, retry count)
+- Any mention of a tool choice with reasoning
+
+```bash
+cat CLAUDE.md .claude/CLAUDE.md 2>/dev/null
+cat ~/.claude/projects/$(echo $PWD | tr '/' '-')/memory/MEMORY.md 2>/dev/null
+```
+
+#### `README.md` / `docs/*.md`
+Look for:
+- Architecture decision sections
+- "Why we chose X over Y" paragraphs
+- Runbook procedures
+- Non-obvious setup steps that encode constraints
+
+#### Source code comments
+Lines starting with `// NOTE:`, `// IMPORTANT:`, `// WHY:`, `// HACK:`, `// TODO:`,
+or multi-line comments explaining *why* (not *what*) the code does something.
+
+```bash
+grep -rn "NOTE:\|IMPORTANT:\|WHY:\|HACK:\|DECISION:" src/ --include="*.js" --include="*.ts"
+```
+
+#### Test files
+Test names encode business rules. Scan test `describe`/`it` blocks for:
+- "should reject X when Y" → constraint
+- "should use X for Z" → pattern
+- "must not allow X" → hard constraint
+
+```bash
+grep -rn "it(\|test(\|describe(" tests/ --include="*.test.*" -A 1
+```
+
+#### Config and environment files
+Numeric values in config often encode constraints no one wrote down:
+- Pool sizes, timeout values, retry counts, rate limits
+- Feature flags that encode a decision about what's enabled
+
+```bash
+cat .env.example docker-compose.yml 2>/dev/null | grep -E "[0-9]+" | head -30
+```
+
+#### Recent git history
+Commit messages with rationale are a goldmine:
+
+```bash
+git log --oneline -20                          # scan subjects
+git log --format="%s%n%b" -10 | head -60      # subjects + bodies
+```
+
+Look for commits that explain *why* a change was made, not just *what* changed.
+
+---
+
+### How to present candidates — batch, don't drip
+
+Never ask the human to confirm one entry at a time. Batch everything you found,
+deduplicate against existing Quorum knowledge, then present a numbered list:
+
+> **Quorum discovery — I found 6 knowledge candidates in this project.**
+> Please confirm which to store (reply with the numbers, e.g. "1 3 5", or "all" / "none"):
+>
+> 1. **api:error-standards** *(Pattern, confidence 0.80)*
+>    "All API errors follow RFC 7807 Problem Detail: type, title, status, detail"
+>    *Source: CLAUDE.md line 14*
+>
+> 2. **db:connection-pooling** *(Constraint, confidence 0.85)*
+>    "PostgreSQL pool size: 10 per service instance, max 100 total across all instances"
+>    *Source: .env.example + docker-compose.yml*
+>
+> 3. **infra:retry-strategy** *(Pattern, confidence 0.75)*
+>    "Exponential backoff with jitter: base 1s, max 30s, max 3 retries, ±20% jitter"
+>    *Source: src/utils/retry.js comment block*
+>
+> 4. **auth:token-strategy** *(Decision, confidence 0.80)*
+>    "JWT for Lambda-based services; session tokens for ECS internal services"
+>    *Source: CLAUDE.md line 8 — already in Quorum? → search result: YES — skip*
+>    ⚠️ Already in Quorum — excluded from list
+
+Once the human replies, store the approved ones:
+
+```javascript
+// For each approved candidate:
+remember("topic", "key", "content", {
+  confidence: 0.80,
+  tags: ["domain", "source-type"],
+  reason: "discovered in CLAUDE.md during project scan"
+})
+```
+
+All entries enter as `DRAFT`. Tell the human: *"Stored N entries as DRAFT —
+review them at http://localhost:3002/pending."*
+
+---
+
+### Confidence for discovered knowledge
+
+Discovery confidence is lower than live-session confidence because the source
+may be stale or imprecise:
+
+| Source | Confidence |
+|--------|-----------|
+| CLAUDE.md / MEMORY.md — explicit decision | 0.80 |
+| README / docs — documented pattern | 0.75 |
+| Code comment — WHY-style explanation | 0.70 |
+| Config value — numeric constraint | 0.70 |
+| Test name — inferred business rule | 0.65 |
+| Git commit message | 0.65 |
+| Implicit from code structure | 0.55 |
+
+Always let the human adjust confidence before confirming — they know better than
+the file how current the knowledge is.
+
+---
+
+### Ongoing passive discovery — notice and flag
+
+Even outside a full scan, keep a passive eye open:
+
+| You notice | Action |
+|-----------|--------|
+| A code comment that says "always X" or "never Y" | Propose storing it |
+| A function with a surprising limit (timeout, retry, size) | Propose storing the constraint |
+| An error message that reveals a hard constraint | Propose storing it immediately |
+| A pattern repeated 3+ times with no Quorum entry | Propose storing the pattern |
+| A deprecated approach still present in old code | Propose a `forget()` or `supersede` |
+
+Say: *"I noticed a constraint/pattern/decision here that isn't in Quorum — want me to add it?"*
+One sentence. Low friction. Human says yes or no.
 
 ---
 
