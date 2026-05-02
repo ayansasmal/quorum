@@ -140,6 +140,52 @@ router.post('/token', async (req, res) => {
   })
 })
 
+// ── Shared helper ──────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all projects accessible to a given GitHub login from DDB/S3.
+ * Member projects and guest-accessible projects are merged; member entry wins
+ * on conflict. Falls through to an empty array on error (best-effort).
+ *
+ * @param {string} githubLogin
+ * @returns {Promise<Array<object>>}
+ */
+async function fetchProjectsForUser(githubLogin) {
+  const [ddbProjects, guestProjects] = await Promise.all([
+    getUserProjects(githubLogin),
+    getGuestProjects(),
+  ])
+
+  const memberMap = new Map()
+  for (const p of ddbProjects ?? []) {
+    memberMap.set(p.project_id, {
+      id:           p.project_id,
+      slug:         p.project_slug ?? p.project_id,
+      name:         p.project_name ?? p.project_id,
+      role:         p.role         ?? null,
+      team:         p.team         ?? null,
+      member_count: null,
+      is_guest:     false,
+    })
+  }
+
+  for (const g of guestProjects ?? []) {
+    if (!memberMap.has(g.project_id)) {
+      memberMap.set(g.project_id, {
+        id:           g.project_id,
+        slug:         g.project_slug ?? g.project_id,
+        name:         g.project_name ?? g.project_id,
+        role:         null,
+        team:         null,
+        member_count: null,
+        is_guest:     true,
+      })
+    }
+  }
+
+  return [...memberMap.values()]
+}
+
 // POST /auth/projects
 // Discover all projects the caller belongs to using only a GitHub OAuth token.
 // Intentionally sits outside JWT auth — this is the step BEFORE JWT issuance.
@@ -162,41 +208,7 @@ router.post('/projects', async (req, res) => {
   // Fast path — member projects from DDB + guest-accessible projects merged.
   // Falls through to PostgreSQL only if combined result is empty or DDB errors.
   try {
-    const [ddbProjects, guestProjects] = await Promise.all([
-      getUserProjects(githubLogin),
-      getGuestProjects(),
-    ])
-
-    // Build member map (project_id → normalized project)
-    const memberMap = new Map()
-    for (const p of ddbProjects ?? []) {
-      memberMap.set(p.project_id, {
-        id:           p.project_id,
-        slug:         p.project_slug ?? p.project_id,
-        name:         p.project_name ?? p.project_id,
-        role:         p.role         ?? null,
-        team:         p.team         ?? null,
-        member_count: null,
-        is_guest:     false,
-      })
-    }
-
-    // Merge guest-accessible projects — member entry wins on conflict
-    for (const g of guestProjects ?? []) {
-      if (!memberMap.has(g.project_id)) {
-        memberMap.set(g.project_id, {
-          id:           g.project_id,
-          slug:         g.project_slug ?? g.project_id,
-          name:         g.project_name ?? g.project_id,
-          role:         null,
-          team:         null,
-          member_count: null,
-          is_guest:     true,
-        })
-      }
-    }
-
-    const projects = [...memberMap.values()]
+    const projects = await fetchProjectsForUser(githubLogin)
     if (projects.length > 0) {
       return res.json({ projects, github_login: githubLogin, source: 'ddb' })
     }
@@ -233,6 +245,20 @@ router.post('/projects', async (req, res) => {
     res.json({ projects, github_login: githubLogin, source: 'db' })
   } catch (err) {
     res.status(500).json({ error: 'db_error', message: err.message })
+  }
+})
+
+// GET /auth/projects
+// Refresh the project list for an already-authenticated user using their JWT.
+// Used by the dashboard when entering the project switcher so the list is always
+// fresh — avoids relying on the sessionStorage cache which can go stale.
+router.get('/projects', verifyJwt, async (req, res) => {
+  const githubLogin = req.user.sub
+  try {
+    const projects = await fetchProjectsForUser(githubLogin)
+    res.json({ projects, github_login: githubLogin, source: 'ddb' })
+  } catch (err) {
+    res.status(500).json({ error: 'fetch_failed', message: err.message })
   }
 })
 

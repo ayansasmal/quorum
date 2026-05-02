@@ -387,10 +387,26 @@ export function AuthProvider({ children }) {
    * ProtectedRoute redirects to /select-project on authPhase === 'selecting'
    * regardless of whether a token is present.
    */
-  const switchProject = useCallback(() => {
+  const switchProject = useCallback(async () => {
     setReauthNeeded(false)
-    // Keep availableProjects, token, user — selector uses the list, switchTo() uses the token
     setAuthPhase('selecting')
+
+    // Refresh the project list using the current JWT so the selector always
+    // shows live data rather than the potentially-stale sessionStorage cache.
+    const currentToken = tokenRef.current
+    if (!currentToken) return
+    try {
+      const res = await fetch('/auth/projects', {
+        headers: { Authorization: `Bearer ${currentToken}` },
+      })
+      if (res.ok) {
+        const { projects } = await res.json()
+        setAvailableProjects(projects)
+        writeStoredProjects(projects)
+      }
+    } catch {
+      // Non-fatal — selector will render with whatever is in state
+    }
   }, [])
 
   /**
