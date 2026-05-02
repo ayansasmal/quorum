@@ -239,7 +239,8 @@ router.post('/projects', async (req, res) => {
 // POST /auth/switch
 // Switch the active project scope without re-authenticating with GitHub.
 // The existing JWT proves identity; this issues a new JWT scoped to the target project.
-// Verifies membership in the target project before issuing.
+// Uses the same config source (DDB/S3 via loadProjectConfig) as POST /auth/token.
+// Guests (role === null) are allowed when the target project has guest_access === true.
 router.post('/switch', verifyJwt, async (req, res) => {
   const { project_id } = req.body ?? {}
   const caller         = req.user.sub
@@ -248,45 +249,37 @@ router.post('/switch', verifyJwt, async (req, res) => {
     return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
   }
 
-  const pool = req.app.locals.pool
-  let row
+  // Load config from DDB/S3 — same source as /auth/token
+  let config
   try {
-    const result = await pool.query(
-      `SELECT id, slug, name, members
-       FROM projects
-       WHERE (id = $1 OR slug = $1) AND status = 'ACTIVE'`,
-      [project_id],
-    )
-    row = result.rows[0]
+    config = await loadProjectConfig(project_id)
   } catch (err) {
-    return res.status(500).json({ error: 'db_error', message: err.message })
-  }
-
-  if (!row) {
     return res.status(404).json({
       error:   'project_not_found',
-      message: `Project '${project_id}' not found`,
+      message: `Project '${project_id}' not found or config load failed: ${err.message}`,
     })
   }
 
-  const member = row.members.find(
-    (m) => m.github_username?.toLowerCase() === caller.toLowerCase(),
-  )
-  if (!member) {
+  const member = findMember(config, caller)
+  if (member === null && config.guest_access !== true) {
     return res.status(403).json({
       error:   'not_a_member',
       message: `You are not a member of project '${project_id}'`,
     })
   }
 
-  const role           = member.role ?? null
-  const team           = member.team ?? null
-  const baseConfidence = member.base_confidence ?? 0.7
+  const role           = member?.role ?? null
+  const team           = member?.team ?? null
+  const baseConfidence = role && config.roles?.[role]
+    ? config.roles[role].base_confidence
+    : 0.5
+
+  const slug = config.group_id ?? project_id
 
   const { privateKey, kid } = getKeys()
   const token = await new SignJWT({
     sub:             caller,
-    project:         row.slug,
+    project:         slug,
     role,
     team,
     method:          'jwt_switch',
@@ -302,7 +295,7 @@ router.post('/switch', verifyJwt, async (req, res) => {
     token,
     expires_in:      TOKEN_TTL_SECONDS,
     sub:             caller,
-    project:         row.slug,
+    project:         slug,
     role,
     team,
     base_confidence: baseConfidence,

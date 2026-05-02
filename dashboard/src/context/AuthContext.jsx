@@ -394,6 +394,18 @@ export function AuthProvider({ children }) {
   }, [])
 
   /**
+   * Cancel a project switch and return to the current project.
+   * Only valid when authPhase === 'selecting' and a JWT is still in state
+   * (i.e. the user triggered a switch but hasn't picked a new project yet).
+   * No-op if there is no active session to return to.
+   */
+  const cancelSwitch = useCallback(() => {
+    if (tokenRef.current) {
+      setAuthPhase('authenticated')
+    }
+  }, [])
+
+  /**
    * Complete re-authentication after session expiry (called by SessionExpiredModal).
    * Uses the existing user's project so the engineer lands back where they were.
    * @param {string} githubOauthToken
@@ -450,6 +462,7 @@ export function AuthProvider({ children }) {
       selectProject,
       switchProject,
       switchTo,
+      cancelSwitch,
       login,
       logout,
       refresh,

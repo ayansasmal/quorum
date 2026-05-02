@@ -151,7 +151,7 @@ function ProjectCard({ project, onSelect, loading }) {
  *     → calls switchTo(slug)
  */
 export default function ProjectSelector() {
-  const { availableProjects, selectProject, switchTo, token, error, setError, logout } = useAuth()
+  const { availableProjects, selectProject, switchTo, cancelSwitch, token, error, setError, logout } = useAuth()
   const navigate = useNavigate()
 
   const [loading,      setLoading]      = useState(false)
@@ -233,14 +233,26 @@ export default function ProjectSelector() {
         ))}
       </div>
 
-      {/* Sign out */}
-      <button
-        type="button"
-        onClick={logout}
-        className="mt-10 text-xs text-gray-600 hover:text-gray-400 transition-colors"
-      >
-        Sign out
-      </button>
+      {/* Footer actions */}
+      <div className="mt-10 flex items-center gap-6">
+        {/* Cancel switch — only shown when switching (token still valid) */}
+        {token && (
+          <button
+            type="button"
+            onClick={cancelSwitch}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            ← Back to current project
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={logout}
+          className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   )
 }
