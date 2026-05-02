@@ -8,7 +8,7 @@ your available tools (Bash, Read, Write). Only ask the human when explicitly not
 ## Phase 1 — Check for existing setup
 
 ```bash
-ls -la .quorum *.quorum.json ~/.claude/skills/quorum.md 2>/dev/null
+ls -la .quorum *.quorum.json ~/.claude/skills/quorum/SKILL.md 2>/dev/null
 ```
 
 If `.quorum` already exists → confirm with human before continuing. The `project_id`
@@ -159,9 +159,18 @@ curl -s -X POST "${QUORUM_GATEWAY_URL:-http://localhost:3001}/auth/token" \
 Install at **user level** — active in every project on the machine, no per-repo commits needed:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
+# From the Quorum repo root (preferred — handles references/ too):
+npm run skill:install
+
+# Or manually:
+rm -rf ~/.claude/skills/quorum
+mkdir -p ~/.claude/skills/quorum
+cp -r /path/to/quorum/skill/. ~/.claude/skills/quorum/
 ```
+
+The skill directory must be `~/.claude/skills/quorum/` (a subdirectory containing
+`SKILL.md` and `references/`). A flat file at `~/.claude/skills/quorum.md` will
+**not** be found by the `Skill` tool — delete it if it exists.
 
 ---
 
@@ -226,7 +235,7 @@ git commit -m "chore: onboard project to Quorum governed memory
 - .quorum: gateway auto-discovery file (walks up directory tree)
 
 Config (<group_id>.quorum.json) is gitignored — it is uploaded to S3,
-not committed. Skill is installed user-level at ~/.claude/skills/quorum.md."
+not committed. Skill is installed user-level at ~/.claude/skills/quorum/."
 ```
 
 Do not commit `.env`, `*.quorum.json` config files, or files containing tokens.

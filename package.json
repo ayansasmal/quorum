@@ -38,7 +38,7 @@
     "job:archive": "node scripts/archive-audit.js",
     "job:recheck": "node scripts/recheck-conflicts.js",
     "mcp:install": "claude mcp add quorum -- node \"$PWD/src/server.js\"",
-    "skill:install": "mkdir -p \"$HOME/.claude/skills\" && cp \"$PWD/skill/SKILL.md\" \"$HOME/.claude/skills/quorum.md\" && echo \"Quorum skill installed → $HOME/.claude/skills/quorum.md\"",
+    "skill:install": "rm -rf \"$HOME/.claude/skills/quorum\" && mkdir -p \"$HOME/.claude/skills/quorum\" && cp -r \"$PWD/skill/.\" \"$HOME/.claude/skills/quorum/\" && echo \"Quorum skill installed → $HOME/.claude/skills/quorum/\"",
     "quorum:install": "npm run mcp:install && npm run skill:install"
   },
   "dependencies": {
