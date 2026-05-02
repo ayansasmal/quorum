@@ -50,15 +50,19 @@ graph TD
 - MCP server with 10 tools: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`
 - Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, DynamoDB read-through cache, rate limiting, JWKS endpoint
 - Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status
-- Netflix-style project selector: `POST /auth/projects` (GitHub token discovery) + `POST /auth/switch` (JWT-based switching, no re-OAuth)
+- Project selector: search + pagination (10/page), full light/dark theme, cancel-back-to-project support
+- `GET /auth/projects` (JWT): refresh project list without re-OAuth; `POST /auth/switch`: JWT-based project switch
+- `GET /schema/config`: public JSON Schema endpoint for editor validation and IDE autocomplete
 - DynamoDB layer: `quorum-configs` table (config cache with TTL) + `quorum-user-projects` table (membership index with GSI)
 - `POST /sync/configs`: EventBridge-compatible S3→DDB full sync (dual auth: sync token or `principal_architect` JWT)
 - Dual-store audit pipeline (PostgreSQL + Graphiti) with SHA256 tamper-evident chain
 - Governance: conflict detection (semantic + LLM), authority weighting, confidence decay, human-in-the-loop
 - Versioning: append-only, bidirectional audit↔version references, `triggered_by` on every write
 - Multi-project isolation via `group_id` scoping in every graph operation
-- Self-evolving skill: `skill/SKILL.md` (minimal) + `skill/references/`
-- Local dev: Docker Compose + LocalStack (S3 + DynamoDB)
+- Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema at `src/config/quorum.schema.json`
+- Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
+- Self-evolving skill: `skill/SKILL.md` (user-level install at `~/.claude/skills/`) + `skill/references/`
+- Local dev: Docker Compose + LocalStack (S3 + DynamoDB); `setup.sh docker clean --volumes` reliably wipes all data
 
 **Not yet built (v0.3+):** PR ingestion, Atlassian integration
 
@@ -76,7 +80,7 @@ src/
   governance/             ← conflict.js · authority.js · confidence.js · provenance.js
   audit/                  ← pipeline.js · chain.js · primary.js · secondary.js
   graph/                  ← client.js (Graphiti MCP HTTP) · schema.js · queries.js
-  config/                 ← schema.js (Zod) · loader.js · migrations.js
+  config/                 ← schema.js (Zod) · quorum.schema.json (JSON Schema) · loader.js · migrations.js
   identity/               ← resolver.js (4-layer identity chain)
   gateway/                ← server.js · routes/ · middleware/ · keys.js · config-cache.js · ddb.js
   export/                 ← markdown.js · confluence.js
@@ -149,9 +153,9 @@ Full defaults: [.env.example](.env.example)
 ## Getting Started
 
 ```bash
-./scripts/setup.sh docker            # start full stack
+./scripts/setup.sh docker            # start full stack + upload configs to S3
 claude mcp add quorum -- node /path/to/quorum/src/server.js
-cp skill/SKILL.md .claude/skills/quorum.md
+cp skill/SKILL.md ~/.claude/skills/quorum.md   # user-level — active in all projects
 npm test
 ```
 

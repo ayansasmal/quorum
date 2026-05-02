@@ -85,10 +85,13 @@ git clone https://github.com/ayansasmal/quorum.git
 cd quorum
 cp .env.example .env          # set OPENAI_API_KEY — the only required change
 
-./scripts/setup.sh docker     # start stack, bootstrap S3, seed knowledge graph
+./scripts/setup.sh docker     # start stack, upload configs to S3, seed knowledge graph
 
 # Connect to Claude Code (replace path with your clone location)
 claude mcp add quorum -- node /path/to/quorum/src/server.js
+
+# Install the Quorum skill at user level — active in every project on your machine
+cp skill/SKILL.md ~/.claude/skills/quorum.md
 ```
 
 After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
@@ -165,7 +168,7 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 ## Roadmap
 
 - **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack, seed data with contradictions
-- **v0.2** (current) — Quorum Gateway (ES256 JWT, S3-backed project config), `.quorum` project files, multi-project scoping, authority weighting (role + domain track record + usage + confidence), confidence decay, human-in-the-loop conflict resolution, self-evolving `skill/SKILL.md`, Crossplane-based IaC, LocalStack for local dev, Express gateway + React dashboard
+- **v0.2** (current) — Quorum Gateway (ES256 JWT, S3-backed project config), `.quorum` project files, multi-project scoping, authority weighting, confidence decay, human-in-the-loop conflict resolution, self-evolving `skill/SKILL.md`, project selector with search + pagination, `<group_id>.quorum.json` config naming, flat S3 bucket, JSON Schema endpoint (`GET /schema/config`), Crossplane-based IaC, LocalStack for local dev, Express gateway + React dashboard
 - **v0.3** — PR knowledge ingestion (`ingest_pr`), post-merge confidence feedback loop
 - **v0.4** — Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`, `search_atlassian`, `sync_atlassian`), Markdown + Confluence export
 - **v1.0** — Production hardening, AWS Neptune support, hosted docs

@@ -8,7 +8,7 @@ your available tools (Bash, Read, Write). Only ask the human when explicitly not
 ## Phase 1 — Check for existing setup
 
 ```bash
-ls -la .quorum quorum.config.json .claude/skills/quorum.md 2>/dev/null
+ls -la .quorum *.quorum.json ~/.claude/skills/quorum.md 2>/dev/null
 ```
 
 If `.quorum` already exists → confirm with human before continuing. The `project_id`
@@ -34,11 +34,11 @@ Do not proceed until you have at least a project ID and one team member.
 
 ## Phase 3 — Create and validate config
 
-Write `quorum.config.json`:
+Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 
 ```json
 {
-  "project": "<project_id>",
+  "$schema": "http://localhost:3001/schema/config",
   "group_id": "<project_id>",
   "members": [
     {
@@ -63,6 +63,10 @@ Write `quorum.config.json`:
 }
 ```
 
+`group_id` is the only required field — it is the canonical identifier used as the
+S3 key, DDB primary key, JWT claim, and Graphiti namespace. `project` is an optional
+display name; omit it unless you want a different label in the dashboard.
+
 Add domain overrides if provided:
 ```json
 "auth": { "conflict_threshold": 0.90, "required_reviewer_teams": ["platform"] }
@@ -73,7 +77,7 @@ Validate before uploading:
 GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
 curl -s -X POST "$GATEWAY_URL/config/validate" \
   -H "Content-Type: application/json" \
-  -d @quorum.config.json
+  -d @"${PROJECT_ID}.quorum.json"
 ```
 
 If `"valid": false` → fix errors in the response, re-validate. Do not continue until `"valid": true`.
@@ -82,21 +86,29 @@ If `"valid": false` → fix errors in the response, re-validate. Do not continue
 
 ## Phase 4 — Upload config to S3
 
+Config files are stored as flat keys: `<group_id>.quorum.json` (no subdirectory).
+
 ```bash
-PROJECT_ID=$(node -e "console.log(require('./quorum.config.json').project)")
+PROJECT_ID=$(node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('${PROJECT_ID}.quorum.json','utf8'));console.log(c.group_id)")
 
 # Local dev (LocalStack)
-awslocal s3 cp quorum.config.json \
-  "s3://quorum-configs/${PROJECT_ID}/config.json" \
-  --endpoint-url http://localhost:4566
+awslocal s3 cp "${PROJECT_ID}.quorum.json" \
+  "s3://quorum-configs/${PROJECT_ID}.quorum.json"
 
 # Verify
-awslocal s3 ls "s3://quorum-configs/${PROJECT_ID}/" --endpoint-url http://localhost:4566
+awslocal s3 ls s3://quorum-configs/
 ```
 
-For production (real S3) omit `awslocal` and `--endpoint-url`:
+For production (real S3) replace `awslocal` with `aws`:
 ```bash
-aws s3 cp quorum.config.json "s3://quorum-configs/${PROJECT_ID}/config.json"
+aws s3 cp "${PROJECT_ID}.quorum.json" "s3://quorum-configs/${PROJECT_ID}.quorum.json"
+```
+
+Then trigger a gateway sync so the config is cached in DynamoDB immediately:
+```bash
+curl -s -X POST "${GATEWAY_URL}/sync/configs" \
+  -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
+# Expected: { "synced": 1, "failed": [], "duration_ms": ... }
 ```
 
 ---
@@ -144,9 +156,11 @@ curl -s -X POST "${QUORUM_GATEWAY_URL:-http://localhost:3001}/auth/token" \
 
 ## Phase 7 — Install the Quorum skill
 
+Install at **user level** — active in every project on the machine, no per-repo commits needed:
+
 ```bash
-mkdir -p .claude/skills
-cp /path/to/quorum/skill/SKILL.md .claude/skills/quorum.md
+mkdir -p ~/.claude/skills
+cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
 ```
 
 ---
@@ -202,16 +216,20 @@ Call `search()` first for each candidate — do not re-ingest what is already in
 
 ## Phase 9 — Commit onboarding files
 
+The config file lives outside the repo (gitignored — it contains real usernames/emails
+and is uploaded to S3). Only commit the `.quorum` discovery file:
+
 ```bash
-git add quorum.config.json .quorum .claude/skills/quorum.md
+git add .quorum
 git commit -m "chore: onboard project to Quorum governed memory
 
-- quorum.config.json: team members, roles, domain thresholds
-- .quorum: gateway auto-discovery (walks up directory tree)
-- .claude/skills/quorum.md: Quorum session skill for Claude Code"
+- .quorum: gateway auto-discovery file (walks up directory tree)
+
+Config (<group_id>.quorum.json) is gitignored — it is uploaded to S3,
+not committed. Skill is installed user-level at ~/.claude/skills/quorum.md."
 ```
 
-Do not commit `.env` or files containing tokens.
+Do not commit `.env`, `*.quorum.json` config files, or files containing tokens.
 
 ---
 
