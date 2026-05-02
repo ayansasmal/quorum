@@ -117,9 +117,11 @@ function ProjectCard({ project, onSelect, loading }) {
           )}
         </div>
 
-        <p className="text-xs text-gray-600 mt-1">
-          {project.member_count} member{project.member_count !== 1 ? 's' : ''}
-        </p>
+        {project.member_count != null && (
+          <p className="text-xs text-gray-600 mt-1">
+            {project.member_count} member{project.member_count !== 1 ? 's' : ''}
+          </p>
+        )}
       </div>
     </button>
   )

@@ -153,14 +153,20 @@ router.post('/projects', async (req, res) => {
   }
 
   // Fast path — DDB lookup. On any failure or empty result, fall through to PostgreSQL.
+  // Normalize to the same shape the PostgreSQL path returns so the frontend
+  // doesn't need to know which store answered.
   try {
     const ddbProjects = await getUserProjects(githubLogin)
     if (ddbProjects && ddbProjects.length > 0) {
-      return res.json({
-        projects: ddbProjects,
-        github_login: githubLogin,
-        source: 'ddb',
-      })
+      const projects = ddbProjects.map((p) => ({
+        id:           p.project_id,
+        slug:         p.project_slug ?? p.project_id,
+        name:         p.project_name ?? p.project_id,
+        role:         p.role         ?? null,
+        team:         p.team         ?? null,
+        member_count: null,   // not stored in DDB — omit gracefully
+      }))
+      return res.json({ projects, github_login: githubLogin, source: 'ddb' })
     }
   } catch {
     // Fall through to PostgreSQL
