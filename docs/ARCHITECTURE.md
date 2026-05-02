@@ -60,7 +60,8 @@ The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fr
 | POST | `/graphiti/*` | JWT-authenticated proxy to Graphiti. `group_id` is injected from the JWT claim (clients cannot spoof project scope) |
 | GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over the PostgreSQL audit store — used by the Dashboard for audit timelines and version history |
 | GET | `/config/:projectId` | Fetch a project's `quorum.config.json` from S3 (cached) |
-| POST | `/config/validate` | Validate a config payload against the schema before write |
+| POST | `/config/validate` | Validate a config payload against the Zod schema before write — no auth required |
+| GET | `/schema/config` | Serve `quorum.config.schema.json` for editor validation and autocomplete — no auth required |
 | GET | `/projects` | List projects the authenticated user is a member of |
 | POST | `/bump/:topic/:key` | Confidence bump on recall — `X-Quorum-Token` shared-secret auth, called by the MCP server |
 | GET | `/api/stats` | Dashboard BFF — graph counts, confidence distribution, recent activity |
@@ -105,11 +106,16 @@ Every `/graphiti/*` call is intercepted by JWT middleware. The Gateway:
 
 ### S3-Backed Project Config
 
-Project configs live at `s3://quorum-configs/<project_id>/config.json`. The Gateway caches them in-process with a short TTL. Schema (validated on `POST /config/validate`):
+Project configs live at `s3://quorum-configs/<group_id>/config.json`. The Gateway caches
+them in-process (5-minute TTL) with a DDB read-through fast path. Configs are validated
+against the Zod schema on every load — an invalid config is a hard startup failure for
+that project.
+
+The canonical JSON Schema is served publicly at `GET /schema/config` for editor tooling:
 
 ```json
 {
-  "project": "macquarie-payments",
+  "$schema": "http://localhost:3001/schema/config",
   "group_id": "macquarie-payments",
   "members": [
     { "name": "Ayan", "team": "platform", "role": "principal_architect",
@@ -123,9 +129,22 @@ Project configs live at `s3://quorum-configs/<project_id>/config.json`. The Gate
   "domains": {
     "auth": { "conflict_threshold": 0.85, "required_reviewer_teams": ["platform"] }
   },
-  "thresholds": { "authority": 0.20, "conflict": 0.85 }
+  "thresholds": { "conflict_threshold": 0.85, "authority_threshold": 0.20 }
 }
 ```
+
+**Field roles:**
+
+| Field | Type | Role |
+|-------|------|------|
+| `group_id` | string, required | Canonical identifier — S3 key prefix, DDB primary key, JWT `project` claim, Graphiti namespace. Must be `^[a-z0-9-]+$`. |
+| `project` | string, optional | Display name shown in the dashboard project picker. Falls back to `group_id` if absent. Never used as a lookup key. |
+| `members` | array | Team roster with identity signals (`github_username`, `git_email`) and role assignment. |
+| `roles` | map | Base confidence floors by role name. Missing roles default to `0.5`. |
+| `domains` | map | Per-domain `conflict_threshold` and `required_reviewer_teams` overrides. |
+| `thresholds` | object | Global `conflict_threshold` (default `0.85`) and `authority_threshold` (default `0.20`). |
+| `notifications` | object | Optional webhook URL for conflict review notifications (GAP-17). |
+| `guest_access` | boolean | Allow any GitHub-authenticated user read-only access. Default `false`. |
 
 The MCP server discovers its project context by walking up the working-directory tree looking for a `.quorum` file. The file sets `QUORUM_GATEWAY_URL` and `QUORUM_PROJECT_ID` — these together define which Gateway is used and which config governs this session.
 

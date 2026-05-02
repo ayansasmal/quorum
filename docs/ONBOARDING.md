@@ -35,15 +35,11 @@ cp /path/to/quorum/quorum.config.example.json quorum.config.json
 
 Edit `quorum.config.json`:
 
-```jsonc
+```json
 {
-  // Unique identifier for this project — used as the S3 key prefix and the JWT group_id.
-  // Use lowercase letters, numbers, and hyphens only. No spaces.
-  "project": "my-project",
+  "$schema": "http://localhost:3001/schema/config",
   "group_id": "my-project",
 
-  // Everyone on the team who will use Quorum.
-  // github_username must match exactly — the gateway verifies it against GitHub.
   "members": [
     {
       "name": "Alice",
@@ -61,8 +57,6 @@ Edit `quorum.config.json`:
     }
   ],
 
-  // Role definitions — controls base confidence weight for each role.
-  // Every role used in `members` must appear here.
   "roles": {
     "principal_architect": { "base_confidence": 0.90 },
     "senior_engineer":     { "base_confidence": 0.80 },
@@ -70,29 +64,51 @@ Edit `quorum.config.json`:
     "junior":              { "base_confidence": 0.60 }
   },
 
-  // Domain-specific overrides (optional).
-  // Omit a domain to use the global thresholds below.
   "domains": {
     "auth": {
       "conflict_threshold": 0.90
     }
   },
 
-  // Global governance thresholds.
-  // conflict_threshold: semantic similarity above which two nodes are flagged as
-  //   potentially conflicting (0–1). Start at 0.85 and tune once you have real data.
-  // authority_threshold: authority delta above which a conflict is auto-resolved
-  //   in favour of the higher-authority author (0–1). Start at 0.20.
   "thresholds": {
     "conflict_threshold": 0.85,
     "authority_threshold": 0.20
-  },
-
-  // Set to true to allow any GitHub-authenticated user to browse this project's
-  // knowledge in read-only guest mode (no authority, no writes).
-  "guest_access": false
+  }
 }
 ```
+
+### Key fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `group_id` | **Yes** | Canonical project ID — S3 key prefix, DDB primary key, JWT claim, Graphiti namespace. Lowercase letters, numbers, hyphens only. |
+| `project` | No | Human-readable display name for the dashboard. Falls back to `group_id` if omitted. |
+| `members` | No | Team roster. At least `github_username` or `git_email` needed per member for identity resolution. |
+| `roles` | No | Base confidence floors per role. Any role in `members` not listed here defaults to `0.5`. |
+| `domains` | No | Per-domain governance overrides — stricter `conflict_threshold` and `required_reviewer_teams`. |
+| `thresholds` | No | Global conflict and authority thresholds. Defaults: `conflict_threshold: 0.85`, `authority_threshold: 0.20`. |
+| `guest_access` | No | When `true`, any GitHub-authenticated user can browse in read-only guest mode. Default: `false`. |
+
+### IDE validation and autocomplete
+
+The gateway serves the full JSON Schema at `GET /schema/config`. Add the `$schema` key to
+any config file to get inline autocomplete, hover docs, and red squiggles on invalid values
+in VS Code, IntelliJ, and any editor backed by a JSON Language Server:
+
+```json
+{ "$schema": "http://localhost:3001/schema/config", "group_id": "my-project", ... }
+```
+
+In production, replace `localhost:3001` with your gateway's public URL. You can also validate
+a config without uploading it:
+
+```bash
+curl -s -X POST http://localhost:3001/config/validate \
+  -H "Content-Type: application/json" \
+  -d @quorum.config.json | python3 -m json.tool
+```
+
+A valid config returns `{ "valid": true, "summary": { ... } }`. Errors return `{ "valid": false, "errors": [...] }`.
 
 ---
 
@@ -312,8 +328,10 @@ curl http://localhost:3001/health  # must return {"status":"ok"}
 
 **Knowledge visible across projects**
 
-Check that `project` and `group_id` in your config are identical — they must match.
-If they diverge, the JWT carries one value but config lookups use another.
+Check that `group_id` in your config matches the S3 key prefix you uploaded to
+(`s3://quorum-configs/<group_id>/config.json`). The JWT `project` claim is derived
+from `group_id` — if they diverge, graph operations will target the wrong namespace.
+The `project` field is display-only and has no effect on routing.
 
 ---
 
