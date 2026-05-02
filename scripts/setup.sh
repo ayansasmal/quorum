@@ -273,10 +273,19 @@ cmd_docker_rebuild() {
 # Data volumes (postgres_data, falkordb_data, localstack_data) are preserved
 # so you don't lose graph data or S3 configs.
 # Use --volumes / -v to also wipe data volumes (full reset).
+#
+# NOTE: docker compose down --volumes only removes volumes when run in the
+# correct project directory. This command always explicitly removes the named
+# volumes (quorum_postgres_data, quorum_falkordb_data, quorum_localstack_data)
+# so a volume wipe works reliably regardless of how Docker was invoked.
 
 cmd_docker_clean() {
   local wipe_volumes=false
-  [[ "${2:-}" == "--volumes" || "${2:-}" == "-v" ]] && wipe_volumes=true
+  # Arguments: setup.sh docker clean [--volumes|-v]
+  # $1=docker  $2=clean  $3=flag — check all args for the flag
+  for arg in "$@"; do
+    [[ "$arg" == "--volumes" || "$arg" == "-v" ]] && wipe_volumes=true
+  done
 
   header "Quorum — Clean Docker Stack"
   check_docker
@@ -285,6 +294,17 @@ cmd_docker_clean() {
   if $wipe_volumes; then
     warn "Wiping containers, images, AND data volumes (postgres + falkordb + localstack)"
     docker compose down --remove-orphans --volumes 2>/dev/null || true
+
+    # Explicitly remove named volumes by their prefixed names — docker compose
+    # down --volumes can silently skip them if the project context doesn't match.
+    local project_name
+    project_name=$(docker compose config --format json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('name','quorum'))" 2>/dev/null || echo "quorum")
+    for vol in postgres_data falkordb_data localstack_data; do
+      local full_name="${project_name}_${vol}"
+      if docker volume inspect "$full_name" &>/dev/null 2>&1; then
+        docker volume rm "$full_name" 2>/dev/null && ok "  Removed volume: $full_name" || warn "  Could not remove $full_name (may be in use)"
+      fi
+    done
   else
     info "Stopping containers (data volumes preserved)..."
     docker compose down --remove-orphans 2>/dev/null || true
