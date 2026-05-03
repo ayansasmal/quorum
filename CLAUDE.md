@@ -24,8 +24,7 @@ knowledge — with conflict detection, authority weighting, and a full audit tra
 graph TD
     CC[Claude Code / AI Agents] -->|MCP stdio| MCP[Quorum MCP Server\nNode.js :8000]
     Browser[Dashboard\nReact :3002] -->|HTTPS| GW[Quorum Gateway\nExpress :3001]
-    MCP -->|QUORUM_GATEWAY_URL set| GW
-    MCP -->|direct, no gateway| PG[(PostgreSQL\nAudit Store)]
+    MCP -->|always via gateway HTTP| GW
     GW -->|JWT-gated proxy| Graphiti[Graphiti MCP\nPython :8001]
     GW --> PG
     GW -->|HeadBucket / GetObject| S3[S3 / LocalStack\nProject configs]
@@ -35,10 +34,10 @@ graph TD
 ```
 
 **Key flows:**
-- Engineers connect the MCP server directly via `claude mcp add quorum`
+- Engineers connect the MCP server via `claude mcp add quorum`; it always talks to the gateway over HTTP (default: `http://localhost:3001`)
 - The dashboard connects through the gateway (GitHub OAuth → ES256 JWT → BFF API)
-- In gateway mode, the MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
-- Identity chain: git email → `QUORUM_AUTHOR` → anonymous (first match wins); dashboard uses GitHub OAuth
+- The MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
+- Identity chain: JWT (gateway) → `QUORUM_AUTHOR` env → git email → anonymous; dashboard uses GitHub OAuth
 
 > Full detail: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -61,8 +60,12 @@ graph TD
 - Multi-project isolation via `group_id` scoping in every graph operation
 - Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema at `src/config/quorum.schema.json`
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
-- Self-evolving skill: `skill/SKILL.md` (user-level install at `~/.claude/skills/`) + `skill/references/`
+- Self-evolving skill: `mcp/skill/SKILL.md` (user-level install at `~/.claude/skills/quorum/`) + `mcp/skill/references/`
 - Local dev: Docker Compose + LocalStack (S3 + DynamoDB); `setup.sh docker clean --volumes` reliably wipes all data
+- Monorepo: `mcp/` (`@as-quorum/mcp`, npm-published), `gateway/` (self-hosted), `dashboard/` (self-hosted)
+- `@as-quorum/mcp` has no `pg` dependency — all DB access goes through the gateway's `/pg/*` REST API
+- OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
+- Per-package CLAUDE.md: `mcp/CLAUDE.md`, `gateway/CLAUDE.md`, `dashboard/CLAUDE.md`
 
 **Not yet built (v0.3+):** PR ingestion, Atlassian integration
 
@@ -136,7 +139,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 
 ```bash
 # MCP server (set in shell or .env)
-QUORUM_GATEWAY_URL=http://localhost:3001   # enables gateway mode
+QUORUM_GATEWAY_URL=http://localhost:3001   # optional — defaults to this; set to your central Quorum instance
 QUORUM_AUTHOR=username                    # identity override (CI contexts; default: git email)
 
 # Gateway (set in docker-compose or deployment env)
