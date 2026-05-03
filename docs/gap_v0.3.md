@@ -4,7 +4,9 @@
 > Revised after critical analysis to strip over-engineering and replace dashboard-first
 > solutions with the simplest change that closes the gap.
 >
-> **Status legend:** ✅ Resolved in this session · ⏳ Pending · 🎯 v0.3 target
+> **Last updated:** 2026-05-03 — monorepo restructure + gateway-only MCP session.
+>
+> **Status legend:** ✅ Resolved · ⏳ Pending · 🎯 v0.3 target · 🐛 Bug found
 >
 > **What changed since v0.2 gap analysis:**
 > The dashboard session delivered more than governance logic — it meaningfully
@@ -38,6 +40,11 @@ This plan explicitly avoids them:
 |---------------|--------------------|
 | **Dashboard** (React, conflict review UI, knowledge browse) | Engineers can manage knowledge without CLI — visual entry point lowers the "what does this do?" question |
 | **`npm run quorum:install`** — one command for MCP + skill | Eliminates the two-step copy-paste install that tripped most people up |
+| **Monorepo restructure** — `mcp/`, `gateway/`, `dashboard/` with per-package `package.json` | `@as-quorum/mcp` ready for npm publish; gateway and dashboard clearly separated |
+| **`pg` removed from `@as-quorum/mcp`** — always gateway HTTP | MCP has no DB dependency; engineers never need PostgreSQL credentials |
+| **npm org `as-quorum`** + `bin.quorum` field in `mcp/package.json` | Foundation for `npx quorum` entry point (GAP-24 unblocked) |
+| **OpenAPI 3.1 spec** at `gateway/openapi.yaml` | All ~40 gateway routes documented; SDK generation possible |
+| **Per-package CLAUDE.md** — `mcp/`, `gateway/`, `dashboard/` | Future Claude Code sessions in any package have immediate context |
 | **`npm run docker:rebuild/clean/ps`** | Common ops no longer require reading the setup.sh source |
 | **LocalStack persistence detection** in `setup.sh` | Silent data loss on container restart now warned at startup |
 | **Gateway healthcheck fix** (200 or 503) | Stack no longer deadlocks when external LocalStack is in use — was a P0 show-stopper |
@@ -68,17 +75,22 @@ the bar is `npx quorum start`.
 entry point without solving the stack size (GAP-25) moves the error one step later — the
 command crashes with "Docker not found" or times out pulling 6 images. GAP-25 must ship first.
 
-**Resolution:**
-1. Publish `quorum` to npm with `"bin": { "quorum": "./cli.js" }`
-2. `cli.js` is a thin wrapper: `npx quorum start` → `docker compose -f <bundled-compose> up -d`
-3. The bundled `docker-compose.yml` in the npm package is the lite compose (GAP-25) — not the
-   full 6-container stack
-4. `npx quorum init` creates a `.quorum` file in the current directory
+**Progress (2026-05-03):**
+- ✅ `"bin": { "quorum": "./dist/cli.js" }` is set in `mcp/package.json`
+- ✅ npm org `as-quorum` created; package ready to publish
+- ✅ `npx quorum init` is implemented in `cli.js`
+- ⏳ `npx quorum start` → docker compose is NOT yet implemented
+- 🐛 `cli.js` still imports `pg` directly — uses a raw `pg.Pool` for `history`, `audit verify`,
+  `audit export`, `audit stats` commands. These must be ported to gateway HTTP calls before
+  publishing (no pg dep in the published package). See **GAP-35** below.
 
-Defer all guard logic (auto-`npm install`, Docker version checks) until the basic flow is validated.
+**Remaining resolution:**
+1. Port `cli.js` audit/history commands to use `GatewayClient` HTTP (GAP-35 below)
+2. Add `npx quorum start` command: `spawn('docker', ['compose', '-f', bundledLiteCompose, 'up', '-d'])`
+3. Bundle `docker-compose.lite.yml` in the npm package (GAP-25 must exist first)
+4. Add `.npmignore` / `"files"` in `package.json` to exclude `src/`, tests, docs from the tarball
 
-**Scope:** `cli.js`, `package.json` publish config, `.npmignore`, README update.
-Blocked on GAP-25.
+**Blocked on:** GAP-25 (lite compose), GAP-35 (cli.js pg removal).
 
 ---
 
@@ -112,29 +124,22 @@ Conflict detection degrades gracefully (no semantic similarity, LLM-only path or
 
 ## Act 2 — First Run and Stack Setup
 
-### GAP-26 · `reflect()` has no observability `HIGH` 🎯 v0.3
+### GAP-26 · `reflect()` has no observability `HIGH` ✅ Done
 
 **Friction:** The self-evolution loop is the core value proposition. Engineers cannot tell
 whether `reflect()` extracted anything. The skill calls it post-task but the result is swallowed.
 
-**What the original plan got wrong:** A "Reflect Activity" dashboard panel is the wrong fix
-for a SKILL.md problem. `reflect()` already returns a structured result — Claude just doesn't
-report it to the engineer. That is a skill instruction issue, not a UI gap.
+**Resolution applied:**
+`mcp/skill/SKILL.md` under "After Task" now says:
 
-**Resolution:**
-Add one instruction to `skill/SKILL.md` under "After Task":
+> After `reflect()` returns: Tell the human: "I've submitted N knowledge entries to Quorum
+> for your review at http://localhost:3002/pending."
+> Handle conflict and deferred-check cases inline.
 
-> After calling `reflect()`, always report the result to the engineer inline:
-> "reflect() extracted N items — pending your review at http://localhost:3002/pending"
-> or "reflect() found no new knowledge to store this session."
+The zero-extract case ("reflect() found no new knowledge") is implied by N=0 but could be
+made explicit if engineers report confusion. Treat as closed for v0.3.
 
-That is the complete fix for v0.3.
-
-A dashboard "Reflect Activity" timeline (extraction rate, top topics, weekly digest) is a
-v1.0 analytics feature. Do not build it before engineers are actually using `reflect()`.
-
-**Files to modify:**
-- `skill/SKILL.md` — one sentence under "After Task"
+A dashboard "Reflect Activity" timeline is a v1.0 analytics feature.
 
 ---
 
@@ -165,45 +170,38 @@ confidence distribution. No dashboard panel needed; engineers can curl it or che
 
 ---
 
-### GAP-28 · Component communication security model `MEDIUM` ✅ Already secured
+### GAP-28 · Component communication security model `MEDIUM` ✅ Code secured · ⏳ Docs pending
 
-**Status:** No gap in gateway mode. Direct mode has a documented, acceptable trust boundary.
+**Status (2026-05-03 update):**
 
-**Full communication map:**
+**Direct mode no longer exists in `@as-quorum/mcp`.** It was removed in the 2026-05-03
+session. `QUORUM_GATEWAY_URL` now defaults to `http://localhost:3001` — there is no
+pg.Pool in the MCP, no unauthenticated Graphiti leg from the MCP side. The "direct mode
+trust model" table below is historical only.
+
+**Current communication map (gateway-only MCP):**
 
 | Leg | Protocol | Auth |
 |-----|----------|------|
 | Claude Code → MCP server | stdio (process spawn) | Process-scoped — only the spawning process can communicate |
-| MCP server → Gateway | HTTP | ES256 JWT (`authenticate()` tool: `gho_` OAuth token → JWT exchange at `POST /auth/token`) |
+| MCP server → Gateway | HTTP | ES256 JWT (`authenticate()` tool: GitHub OAuth token → JWT at `POST /auth/token`) |
 | Gateway → PostgreSQL | TCP | Database credentials (user/password) |
-| Gateway → Graphiti | HTTP (Docker internal network) | JWT-gated proxy — `verifyJwt` middleware enforces JWT on every request; `group_id` claim injected server-side, caller cannot override |
+| Gateway → Graphiti | HTTP (Docker internal network) | JWT-gated proxy — `verifyJwt` on every request; `group_id` injected server-side |
 | Gateway → S3/LocalStack | HTTPS | AWS credentials |
 | Browser → Gateway | HTTPS | ES256 JWT (GitHub OAuth flow) |
 
-Every leg in gateway mode is authenticated. The `authenticate()` MCP tool (shipped in v0.2)
-completes the MCP → Gateway leg — Claude Code exchanges a GitHub OAuth token for a short-lived
-ES256 JWT without any manual token management by the engineer.
+Every leg is authenticated. The `authenticate()` MCP tool handles MCP → Gateway auth without
+manual token management.
 
-**Direct mode (no `QUORUM_GATEWAY_URL`) trust model:**
+**Remaining work:** Add a "Component Security Model" section to `docs/DEPLOYMENT.md` covering
+the table above. (~15 min, no code change.)
 
-| Leg | Auth |
-|-----|------|
-| Claude Code → MCP server | Process-scoped stdio |
-| MCP server → PostgreSQL | Database credentials |
-| MCP server → Graphiti | HTTP, no token — trust via Docker network isolation |
-
-The MCP → Graphiti leg in direct mode has no token. This is acceptable: Graphiti is not
-exposed on a host port by default in `docker-compose.yml` — it is only reachable within
-the Docker network. The trust boundary is the Docker network, not a credential.
-
-**Resolution:** Document the security model. No code change needed.
-
-Add one section to `docs/DEPLOYMENT.md` covering the table above and noting:
-- Gateway mode is the correct choice for any multi-engineer or shared environment
-- Direct mode is single-engineer local only; Graphiti network isolation is the perimeter
+> **Note on GAP-33:** The Graphiti route currently uses `if (!body.params.group_id)` —
+> conditional injection. A caller who sets `group_id` in the request body bypasses isolation.
+> See GAP-33 for the fix.
 
 **Files to modify:**
-- `docs/DEPLOYMENT.md` — component security model section
+- `docs/DEPLOYMENT.md` — component security model section (still pending)
 
 ---
 
@@ -306,23 +304,45 @@ No GHCR image publishing. No separate CI workflow.
 
 ---
 
-### GAP-33 · `group_id` isolation not enforced at the graph layer `LOW` 🎯 v0.3
+### GAP-33 · `group_id` isolation not enforced at the graph layer `MEDIUM` 🐛 Bug found · 🎯 v0.3
 
 **Friction:** Graphiti's `group_id` isolation relies on the caller providing the right value.
-A misconfigured `QUORUM_GROUP_ID` could read across project boundaries.
+A misconfigured or malicious request could read across project boundaries.
 
-**What the original plan got wrong:** The gateway Graphiti route likely already overwrites
-`group_ids` from the JWT. The actual gap is the missing test.
+**Current state (2026-05-03 audit):**
+
+`gateway/src/routes/graphiti.js` injects `group_id` but with a conditional guard:
+
+```js
+// BUG: conditional — caller can bypass by supplying their own group_id
+if (!body.params.group_id) {
+  body.params.group_id = req.user.project
+}
+```
+
+This is a **confused deputy vulnerability**: the gateway is trusted by Graphiti, but a
+caller who includes `"group_id": "other-team"` in their request body will have it pass through
+unchanged. The gateway must always overwrite, never trust caller input for isolation fields.
+
+**Additional issue:** The field injected is `group_id` (singular). Graphiti's API uses
+`group_ids` (plural, array). Verify which the Graphiti MCP actually expects and align.
 
 **Resolution:**
-1. Verify `src/gateway/routes/graphiti.js` overwrites `group_ids` in the proxied request body
-   with the JWT-derived value — add the two-line overwrite if absent
-2. Add one integration test: send a Graphiti request with a tampered `group_ids` value,
-   assert the gateway rewrote it to the JWT-bound value before forwarding
-3. Add one paragraph to `docs/DEPLOYMENT.md`: "Multi-team isolation guarantees"
+1. `gateway/src/routes/graphiti.js` — change conditional to unconditional overwrite:
+   ```js
+   // Always overwrite — never trust caller-supplied group scoping
+   body.params.group_id = req.user.project
+   ```
+   If Graphiti expects `group_ids` (array), also set that:
+   ```js
+   body.params.group_ids = [req.user.project]
+   ```
+2. Add one test: send a Graphiti request with a tampered `group_id` in the body, assert
+   the gateway overwrote it with the JWT-bound value before forwarding
+3. Add isolation guarantee paragraph to `docs/DEPLOYMENT.md`
 
 **Files to modify:**
-- `src/gateway/routes/graphiti.js` — verify/add `group_ids` overwrite (2 lines if missing)
+- `gateway/src/routes/graphiti.js` — unconditional overwrite (2-line fix, critical)
 - `tests/governance/isolation.test.js` — new test
 - `docs/DEPLOYMENT.md` — isolation guarantee documentation
 
@@ -354,33 +374,72 @@ exists to build the dataset from.
 
 ---
 
+---
+
+## GAP-35 · `cli.js` still imports `pg` directly `HIGH` 🎯 v0.3
+
+**Friction:** `mcp/cli.js` was not updated when `pg` was removed from `server.js`. It still
+creates a raw `pg.Pool` for the `history`, `audit verify`, `audit export`, and `audit stats`
+commands. This means:
+
+1. `pg` is still an implicit runtime dependency of `@as-quorum/mcp` even though it was removed
+   from `package.json` — these commands will throw `Cannot find package 'pg'` when run from
+   the published npm package
+2. Prevents publishing `@as-quorum/mcp` to npm without breaking the CLI commands
+3. Blocks GAP-24 (`npx quorum start`) — the published package must have zero pg dependency
+
+**Resolution:**
+Port each `cli.js` command to use the gateway HTTP API instead of a direct pg.Pool:
+
+| Command | Currently uses | Replace with |
+|---------|----------------|--------------|
+| `quorum history <topic:key>` | `historyHandler(pool, ...)` | `GET /pg/versions/{topic}/{key}/history` via GatewayClient |
+| `quorum audit verify` | `getAllEntries(pool)` | `gw.getAllEntries({})` |
+| `quorum audit export` | `getAllEntries(pool, opts)` | `gw.getAllEntries(opts)` |
+| `quorum audit stats` | `pool.query(...)`, `countEntries(pool)` | `gw.countEntries()` + `gw.getAllEntries({})` |
+| `quorum audit lineage` | `pool.query(...)` | gateway `/pg/audit` query |
+
+The `GatewayClient` (`src/gateway/client.js`) already exposes all needed methods.
+Use `getGatewayClient()` after setting `QUORUM_GATEWAY_URL` from env or `.quorum` file.
+
+**Files to modify:**
+- `mcp/cli.js` — remove `import pg from 'pg'`, remove `const pool = new pg.Pool(...)`,
+  port each command to GatewayClient HTTP
+
+---
+
 ## Priority Order — v0.3 Work
 
 Ordered by value-to-effort ratio:
 
 ```
-P0 — Already resolved (no work needed)
-  ✅ GAP-28  Document direct-mode security boundary (DEPLOYMENT.md)
+P0 — Already done (no work needed)
+  ✅ GAP-26  reflect() result reported to engineer (SKILL.md, done)
+  ✅ GAP-28  Security model code secured (direct mode removed from MCP)
 
-P1 — Highest leverage, smallest change
-  🎯 GAP-26  One sentence in SKILL.md — reflect() result always reported to engineer
-  🎯 GAP-29  Retry wrapper (conflict.js) + reflect() fallback + startup env check
+P1 — Security fixes (high risk, low effort)
+  🐛 GAP-33  Unconditional group_id overwrite in graphiti.js (2-line fix, CRITICAL)
+  🎯 GAP-33  Isolation test + DEPLOYMENT.md paragraph
 
-P2 — Core reliability
-  🎯 GAP-33  group_id overwrite verification + isolation test
+P2 — Unblock npm publish (must ship together)
+  🎯 GAP-35  Port cli.js to GatewayClient HTTP (no pg in published package)
+  🎯 GAP-24  npx quorum start command in cli.js (also needs GAP-25)
+  ⏳ GAP-28  DEPLOYMENT.md security model section (15 min)
+
+P3 — Core reliability
+  🎯 GAP-29  LLM retry wrapper + reflect() fallback + startup env check
   🎯 GAP-32  Pin Graphiti SHA + Dependabot rule
 
-P3 — Operational automation
+P4 — Operational automation
   🎯 GAP-27  setInterval decay in gateway + /admin/decay/status endpoint
 
-P4 — Stack simplification (enables npx entry point)
+P5 — Stack simplification (enables full npx flow)
   🎯 GAP-25  Graphiti graceful degradation + docker-compose.lite.yml
-  🎯 GAP-24  npx quorum start (blocked on GAP-25)
 
-P5 — New knowledge source
+P6 — New knowledge source
   🎯 GAP-30  ingest_pr() MCP tool, dry_run mode only
 
-P6 — Test infrastructure
+P7 — Test infrastructure
   🎯 GAP-34  Prompt rendering unit tests + manual validation script
 
 DEFERRED — v1.0
@@ -396,37 +455,42 @@ DEFERRED — v1.0
 
 ## Estimated v0.3 Effort
 
-| Gap | Change | Effort |
-|-----|--------|--------|
-| GAP-26 | One sentence in SKILL.md | 5 min |
-| GAP-28 | Paragraph in DEPLOYMENT.md | 15 min |
-| GAP-29 | Retry wrapper + reflect fallback + startup warn | 4h |
-| GAP-33 | group_id overwrite verify + 1 test | 4h |
-| GAP-32 | Pin Graphiti SHA + Dependabot | 1h |
-| GAP-27 | setInterval decay + status endpoint | 3h |
-| GAP-25 | Graceful degradation flag + lite compose | 4h |
-| GAP-24 | npx cli.js wrapper | 3h |
-| GAP-30 | ingest_pr() MCP tool, 3 files | 1d |
-| GAP-34 | Prompt rendering unit tests | 4h |
-| **Total** | | **~4 days** |
+| Gap | Change | Effort | Status |
+|-----|--------|--------|--------|
+| GAP-26 | SKILL.md reflect() reporting | — | ✅ Done |
+| GAP-28 | Direct mode removed from MCP | — | ✅ Done (code); docs still pending |
+| GAP-33 | Unconditional group_id overwrite (2 lines) + isolation test | 2h | 🐛 Bug — fix first |
+| GAP-35 | Port cli.js to GatewayClient HTTP | 4h | ⏳ New gap |
+| GAP-28 | DEPLOYMENT.md security model section | 15 min | ⏳ Pending |
+| GAP-29 | Retry wrapper + reflect fallback + startup warn | 4h | ⏳ Pending |
+| GAP-32 | Pin Graphiti SHA + Dependabot | 1h | ⏳ Pending |
+| GAP-24 | npx quorum start command | 2h | ⏳ Partially done (bin + org) |
+| GAP-27 | setInterval decay + status endpoint | 3h | ⏳ Pending |
+| GAP-25 | Graceful degradation flag + lite compose | 4h | ⏳ Pending |
+| GAP-30 | ingest_pr() MCP tool, 3 files | 1d | ⏳ Pending |
+| GAP-34 | Prompt rendering unit tests | 4h | ⏳ Pending |
+| **Total remaining** | | **~4 days** | |
 
 ---
 
 ## Adoption Friction Reassessment
 
-| Dimension | v0.2 | After this session | v0.3 target |
-|-----------|------|-------------------|-------------|
-| First install | 2/5 | 3/5 (install script, healthcheck fix) | 4/5 (npx after GAP-25) |
-| First run | 2/5 | 3/5 (QUICKSTART, persistence warn) | 4/5 (lite stack) |
-| Understanding the value | 2/5 | 4/5 (dashboard, visual conflict review) | 4/5 |
-| Daily use for engineers | 3/5 | 3/5 | 4/5 (reflect observability, LLM resilience) |
-| Operational maturity | 2/5 | 2/5 | 3/5 (decay automation, Graphiti pin) |
-| **Overall** | **2/5** | **3/5** | **4/5** |
+| Dimension | v0.2 | Post-dashboard session | Post-2026-05-03 session | v0.3 target |
+|-----------|------|----------------------|------------------------|-------------|
+| First install | 2/5 | 3/5 (install script, healthcheck fix) | 3/5 | 4/5 (npx after GAP-25, GAP-35) |
+| First run | 2/5 | 3/5 (QUICKSTART, persistence warn) | 3/5 | 4/5 (lite stack) |
+| Understanding the value | 2/5 | 4/5 (dashboard, visual conflict review) | 4/5 | 4/5 |
+| Daily use for engineers | 3/5 | 3/5 | 3/5 | 4/5 (LLM resilience GAP-29) |
+| Operational maturity | 2/5 | 2/5 | 2.5/5 (security hardened, no direct pg) | 3/5 (decay automation) |
+| **Overall** | **2/5** | **3/5** | **3/5** | **4/5** |
 
-The gap from 3 to 4 is closed by three changes: `reflect()` result surfaced in SKILL.md
-(engineers trust what they cannot see only so long before they turn it off), LLM retry and
-fallback (governance reliability degrades gracefully instead of silently failing), and the
-lite stack + npx entry point (OSS tools that require cloning don't get evaluated).
+The 2026-05-03 session hardened the architecture (no direct pg in MCP, gateway-only) and
+unblocked the npm publish path. It did not move the adoption friction number because those
+changes are invisible to engineers who are already running the stack — they matter for
+publishing and enterprise trust, not first-run experience.
+
+The gap from 3 to 4 is closed by: npx entry point (GAP-24 + GAP-25 + GAP-35), LLM retry
+and fallback (GAP-29), and fixing the group_id isolation bug (GAP-33).
 
 The gap from 4 to 5 is closed at v1.0 by: hosted documentation, at least one public case
 study, and the analytics features (reflect dashboard, decay health panel) that prove the
