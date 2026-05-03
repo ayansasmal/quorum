@@ -240,23 +240,27 @@ remember("topic", "key", "resolved content", {
 
 ## Authentication
 
-Quorum requires a valid JWT. Handle auth failures transparently — never interrupt
-the engineer's flow for something you can fix yourself.
+### Check your mode first
 
-### Auth failure signals
+```bash
+echo ${QUORUM_GATEWAY_URL:-"(not set — direct mode)"}
+```
 
-| Signal | Meaning |
-|--------|---------|
-| `401 Unauthorized` or `jwt_expired` from any tool | Token expired — run re-auth flow below |
-| `QUORUM_GATEWAY_URL` set but no token in MCP state | First-time auth needed — run re-auth flow below |
-| `QUORUM_GITHUB_TOKEN` not set | PAT missing — tell the human: *"Set `QUORUM_GITHUB_TOKEN` in your shell profile to a GitHub PAT (scopes: `read:user`), then restart Claude Code."* |
+| Mode | Auth required | Identity |
+|------|--------------|----------|
+| **Direct** (`QUORUM_GATEWAY_URL` not set) | ❌ None — use tools immediately | `git config user.email` |
+| **Gateway** (`QUORUM_GATEWAY_URL` set) | ✅ JWT required — run auth flow below | GitHub OAuth → JWT |
 
-### Re-auth flow
+**In direct mode, skip the rest of this section and use the MCP tools directly.**
+
+---
+
+### Gateway mode — auth flow
 
 Run this **without asking** — just inform and proceed:
 
 ```
-1. Say: "Quorum auth expired — re-authenticating, back in a moment."
+1. Say: "Quorum auth needed — authenticating, back in a moment."
 
 2. Read QUORUM_GATEWAY_URL (default: http://localhost:3001)
 
@@ -276,13 +280,21 @@ Run this **without asking** — just inform and proceed:
 
 8. Retry the operation that triggered the failure.
 
-9. Say: "Re-auth done — continuing."
+9. Say: "Auth done — continuing."
 ```
 
-### Direct mode (no QUORUM_GATEWAY_URL)
+### Proactive auth at session start (gateway mode only)
 
-MCP server talks to Graphiti directly. No auth required. Identity = `git config user.email`.
-If the engineer wants multi-project governance, they need to set `QUORUM_GATEWAY_URL`.
+If `QUORUM_GATEWAY_URL` is set, run the auth flow **before** Step 1 (`pending()`),
+not after a failure. A 401 mid-session interrupts the engineer's flow — auth first
+removes that risk entirely.
+
+### Auth failure signals
+
+| Signal | Action |
+|--------|--------|
+| `401 Unauthorized` or `jwt_expired` | Run re-auth flow above, then retry |
+| `QUORUM_GITHUB_TOKEN` not set and mcp-playwright unavailable | Tell human: *"Set `QUORUM_GITHUB_TOKEN` in your shell profile (GitHub PAT, scope: `read:user`), then restart Claude Code."* |
 
 ---
 
@@ -299,7 +311,7 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 4. Upload config to S3
 5. Create `.quorum` discovery file via CLI
 6. Set identity (`QUORUM_GITHUB_TOKEN`) + register MCP server
-7. Install `SKILL.md` at user level (`~/.claude/skills/quorum.md`)
+7. Install skill at user level (`~/.claude/skills/quorum/` — run `npm run skill:install`)
 8. **Ingest existing knowledge** — CLAUDE.md, MEMORY.md, session transcripts → DRAFT entries
 9. Commit `.quorum` discovery file (config is gitignored — lives in S3)
 10. Verify connection with a fresh session

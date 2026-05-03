@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { calculateAuthority, shouldAutoSupersede } from '../../src/governance/authority.js'
+import { calculateAuthority, shouldAutoSupersede } from '../../mcp/src/governance/authority.js'
 
 /** Returns a date N days in the past. */
 function daysAgo(days) {

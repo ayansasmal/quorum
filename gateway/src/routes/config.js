@@ -15,7 +15,7 @@
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 import { loadProjectConfig, invalidateProject } from '../config-cache.js'
-import { QuorumConfigSchema } from '../../config/schema.js'
+import { QuorumConfigSchema } from '@as-quorum/mcp/config/schema'
 
 const router = Router()
 

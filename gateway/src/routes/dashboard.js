@@ -23,10 +23,10 @@ import {
   getLastBump,
   insertBump,
   updateConfidence,
-} from '../../graph/queries.js'
-import { searchNodes } from '../../graph/client.js'
-import { writeAuditEntry } from '../../audit/secondary.js'
-import { enforceNoSelfApproval, enforceReasonRequired } from '../../governance/constitutional.js'
+} from '@as-quorum/mcp/graph/queries'
+import { searchNodes } from '@as-quorum/mcp/graph/client'
+import { writeAuditEntry } from '@as-quorum/mcp/audit/secondary'
+import { enforceNoSelfApproval, enforceReasonRequired } from '@as-quorum/mcp/governance/constitutional'
 
 const router = Router()
 

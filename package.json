@@ -1,57 +1,36 @@
 {
   "name": "quorum",
   "version": "0.2.0",
-  "description": "Governance layer for AI agent engineering memory — built on Graphiti's temporal knowledge graph",
+  "description": "Quorum monorepo — governed engineering memory for Claude Code and AI agents",
   "type": "module",
-  "license": "Apache-2.0",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "bin": {
-    "quorum": "./cli.js"
-  },
-  "exports": {
-    "./server": "./src/server.js",
-    "./cli": "./cli.js"
-  },
+  "private": true,
+  "workspaces": ["mcp", "gateway", "dashboard"],
   "scripts": {
     "docker:start": "./scripts/setup.sh docker",
     "docker:rebuild": "./scripts/setup.sh docker rebuild",
     "docker:clean": "./scripts/setup.sh docker clean",
     "docker:clean:all": "./scripts/setup.sh docker clean --volumes",
     "docker:ps": "./scripts/setup.sh docker ps",
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "start:gateway": "node src/gateway/server.js",
-    "dev:gateway": "node --watch src/gateway/server.js",
+    "build": "npm run build:all --workspace=mcp",
+    "dev:mcp": "npm run dev --workspace=mcp",
+    "dev:gateway": "npm run dev --workspace=gateway",
+    "start:mcp": "npm run start --workspace=mcp",
+    "start:gateway": "npm run start --workspace=gateway",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:constitutional": "vitest run tests/constitutional",
     "test:governance": "vitest run tests/governance",
     "test:tools": "vitest run tests/tools",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:constitutional": "vitest run --coverage --coverage.include='src/governance/constitutional.js' tests/constitutional",
     "seed": "node scripts/seed.js",
     "audit:scan-bypasses": "node scripts/audit-scan.js",
     "audit:scan-harddeletes": "node scripts/audit-scan-harddeletes.js",
     "job:decay": "node scripts/decay-confidence.js",
     "job:archive": "node scripts/archive-audit.js",
     "job:recheck": "node scripts/recheck-conflicts.js",
-    "mcp:install": "claude mcp add quorum -- node \"$PWD/src/server.js\"",
-    "skill:install": "rm -rf \"$HOME/.claude/skills/quorum\" && mkdir -p \"$HOME/.claude/skills/quorum\" && cp -r \"$PWD/skill/.\" \"$HOME/.claude/skills/quorum/\" && echo \"Quorum skill installed → $HOME/.claude/skills/quorum/\"",
+    "mcp:install": "npm run build --workspace=mcp && claude mcp add quorum -- node \"$PWD/mcp/dist/server.js\"",
+    "skill:install": "rm -rf \"$HOME/.claude/skills/quorum\" && mkdir -p \"$HOME/.claude/skills/quorum\" && cp -r \"$PWD/mcp/skill/.\" \"$HOME/.claude/skills/quorum/\" && echo \"Quorum skill installed → $HOME/.claude/skills/quorum/\"",
     "quorum:install": "npm run mcp:install && npm run skill:install"
-  },
-  "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1040.0",
-    "@aws-sdk/client-s3": "3.1032.0",
-    "@aws-sdk/util-dynamodb": "^3.996.2",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "commander": "14.0.3",
-    "express": "^5.2.1",
-    "jose": "5.10.0",
-    "pg": "8.20.0",
-    "uuid": "^14.0.0",
-    "zod": "4.3.6"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "4.1.2",

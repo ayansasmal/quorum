@@ -222,7 +222,7 @@ cmd_docker() {
   header "Setup complete"
   echo ""
   echo "  Add Quorum to Claude Code:"
-  echo "    claude mcp add quorum -- node $(pwd)/src/server.js"
+  echo "    claude mcp add quorum -- node $(pwd)/mcp/dist/server.js"
   echo ""
   echo "  Verify:"
   echo "    node cli.js audit verify"

@@ -19,7 +19,7 @@
  */
 
 import pg from 'pg'
-import { handler as rememberHandler } from '../src/tools/remember.js'
+import { handler as rememberHandler } from '../mcp/src/tools/remember.js'
 
 const FORCE = process.argv.includes('--force')
 

@@ -73,31 +73,42 @@ graph TD
 ## Project Structure
 
 ```
-src/
-  server.js               ← MCP server entry point + .quorum auto-discovery
-  quorum-file.js          ← .quorum project file loader
-  tools/                  ← MCP tool implementations (one file per tool)
-  governance/             ← conflict.js · authority.js · confidence.js · provenance.js
-  audit/                  ← pipeline.js · chain.js · primary.js · secondary.js
-  graph/                  ← client.js (Graphiti MCP HTTP) · schema.js · queries.js
-  config/                 ← schema.js (Zod) · quorum.schema.json (JSON Schema) · loader.js · migrations.js
-  identity/               ← resolver.js (4-layer identity chain)
-  gateway/                ← server.js · routes/ · middleware/ · keys.js · config-cache.js · ddb.js
-  export/                 ← markdown.js · confluence.js
+mcp/                    ← @as-quorum/mcp (published to npm)
+  src/
+    server.js           ← MCP server entry point + .quorum auto-discovery
+    quorum-file.js      ← .quorum project file loader
+    tools/              ← MCP tool implementations (one file per tool)
+    governance/         ← conflict.js · authority.js · confidence.js · provenance.js
+    audit/              ← pipeline.js · chain.js · primary.js · secondary.js
+    graph/              ← client.js · schema.js · queries.js
+    config/             ← schema.js · quorum.schema.json · loader.js
+    identity/           ← resolver.js (4-layer identity chain)
+    gateway/
+      client.js         ← MCP's outbound HTTP client (gateway mode only)
+    export/             ← markdown.js · confluence.js
+    prompts/            ← loader.js
+  dist/                 ← compiled output (esbuild, gitignored)
+  cli.js                ← CLI entry point (quorum init, quorum install)
+  skill/                ← SKILL.md + references/ (bundled with npm package)
 
-dashboard/src/
-  pages/                  ← Stats · Graph · Pending · Knowledge · Audit · Config · Status
-  components/             ← layout/ · session/ · status/
-  context/                ← AuthContext.jsx · ThemeContext.jsx
-  api/                    ← typed API clients
+gateway/                ← @as-quorum/gateway (private, enterprise self-hosted)
+  src/
+    server.js           ← Gateway entry point (Express :3001)
+    routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump
+    middleware/         ← verify-jwt · project · rate-limit
+    keys.js · config-cache.js · ddb.js · errors.js
 
-skill/
-  SKILL.md                ← minimal session skill (~120 lines)
-  references/             ← tool-reference · conflict-resolution · knowledge-guidelines · onboarding
+dashboard/src/          ← React dashboard (private, enterprise self-hosted)
+  pages/                ← Stats · Graph · Pending · Knowledge · Audit · Config · Status
+  components/           ← layout/ · session/ · status/
+  context/              ← AuthContext.jsx · ThemeContext.jsx
+  api/                  ← typed API clients
 
 tests/
-  constitutional/         ← 100% coverage required, blocks CI
-  governance/ · tools/
+  constitutional/       ← 100% coverage required, blocks CI
+  governance/ · tools/ · gateway/
+
+scripts/                ← seed · audit-scan · decay · archive · recheck
 ```
 
 ---
@@ -154,7 +165,7 @@ Full defaults: [.env.example](.env.example)
 
 ```bash
 ./scripts/setup.sh docker            # start full stack + upload configs to S3
-claude mcp add quorum -- node /path/to/quorum/src/server.js
+npm run mcp:install   # from repo root
 cp skill/SKILL.md ~/.claude/skills/quorum.md   # user-level — active in all projects
 npm test
 ```

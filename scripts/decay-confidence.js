@@ -18,8 +18,8 @@
  */
 
 import pg from 'pg'
-import { onAgeDecay } from '../src/governance/confidence.js'
-import { getDecayEligibleVersions, updateConfidence } from '../src/graph/queries.js'
+import { onAgeDecay } from '../mcp/src/governance/confidence.js'
+import { getDecayEligibleVersions, updateConfidence } from '../mcp/src/graph/queries.js'
 
 const DRY_RUN    = process.argv.includes('--dry-run')
 const PROJECT_ID = (() => {

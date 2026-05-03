@@ -14,7 +14,7 @@ import {
   enforceMultiPartyConfig,
   enforceConstitutionalRulesAreImmutable,
   ConstitutionalViolation,
-} from '../../src/governance/constitutional.js'
+} from '../../mcp/src/governance/constitutional.js'
 
 /** Returns an ISO timestamp N hours in the past. */
 function hoursAgo(hours) {

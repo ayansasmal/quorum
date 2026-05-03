@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock('../../src/graph/queries.js', () => ({
+vi.mock('../../mcp/src/graph/queries.js', () => ({
   getCurrentVersion:        vi.fn(),
   getPendingDecisions:      vi.fn(),
   getDraftVersions:         vi.fn(),
@@ -27,14 +27,14 @@ vi.mock('../../src/graph/queries.js', () => ({
   getNextVersionNumber:     vi.fn(),
 }))
 
-vi.mock('../../src/audit/pipeline.js', () => ({
+vi.mock('../../mcp/src/audit/pipeline.js', () => ({
   withAuditPipeline: vi.fn(async (_pg, _ctx, operation) => {
     const result = await operation()
     return result
   }),
 }))
 
-vi.mock('../../src/config/loader.js', () => ({
+vi.mock('../../mcp/src/config/loader.js', () => ({
   getConfig: vi.fn(() => ({ domains: {} })),
 }))
 
@@ -45,9 +45,9 @@ import {
   getPendingDecisions,
   getDraftVersions,
   markPendingDecisionStale,
-} from '../../src/graph/queries.js'
+} from '../../mcp/src/graph/queries.js'
 
-import { handler } from '../../src/tools/pending.js'
+import { handler } from '../../mcp/src/tools/pending.js'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 

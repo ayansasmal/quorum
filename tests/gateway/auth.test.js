@@ -23,15 +23,15 @@ import express from 'express'
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock('../../src/gateway/config-cache.js', () => ({
+vi.mock('../../gateway/src/config-cache.js', () => ({
   loadProjectConfig: vi.fn(),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
-import { loadProjectConfig } from '../../src/gateway/config-cache.js'
-import { loadKeys }          from '../../src/gateway/keys.js'
-import authRoutes            from '../../src/gateway/routes/auth.js'
+import { loadProjectConfig } from '../../gateway/src/config-cache.js'
+import { loadKeys }          from '../../gateway/src/keys.js'
+import authRoutes            from '../../gateway/src/routes/auth.js'
 
 // ── Test server ────────────────────────────────────────────────────────────────
 

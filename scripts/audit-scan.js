@@ -21,7 +21,8 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
-const SRC  = join(ROOT, 'src')
+const MCP_SRC      = join(ROOT, 'mcp', 'src')
+const GATEWAY_SRC  = join(ROOT, 'gateway', 'src')
 
 // ── File walker ────────────────────────────────────────────────────────────────
 
@@ -57,15 +58,18 @@ async function findMatches(filePath, pattern) {
 
 async function main() {
   console.log('Quorum Audit Bypass Scanner\n' + '─'.repeat(50))
-  const allFiles = await collectFiles(SRC)
-  try { await stat(join(ROOT, 'cli.js')); allFiles.push(join(ROOT, 'cli.js')) } catch {}
+  const allFiles = [
+    ...(await collectFiles(MCP_SRC)),
+    ...(await collectFiles(GATEWAY_SRC)),
+  ]
+  try { await stat(join(ROOT, 'mcp', 'cli.js')); allFiles.push(join(ROOT, 'mcp', 'cli.js')) } catch {}
 
   let violations = 0
 
   // 1. Direct INSERT INTO audit_log — only allowed in audit/secondary.js
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    if (rel === 'src/audit/secondary.js') continue
+    if (rel === 'mcp/src/audit/secondary.js') continue
     const hits = await findMatches(f, /INSERT\s+INTO\s+audit_log/i)
     for (const h of hits) {
       console.error(`[DIRECT_AUDIT_INSERT] ${rel}:${h.line}:${h.col}  "${h.text}"`)
@@ -75,10 +79,10 @@ async function main() {
 
   // 2. writeAuditEntry called outside audit/ and tests/
   // Allowlist: gateway/client.js (proxy method definition) and gateway/routes/pg.js (authorized gateway caller)
-  const WRITE_AUDIT_ALLOWLIST = new Set(['src/gateway/client.js', 'src/gateway/routes/pg.js'])
+  const WRITE_AUDIT_ALLOWLIST = new Set(['mcp/src/gateway/client.js', 'gateway/src/routes/pg.js'])
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    if (rel.startsWith('src/audit/') || rel.startsWith('tests/')) continue
+    if (rel.startsWith('mcp/src/audit/') || rel.startsWith('tests/')) continue
     if (WRITE_AUDIT_ALLOWLIST.has(rel)) continue
     const hits = await findMatches(f, /writeAuditEntry\s*\(/)
     for (const h of hits) {
@@ -90,7 +94,7 @@ async function main() {
   // 3. pool.query / pg.query called directly inside src/tools/
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    if (!rel.startsWith('src/tools/')) continue
+    if (!rel.startsWith('mcp/src/tools/')) continue
     const hits = await findMatches(f, /(?:pool|pg|client)\.query\s*\(/)
     for (const h of hits) {
       console.error(`[DIRECT_PG_IN_TOOL] ${rel}:${h.line}:${h.col}  "${h.text}"  (use graph/queries.js functions instead)`)
@@ -101,7 +105,7 @@ async function main() {
   // 4. Tool handler missing withAuditPipeline wrapper
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    if (!rel.startsWith('src/tools/')) continue
+    if (!rel.startsWith('mcp/src/tools/')) continue
     const content = await readFile(f, 'utf8')
     if (!/export\s+async\s+function\s+handler/.test(content)) continue
     if (!/withAuditPipeline\s*\(/.test(content)) {

@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import {
   enforceReasonRequired,
   ConstitutionalViolation,
-} from '../../src/governance/constitutional.js'
+} from '../../mcp/src/governance/constitutional.js'
 
 // ── Invalid reasons — should throw ────────────────────────────────────────────
 

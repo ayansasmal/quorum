@@ -21,7 +21,8 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
-const SRC  = join(ROOT, 'src')
+const MCP_SRC      = join(ROOT, 'mcp', 'src')
+const GATEWAY_SRC  = join(ROOT, 'gateway', 'src')
 
 const BLOCKED_GRAPHITI_METHODS = [
   'delete_episode',
@@ -64,7 +65,10 @@ async function findMatches(filePath, pattern) {
 
 async function main() {
   console.log('Quorum Graphiti Delete Scanner\n' + '─'.repeat(50))
-  const allFiles = await collectFiles(SRC)
+  const allFiles = [
+    ...(await collectFiles(MCP_SRC)),
+    ...(await collectFiles(GATEWAY_SRC)),
+  ]
 
   let violations = 0
 
@@ -72,9 +76,9 @@ async function main() {
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
     // client.js defines BLOCKED_METHODS — allowed to reference them
-    if (rel === 'src/graph/client.js') continue
+    if (rel === 'mcp/src/graph/client.js') continue
     // constitutional.js defines and enforces the rules — allowed to name the blocked methods
-    if (rel === 'src/governance/constitutional.js') continue
+    if (rel === 'mcp/src/governance/constitutional.js') continue
     // Tests verify the block is in place — they reference the method names too
     if (rel.startsWith('tests/')) continue
 
@@ -95,7 +99,7 @@ async function main() {
     const rel = relative(ROOT, f)
     // Allow in secondary.js — the unconditional-throw functions reference these conceptually
     // Allow in tests and scripts
-    if (rel.startsWith('tests/') || rel.startsWith('scripts/') || rel === 'src/audit/secondary.js') continue
+    if (rel.startsWith('tests/') || rel.startsWith('scripts/') || rel === 'mcp/src/audit/secondary.js') continue
     const hits = await findMatches(f, sqlDeletePattern)
     for (const h of hits) {
       console.error(`[SQL_DELETE] ${rel}:${h.line}:${h.col}  "${h.text}"  (all deletes are unconstitutional — use status transitions instead)`)
@@ -107,7 +111,7 @@ async function main() {
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
     // secondary.js defines these as unconditional-throws; constitutional.js tests that they throw
-    if (rel === 'src/audit/secondary.js' || rel === 'src/governance/constitutional.js') continue
+    if (rel === 'mcp/src/audit/secondary.js' || rel === 'mcp/src/governance/constitutional.js') continue
     if (rel.startsWith('tests/')) continue
     const hits = await findMatches(f, /(?:deleteEntry|updateEntry)\s*\(/)
     for (const h of hits) {

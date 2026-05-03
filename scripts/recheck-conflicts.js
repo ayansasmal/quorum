@@ -21,8 +21,8 @@
  */
 
 import pg from 'pg'
-import { detectConflict } from '../src/governance/conflict.js'
-import { KnowledgeStatus, TriggeredBy } from '../src/graph/schema.js'
+import { detectConflict } from '../mcp/src/governance/conflict.js'
+import { KnowledgeStatus, TriggeredBy } from '../mcp/src/graph/schema.js'
 
 const BATCH_SIZE   = parseInt(process.env.RECHECK_BATCH_SIZE   ?? '50', 10)
 const GRAPHITI_URL = process.env.GRAPHITI_URL                  ?? 'http://graphiti:8000'
