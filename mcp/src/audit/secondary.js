@@ -21,6 +21,7 @@ import { enforceAppendOnlyAudit } from '../governance/constitutional.js'
  * @returns {Promise<Record<string, unknown>>} the stored entry with all chain fields
  */
 export async function writeAuditEntry(pg, entry) {
+  if (typeof pg.writeAuditEntry === 'function') return pg.writeAuditEntry(entry)
   const client = await pg.connect()
   try {
     await client.query('BEGIN')
@@ -100,6 +101,7 @@ export async function writeAuditEntry(pg, entry) {
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function getAuditEntry(pg, entryId) {
+  if (typeof pg.getAuditEntry === 'function') return pg.getAuditEntry(entryId)
   const result = await pg.query('SELECT * FROM audit_log WHERE entry_id = $1', [entryId])
   return result.rows[0] ?? null
 }
@@ -112,6 +114,7 @@ export async function getAuditEntry(pg, entryId) {
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getAllEntries(pg, options = {}) {
+  if (typeof pg.getAllEntries === 'function') return pg.getAllEntries(options)
   let query = 'SELECT * FROM audit_log'
   const params = []
   const conditions = []
@@ -150,6 +153,7 @@ export async function getAllEntries(pg, options = {}) {
  * @returns {Promise<number>}
  */
 export async function countEntries(pg, projectId) {
+  if (typeof pg.countEntries === 'function') return pg.countEntries()
   if (projectId) {
     const result = await pg.query(
       'SELECT COUNT(*)::int AS count FROM audit_log WHERE project_id = $1',

@@ -28,6 +28,7 @@ const LEGAL_TRANSITIONS = new Map([
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function getCurrentVersion(pg, topic, key, projectId = 'default') {
+  if (typeof pg.getCurrentVersion === 'function') return pg.getCurrentVersion(topic, key)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1 AND topic = $2 AND key = $3 AND status = $4
@@ -47,6 +48,7 @@ export async function getCurrentVersion(pg, topic, key, projectId = 'default') {
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function getVersionAtDate(pg, topic, key, date, projectId = 'default') {
+  if (typeof pg.getVersionAtDate === 'function') return pg.getVersionAtDate(topic, key, date)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1
@@ -76,6 +78,7 @@ export async function getVersionAtDate(pg, topic, key, date, projectId = 'defaul
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getVersionHistory(pg, topic, key, projectId = 'default') {
+  if (typeof pg.getVersionHistory === 'function') return pg.getVersionHistory(topic, key)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1 AND topic = $2 AND key = $3
@@ -95,6 +98,7 @@ export async function getVersionHistory(pg, topic, key, projectId = 'default') {
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function getSpecificVersion(pg, topic, key, version, projectId = 'default') {
+  if (typeof pg.getSpecificVersion === 'function') return pg.getSpecificVersion(topic, key, version)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1 AND topic = $2 AND key = $3 AND version = $4
@@ -114,6 +118,7 @@ export async function getSpecificVersion(pg, topic, key, version, projectId = 'd
  * @returns {Promise<number>}
  */
 export async function getNextVersionNumber(pg, topic, key, projectId = 'default') {
+  if (typeof pg.getNextVersionNumber === 'function') return pg.getNextVersionNumber(topic, key)
   const result = await pg.query(
     `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
      FROM knowledge_versions
@@ -130,6 +135,7 @@ export async function getNextVersionNumber(pg, topic, key, projectId = 'default'
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function insertVersion(pg, record) {
+  if (typeof pg.insertVersion === 'function') return pg.insertVersion(record)
   const result = await pg.query(
     `INSERT INTO knowledge_versions (
       topic, key, version, status, content_hash, author, author_role,
@@ -180,6 +186,7 @@ export async function insertVersion(pg, record) {
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getVersionsByTag(pg, tag, projectId = 'default') {
+  if (typeof pg.getVersionsByTag === 'function') return pg.getVersionsByTag(tag)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1 AND $2 = ANY(tags) AND status = 'ACTIVE'
@@ -204,6 +211,7 @@ export async function getVersionsByTag(pg, tag, projectId = 'default') {
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function transitionVersionStatus(pg, topic, key, version, newStatus, forwardLink = null, projectId = 'default') {
+  if (typeof pg.transitionVersionStatus === 'function') return pg.transitionVersionStatus(topic, key, version, newStatus, forwardLink)
   const current = await getSpecificVersion(pg, topic, key, version, projectId)
   if (!current) {
     throw new Error(`Version not found: ${topic}:${key} v${version}`)
@@ -248,6 +256,7 @@ export async function transitionVersionStatus(pg, topic, key, version, newStatus
  * @param {{ auditEntryId: string, topic: string, key: string, version: number, linkType: 'created'|'superseded' }} record
  */
 export async function insertVersionAuditLink(pg, record) {
+  if (typeof pg.insertVersionAuditLink === 'function') return pg.insertVersionAuditLink(record)
   await pg.query(
     `INSERT INTO version_audit_links (audit_entry_id, topic, key, version, link_type, created_at)
      VALUES ($1, $2, $3, $4, $5, NOW())`,
@@ -330,6 +339,7 @@ export async function getVersionStatusCounts(pg, { topic, projectId = 'default' 
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getPendingDecisions(pg, { topic, statuses = ['pending'], decisionType = 'conflict', projectId = 'default' } = {}) {
+  if (typeof pg.getPendingDecisions === 'function') return pg.getPendingDecisions({ topic, statuses, decisionType })
   if (topic) {
     const result = await pg.query(
       `SELECT * FROM pending_decisions
@@ -398,6 +408,7 @@ export async function markPendingDecisionStale(pg, conflictId, staleWarning, cur
  * @returns {Promise<number>}
  */
 export async function countPendingForKey(pg, topic, key, projectId = 'default') {
+  if (typeof pg.countPendingForKey === 'function') return pg.countPendingForKey(topic, key)
   const result = await pg.query(
     `SELECT COUNT(*)::int AS cnt FROM pending_decisions
      WHERE project_id = $1 AND conflict_topic = $2 AND conflict_key = $3 AND status = 'pending'`,
@@ -426,6 +437,7 @@ export async function getPendingDecisionById(pg, conflictId) {
  * @param {Record<string, unknown>} record
  */
 export async function insertPendingDecision(pg, record) {
+  if (typeof pg.insertPendingDecision === 'function') return pg.insertPendingDecision(record)
   await pg.query(
     `INSERT INTO pending_decisions
        (conflict_id, decision_type, conflict_topic, conflict_key,
@@ -454,6 +466,7 @@ export async function insertPendingDecision(pg, record) {
  * @param {{ status: string, resolution: string, note: string, resolvedBy: string, splitExistingKey?: string|null, splitIncomingKey?: string|null, mergedContent?: string|null }} updates
  */
 export async function resolvePendingDecision(pg, conflictId, updates) {
+  if (typeof pg.updatePendingDecision === 'function') return pg.updatePendingDecision(conflictId, updates)
   await pg.query(
     `UPDATE pending_decisions
      SET status = $1, resolution = $2, resolution_note = $3, resolved_by = $4,

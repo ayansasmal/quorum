@@ -2,13 +2,16 @@
  * Quorum MCP Server entry point.
  *
  * Startup sequence:
- *   1. Connect PostgreSQL pool
- *   2. Verify SHA256 audit chain integrity (hard stop on violation)
+ *   1. Set QUORUM_GATEWAY_URL default (http://localhost:3001)
+ *   2. Verify SHA256 audit chain integrity via gateway (non-fatal if not yet authenticated)
  *   3. Load S3 config (or local path / env fallback)
- *   4. Resolve caller identity (4-layer chain)
+ *   4. Resolve caller identity (from JWT via gateway)
  *   5. Validate MCP manifest has no delete-capable tools
  *   6. Start /health HTTP endpoint
  *   7. Connect MCP stdio transport
+ *
+ * The MCP always communicates with a Quorum gateway over HTTP — never directly
+ * to PostgreSQL or Graphiti. Default gateway: http://localhost:3001 (local dev).
  *
  * Identity is resolved once and injected into every tool handler call.
  * Tool schemas do not accept author/reviewer as input — server-side only.
@@ -22,7 +25,6 @@ applyQuorumFileDefaults()
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from 'node:http'
-import pg from 'pg'
 
 import { verifyChain, ChainIntegrityViolation } from './audit/chain.js'
 import { getAllEntries, countEntries } from './audit/secondary.js'
@@ -43,33 +45,15 @@ import * as reflect from './tools/reflect.js'
 import * as exportTool from './tools/export.js'
 import * as pending from './tools/pending.js'
 
-// ── PostgreSQL pool or Gateway client ─────────────────────────────────────────
-// In gateway mode (QUORUM_GATEWAY_URL set), the gateway client replaces the
-// direct pg.Pool. Tool handlers are unaware of the difference — both expose
-// the same interface for the operations they use.
-
-// Pool resolved at startup for direct mode. In gateway mode the active pool is
-// re-resolved on every tool call (see registerTools) so authenticate() takes effect
-// immediately without a server restart.
-const pool = process.env.QUORUM_GATEWAY_URL
-  ? null  // Gateway mode — pool is resolved dynamically via getGatewayClient()
-  : new pg.Pool({
-      host:                    process.env.POSTGRES_HOST     ?? 'localhost',
-      port:                    parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
-      database:                process.env.POSTGRES_DB       ?? 'quorum_audit',
-      user:                    process.env.POSTGRES_USER     ?? 'quorum',
-      password:                process.env.POSTGRES_PASSWORD ?? 'quorum_local',
-      max:                     10,
-      idleTimeoutMillis:       30000,
-      connectionTimeoutMillis: 5000,
-    })
-
-if (process.env.QUORUM_GATEWAY_URL) {
-  const hasToken = !!(process.env.QUORUM_GITHUB_TOKEN)
-  console.error(`[Quorum] Gateway mode: ${process.env.QUORUM_GATEWAY_URL}`)
-  if (!hasToken) {
-    console.error('[Quorum] ℹ  No token at startup — call authenticate() to log in via GitHub OAuth')
-  }
+// ── Gateway URL default ────────────────────────────────────────────────────────
+// The MCP always communicates with a Quorum gateway over HTTP.
+// Engineers running the local Docker stack get http://localhost:3001 by default.
+// Enterprise teams set QUORUM_GATEWAY_URL to their central Quorum instance.
+// The .quorum project file may also set this before we reach this line.
+process.env.QUORUM_GATEWAY_URL ??= 'http://localhost:3001'
+console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`)
+if (!process.env.QUORUM_GITHUB_TOKEN) {
+  console.error('[Quorum] ℹ  No token at startup — call authenticate() to log in via GitHub OAuth')
 }
 
 // ── MCP Server ─────────────────────────────────────────────────────────────────
@@ -108,7 +92,7 @@ function registerTools(identity) {
     server.tool(name, def.schema.shape ?? def.schema, async (input) => {
       try {
         // Resolve at call time — picks up any token injected by authenticate()
-        const activePool = getGatewayClient() ?? pool
+        const activePool = getGatewayClient()
 
         // In gateway mode, if no client exists yet, only authenticate() is allowed
         if (process.env.QUORUM_GATEWAY_URL && !getGatewayClient() && name !== 'authenticate') {
@@ -147,27 +131,26 @@ function registerTools(identity) {
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 async function verifyStoreSync() {
-  // In gateway mode, count entries via gateway REST API
   const gw = getGatewayClient()
-  const pgCount = gw
-    ? await gw.countEntries().catch(() => -1)
-    : await countEntries(pool).catch(() => -1)
-  if (pgCount === -1) {
-    console.error('[Quorum] WARNING: Could not reach audit store')
+  if (!gw) return  // not yet authenticated — skip
+  const count = await gw.countEntries().catch(() => -1)
+  if (count === -1) {
+    console.error('[Quorum] WARNING: Could not reach audit store via gateway')
   }
 }
 
 async function startup() {
   console.error('[Quorum] Starting up...')
 
-  // 1. Verify audit chain integrity — hard stop if broken
+  // 1. Verify audit chain integrity — via gateway (non-fatal if not yet authenticated)
   try {
-    const entries = await getAllEntries(pool).catch(() => [])
+    const gw = getGatewayClient()
+    const entries = gw ? await gw.getAllEntries({}).catch(() => []) : []
     if (entries.length > 0) {
       const result = verifyChain(entries)
       console.error(`[Quorum] ✓ Audit chain verified (${result.entries} entries)`)
     } else {
-      console.error('[Quorum] ✓ Audit chain empty — fresh start')
+      console.error('[Quorum] ✓ Audit chain empty — fresh start or not yet authenticated')
     }
   } catch (err) {
     if (err instanceof ChainIntegrityViolation) {
@@ -179,23 +162,21 @@ async function startup() {
     console.error('[Quorum] WARNING: Could not verify audit chain:', err.message)
   }
 
-  // 2. Verify stores are reachable (skip in gateway mode if not authenticated yet)
-  if (!process.env.QUORUM_GATEWAY_URL || getGatewayClient()) {
-    await verifyStoreSync()
-  }
+  // 2. Verify gateway is reachable (skip if not yet authenticated)
+  await verifyStoreSync()
 
   // 3. Load config from S3 / local file / env fallback
   // Config must be loaded before identity resolution (identity maps roles from config)
   try {
-    const config = await loadConfig(pool)
+    const config = await loadConfig(null)
     console.error(`[Quorum] ✓ Config loaded (project: ${config.project}, members: ${config.members.length})`)
   } catch (err) {
     console.error(`[Quorum] WARNING: Config load failed — using env defaults: ${err.message}`)
   }
 
   // 4. Resolve caller identity — once per session, injected into all tool calls
-  // In gateway mode, identity comes from the JWT (verified by the gateway).
-  // In direct mode, identity is resolved locally via the 4-layer chain.
+  // Identity comes from the JWT (verified by the gateway).
+  // Falls back to local resolution if not yet authenticated.
   const activeGatewayClient = getGatewayClient()
   const identity = activeGatewayClient
     ? await activeGatewayClient.getIdentity()
@@ -233,7 +214,7 @@ function startHealthServer() {
 
     const [graphConnected, auditConnected] = await Promise.all([
       pingGraphiti(),
-      pool.query('SELECT 1').then(() => true).catch(() => false),
+      getGatewayClient()?.ping().then(() => true).catch(() => false) ?? false,
     ])
 
     const status = graphConnected && auditConnected ? 'healthy' : 'degraded'
@@ -258,9 +239,6 @@ function startHealthServer() {
 async function shutdown() {
   console.error('[Quorum] Shutting down...')
   stopConfigPoller()
-  if (!gatewayClient) {
-    await pool.end().catch(() => {})
-  }
   process.exit(0)
 }
 
