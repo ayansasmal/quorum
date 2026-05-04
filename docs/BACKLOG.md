@@ -12,7 +12,8 @@
 | ID | Title | Priority | Status | Notes |
 |----|-------|----------|--------|-------|
 | BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | ✅ Done | Conditional guard → unconditional overwrite. See detail below. |
-| BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | 🟡 To Do | Blocks npm publish. `pg` removed from package.json but cli.js still uses it. |
+| BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
+| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-02 + BL-07. `bin` field + npm org already done. |
 | BL-04 | LLM retry + `reflect()` fallback + startup check | P3 | 🟡 To Do | 3 small independent changes, ship as one commit. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | 🟡 To Do | Add `ARG GRAPHITI_REF` + Dependabot rule. |
@@ -22,7 +23,7 @@
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
 | BL-11 | Gateway LLM governance endpoints | P2 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract` — removes OPENAI_API_KEY from quorum-mcp. |
-| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | 🟡 To Do | Standard MCP OAuth 2.1 flow — PKCE, dynamic client reg, GitHub as third-party IdP, gateway issues its own token. Unblocks quorum-mcp BL-10. |
+| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. Unblocks quorum-mcp BL-10. |
 
 ---
 
@@ -57,11 +58,12 @@ Also check whether Graphiti expects `group_ids` (array) or `group_id` (string) a
 
 ---
 
-### 🟡 BL-02 — Port `cli.js` to GatewayClient HTTP
-**File:** `mcp/cli.js`
+### ✅ BL-02 — Remove `mcp/` from engram + ops audit CLI
+**Files:** `mcp/` (deleted) · `scripts/audit-cli.js` (new) · `gateway/package.json` · `package.json` (root)
 
-`pg` was removed from `mcp/package.json` but `cli.js` still creates a direct `pg.Pool`.
-These commands will crash with `Cannot find package 'pg'` when installed from npm:
+`mcp/` was migrated to the standalone `quorum-mcp` repo. Gateway now imports `@as-quorum/mcp`
+via `file:../../quorum-mcp`. Tests migrated to `quorum-mcp/tests/`. Ops audit CLI created at
+`scripts/audit-cli.js` — pure HTTP, no pg dependency.
 
 | Command | Currently | Replace with |
 |---------|-----------|--------------|
@@ -269,8 +271,8 @@ Full TP/FP accuracy gate with golden dataset is a v1.0 concern.
 
 ---
 
-### 🟡 BL-12 — OAuth 2.1 Authorization Server in gateway
-**Files (new/modified):** `gateway/src/routes/auth.js` · `gateway/src/routes/oauth.js` · `gateway/src/server.js` · `gateway/openapi.yaml`
+### ✅ BL-12 — OAuth 2.1 Authorization Server in gateway
+**Files (new/modified):** `gateway/src/routes/mcp-oauth.js` (new) · `gateway/src/server.js` · `gateway/openapi.yaml`
 
 Implement the standard MCP OAuth 2.1 Authorization Server flow so `quorum-mcp` can authenticate with zero env vars. The gateway acts as both an OAuth client to GitHub and an OAuth server to the MCP client.
 

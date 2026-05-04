@@ -143,6 +143,38 @@ components:
         error:   { type: string }
         message: { type: string }
 
+    # ── MCP OAuth 2.1 ─────────────────────────────────────────────────────────
+    OAuthMetadata:
+      type: object
+      description: RFC8414 Authorization Server Metadata
+      properties:
+        issuer:                                { type: string }
+        authorization_endpoint:                { type: string }
+        token_endpoint:                        { type: string }
+        registration_endpoint:                 { type: string }
+        response_types_supported:              { type: array, items: { type: string } }
+        grant_types_supported:                 { type: array, items: { type: string } }
+        code_challenge_methods_supported:      { type: array, items: { type: string } }
+        token_endpoint_auth_methods_supported: { type: array, items: { type: string } }
+
+    OAuthClientRegistration:
+      type: object
+      description: RFC7591 dynamic client registration response
+      properties:
+        client_id:                  { type: string }
+        redirect_uris:              { type: array, items: { type: string } }
+        grant_types:                { type: array, items: { type: string } }
+        response_types:             { type: array, items: { type: string } }
+        token_endpoint_auth_method: { type: string }
+
+    OAuthTokenResponse:
+      type: object
+      description: OAuth 2.1 token endpoint response
+      properties:
+        access_token: { type: string, description: ES256-signed JWT for MCP client auth }
+        token_type:   { type: string, enum: [bearer] }
+        expires_in:   { type: integer, description: Token lifetime in seconds }
+
 paths:
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -169,6 +201,203 @@ paths:
                   timestamp: { type: string, format: date-time }
         '503':
           description: One or more dependencies are unavailable
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # MCP OAuth 2.1 Authorization Server (BL-12)
+  # Implements MCP spec 2025-03-26 Third-Party Authorization flow.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /.well-known/oauth-authorization-server:
+    get:
+      summary: RFC8414 Authorization Server Metadata
+      operationId: getOAuthMetadata
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        MCP clients use this endpoint to discover the gateway's OAuth endpoints.
+        No authentication required.
+      responses:
+        '200':
+          description: Authorization server metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthMetadata' }
+
+  /oauth/register:
+    post:
+      summary: RFC7591 Dynamic Client Registration
+      operationId: registerOAuthClient
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        MCP clients register themselves before starting the authorization flow.
+        Returns a `client_id` that must be presented in subsequent OAuth requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redirect_uris]
+              properties:
+                redirect_uris:
+                  type: array
+                  items: { type: string, format: uri }
+                  description: URIs the gateway is allowed to redirect to after authorization
+      responses:
+        '201':
+          description: Client registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthClientRegistration' }
+        '400':
+          description: Invalid client metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/authorize:
+    get:
+      summary: Start PKCE Authorization Flow
+      operationId: startOAuthAuthorize
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        Initiates the PKCE S256 authorization flow. The gateway validates the request
+        and redirects the user to GitHub for identity verification. Only `S256` is
+        accepted for `code_challenge_method`.
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema: { type: string, enum: [code] }
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+          description: CSRF token — must be validated by the client on callback
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string }
+          description: base64url(SHA256(code_verifier))
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string, enum: [S256] }
+        - name: project_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional Quorum project ID — enriches the issued JWT with role/team claims
+      responses:
+        '302':
+          description: Redirect to GitHub OAuth
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: GITHUB_CLIENT_ID not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/callback:
+    get:
+      summary: GitHub OAuth Callback
+      operationId: oauthMcpCallback
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        GitHub redirects here after the user authorizes. The gateway exchanges the GitHub
+        code for the user's login, enriches with project config claims, issues a single-use
+        60-second auth code, and redirects back to the MCP client's `redirect_uri`.
+
+        The GitHub access token is used only to fetch the user's login and is never stored.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: error
+          in: query
+          required: false
+          schema: { type: string }
+          description: Set by GitHub if the user denied authorization
+      responses:
+        '302':
+          description: Redirect to MCP client redirect_uri with `code` and `state`
+        '400':
+          description: Invalid or expired state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '502':
+          description: GitHub identity exchange failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/token:
+    post:
+      summary: Exchange Auth Code for JWT
+      operationId: exchangeOAuthToken
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        Exchanges a single-use authorization code and PKCE verifier for a Gateway-MCP JWT.
+        Accepts `application/x-www-form-urlencoded` (standard OAuth 2.1) and `application/json`.
+
+        The returned JWT carries: `sub` (GitHub login), `project`, `role`, `team`,
+        `base_confidence`, `method: "oauth2_pkce"`, `mcp_client_id`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, code, client_id, redirect_uri, code_verifier]
+              properties:
+                grant_type:    { type: string, enum: [authorization_code] }
+                code:          { type: string }
+                client_id:     { type: string }
+                redirect_uri:  { type: string, format: uri }
+                code_verifier: { type: string, description: Raw PKCE verifier (before hashing) }
+          application/json:
+            schema:
+              type: object
+              required: [grant_type, code, client_id, redirect_uri, code_verifier]
+              properties:
+                grant_type:    { type: string, enum: [authorization_code] }
+                code:          { type: string }
+                client_id:     { type: string }
+                redirect_uri:  { type: string, format: uri }
+                code_verifier: { type: string }
+      responses:
+        '200':
+          description: JWT issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthTokenResponse' }
+        '400':
+          description: Invalid grant, expired code, or PKCE mismatch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   # ────────────────────────────────────────────────────────────────────────────
   # Auth / OAuth
