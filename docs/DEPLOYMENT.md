@@ -1024,4 +1024,28 @@ postgresql:
 graphiti:
   networkPolicy:
     enabled: true
+
+---
+
+## Multi-team Isolation Guarantees
+
+Quorum uses `group_id` to namespace every Graphiti graph operation to a specific project.
+The `group_id` value is **owned by the S3 project config** (`<group_id>.quorum.json`) and is
+embedded in the JWT at issue time by `POST /auth/token`. It is never derived from or
+influenced by caller-supplied request body content.
+
+**Enforcement chain:**
+
+1. `POST /auth/token` — reads the project config from S3 (via DynamoDB cache) and embeds
+   the canonical `group_id` as the `project` claim in the signed ES256 JWT.
+2. `verifyJwt` middleware — verifies the JWT signature and attaches `req.user.project` from
+   the `project` claim.
+3. `POST /graphiti/*path` proxy — **unconditionally overwrites** `body.params.group_id` (and
+   `body.params.group_ids` if present) with `req.user.project` before forwarding to Graphiti.
+   Any caller-supplied `group_id` value is silently discarded.
+
+This means a team member with a valid JWT for `project-A` **cannot read or write** graph
+data belonging to `project-B`, even if they construct a request body that includes
+`"group_id": "project-B"`. The gateway enforces the S3-defined project boundary at the
+proxy layer, and Graphiti trusts the gateway entirely.
 ```

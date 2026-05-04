@@ -11,7 +11,7 @@
 
 | ID | Title | Priority | Status | Notes |
 |----|-------|----------|--------|-------|
-| BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | 🔴 Bug | Conditional guard → unconditional overwrite. See detail below. |
+| BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | ✅ Done | Conditional guard → unconditional overwrite. See detail below. |
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | 🟡 To Do | Blocks npm publish. `pg` removed from package.json but cli.js still uses it. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-02 + BL-07. `bin` field + npm org already done. |
 | BL-04 | LLM retry + `reflect()` fallback + startup check | P3 | 🟡 To Do | 3 small independent changes, ship as one commit. |
@@ -288,6 +288,7 @@ Items resolved in reverse-chronological order.
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-04 | BL-01: `group_id` isolation bypass — unconditional overwrite in `graphiti.js` + 6 tests + DEPLOYMENT.md | pending commit |
 | 2026-05-03 | Per-package `CLAUDE.md` for `mcp/`, `gateway/`, `dashboard/` | `95e2cae` |
 | 2026-05-03 | OpenAPI 3.1 spec at `gateway/openapi.yaml` (~40 routes) | `95e2cae` |
 | 2026-05-03 | `pg` removed from `@as-quorum/mcp` — always gateway HTTP | `95e2cae` |

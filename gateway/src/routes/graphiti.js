@@ -3,8 +3,9 @@
  *
  * POST /graphiti/*path
  *   JWT-authenticated transparent proxy to the central Graphiti sidecar.
- *   Injects the project claim from the JWT into the request body as group_id
- *   so Graphiti namespaces all operations to the engineer's project.
+ *   group_id is owned by the S3 project config and embedded in the JWT at issue
+ *   time. Caller-supplied values are always discarded — the gateway enforces the
+ *   S3-defined project boundary unconditionally before proxying to Graphiti.
  *
  *   Engineers never need the Graphiti URL or credentials — only the gateway URL.
  *
@@ -24,11 +25,11 @@ router.post('/*path', verifyJwt, async (req, res) => {
   const suffix = req.params.path || 'mcp';
   const target = `${GRAPHITI_URL()}/${suffix}`;
 
-  // Inject project as group_id so Graphiti namespaces to this project
+  // group_id is owned by the S3 project config and carried in the JWT — callers never control it.
+  // Unconditional overwrite prevents confused-deputy attacks where a caller supplies their own value.
   const body = { ...(req.body ?? {}), params: { ...(req.body?.params ?? {}) } };
-  if (!body.params.group_id) {
-    body.params.group_id = req.user.project;
-  }
+  body.params.group_id = req.user.project;
+  if (body.params.group_ids !== undefined) body.params.group_ids = [req.user.project];
 
   let response;
   try {
