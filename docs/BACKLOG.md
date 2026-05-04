@@ -21,6 +21,7 @@
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
+| BL-11 | Gateway LLM governance endpoints | P2 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract` — removes OPENAI_API_KEY from quorum-mcp. |
 
 ---
 
@@ -264,6 +265,29 @@ Full TP/FP accuracy gate with golden dataset is a v1.0 concern.
 - [ ] Prompt rendering functions have unit tests
 - [ ] Parser handles malformed LLM output without throwing
 - [ ] Manual validation script exists and is documented in CONTRIBUTING.md
+
+---
+
+### 🟡 BL-11 — Gateway LLM governance endpoints
+**Files (new):** `gateway/src/routes/governance.js` · `gateway/src/server.js`
+
+Three endpoints that move LLM calls out of `quorum-mcp` and into the gateway.
+The MCP already calls these endpoints and degrades gracefully when they return 404.
+
+| Endpoint | Input | Output |
+|----------|-------|--------|
+| `POST /governance/detect-conflict` | `{ existing, incoming }` | `{ contradicts, reason, possible_split, split_suggestion? }` |
+| `POST /governance/enrich` | `{ existing, incoming, conflict_reason, possible_split, split_suggestion? }` | `{ analysis, risks_if_approved[], questions_for_reviewer[], existing_rationale?, possible_split, split_suggestion? }` |
+| `POST /governance/extract` | `{ task_summary, decisions_made?, patterns_used? }` | `{ items: ExtractedItem[] }` |
+
+The LLM prompt templates live in `quorum-mcp/src/prompts/` — either copy them into the gateway
+or expose a `GET /governance/prompts/:name` endpoint so the gateway can read them remotely.
+
+**Acceptance criteria:**
+- [ ] All three endpoints implemented and authenticated (JWT required)
+- [ ] `OPENAI_API_KEY` used only in gateway — not referenced anywhere in `quorum-mcp`
+- [ ] MCP gracefully degrades when gateway returns 404 (endpoint not yet live)
+- [ ] Endpoints documented in `gateway/openapi.yaml`
 
 ---
 
