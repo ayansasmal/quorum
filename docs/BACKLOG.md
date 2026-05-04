@@ -22,6 +22,7 @@
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
 | BL-11 | Gateway LLM governance endpoints | P2 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract` — removes OPENAI_API_KEY from quorum-mcp. |
+| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | 🟡 To Do | Standard MCP OAuth 2.1 flow — PKCE, dynamic client reg, GitHub as third-party IdP, gateway issues its own token. Unblocks quorum-mcp BL-10. |
 
 ---
 
@@ -265,6 +266,65 @@ Full TP/FP accuracy gate with golden dataset is a v1.0 concern.
 - [ ] Prompt rendering functions have unit tests
 - [ ] Parser handles malformed LLM output without throwing
 - [ ] Manual validation script exists and is documented in CONTRIBUTING.md
+
+---
+
+### 🟡 BL-12 — OAuth 2.1 Authorization Server in gateway
+**Files (new/modified):** `gateway/src/routes/auth.js` · `gateway/src/routes/oauth.js` · `gateway/src/server.js` · `gateway/openapi.yaml`
+
+Implement the standard MCP OAuth 2.1 Authorization Server flow so `quorum-mcp` can authenticate with zero env vars. The gateway acts as both an OAuth client to GitHub and an OAuth server to the MCP client.
+
+**Endpoints required:**
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /.well-known/oauth-authorization-server` | Metadata discovery (RFC8414) — MCP client discovers all endpoints automatically |
+| `POST /oauth/register` | Dynamic client registration (RFC7591) — MCP client self-registers, no manual setup |
+| `GET /oauth/authorize` | Starts PKCE flow, redirects to GitHub OAuth |
+| `GET /oauth/callback` | GitHub redirects here; gateway exchanges GitHub code for GitHub token, issues Gateway-MCP token, redirects to MCP client callback with auth code |
+| `POST /oauth/token` | MCP client exchanges auth code + PKCE verifier for Gateway-MCP Token |
+
+**Gateway-MCP Token payload (ES256 JWT):**
+```json
+{
+  "sub": "github_login",
+  "mcp_client_id": "dynamic-client-id",
+  "project": "group_id",
+  "role": "senior_engineer",
+  "team": "platform",
+  "base_confidence": 0.75,
+  "permissions": ["remember", "review", "forget"],
+  "exp": 1234567890
+}
+```
+
+**Flow (per MCP spec 2025-03-26 Third-Party Authorization):**
+1. MCP calls gateway → gateway returns `HTTP 401`
+2. MCP discovers metadata at `/.well-known/oauth-authorization-server`
+3. MCP registers dynamically via `POST /oauth/register` → receives `client_id`
+4. MCP opens browser to `GET /oauth/authorize` with PKCE `code_challenge`
+5. Gateway redirects to GitHub OAuth
+6. User authenticates with GitHub → GitHub redirects to `GET /oauth/callback`
+7. Gateway exchanges GitHub code → GitHub token (stays in gateway, never sent to MCP)
+8. Gateway enriches token with project config (role, team, permissions, confidence)
+9. Gateway issues auth code → redirects to MCP client's local callback
+10. MCP exchanges auth code + `code_verifier` via `POST /oauth/token`
+11. Gateway returns Gateway-MCP Token — MCP stores in memory, uses for all calls
+
+**Security properties:**
+- PKCE required — prevents authorization code interception
+- GitHub token never leaves the gateway
+- `QUORUM_GITHUB_TOKEN` env var eliminated entirely
+- Standard OAuth 2.1 — works with any compliant MCP client out of the box
+
+**Acceptance criteria:**
+- [ ] `GET /.well-known/oauth-authorization-server` returns valid RFC8414 metadata
+- [ ] `POST /oauth/register` supports dynamic client registration
+- [ ] PKCE (`S256`) required and enforced on token exchange
+- [ ] GitHub token never returned to MCP client
+- [ ] Gateway-MCP token contains user + project + role + permissions
+- [ ] Existing `/auth/token` (GitHub PAT exchange) kept for backwards-compat CLI use
+- [ ] All endpoints documented in `gateway/openapi.yaml`
 
 ---
 
