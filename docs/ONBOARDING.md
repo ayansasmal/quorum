@@ -179,12 +179,17 @@ correctly and your `github_username` is recognised:
 
 ### 4a — Add the Quorum MCP server
 
+The MCP server is `@as-quorum/mcp` — a separate package from this repo:
+
 ```bash
-# Replace /path/to/quorum with your actual clone path
-claude mcp add quorum -- node /path/to/quorum/src/server.js
+# Recommended: one-step install (registers MCP + installs skill)
+npx @as-quorum/mcp install
+
+# Or — if running from a local quorum-mcp clone:
+claude mcp add quorum -- node /path/to/quorum-mcp/dist/server.js
 ```
 
-Set the gateway URL in your shell profile so the MCP server knows where to send requests:
+Set the gateway URL in your shell profile if the gateway isn't on `localhost:3001`:
 
 ```bash
 # Add to ~/.zshrc or ~/.bashrc
@@ -200,14 +205,15 @@ claude mcp list
 
 ### 4b — Authenticate the MCP server
 
-The MCP server needs its own JWT — separate from the dashboard session.
-When Claude Code starts a session in a project that has the Quorum skill loaded,
-it will detect a missing auth token and run the re-auth flow automatically:
+The MCP server uses OAuth 2.1 + PKCE — no env vars needed. When Claude Code starts a
+session with the Quorum skill loaded, it detects a missing auth token and runs the flow
+automatically:
 
-1. It opens the GitHub OAuth URL in a browser window
-2. You approve the GitHub login (one click if already logged in)
-3. Claude extracts the `gho_` token and calls `authenticate({ github_token, project_id })`
-4. The JWT is stored in-memory for the session
+1. The gateway's `/.well-known/oauth-authorization-server` is discovered
+2. A local callback server starts on a random ephemeral port
+3. A browser window opens to the gateway's `/oauth/authorize` (redirects to GitHub)
+4. You approve the GitHub login — the gateway exchanges the code, enriches with project config claims, and redirects back to the local callback
+5. The MCP server completes the PKCE exchange and stores the ES256 JWT in-memory
 
 You can also trigger this manually:
 
@@ -215,29 +221,26 @@ You can also trigger this manually:
 Ask Claude: "Authenticate me with Quorum for project my-project."
 ```
 
-> **Note:** The MCP server holds the JWT in memory only — it is never written to
-> disk. If the MCP server process restarts, re-auth runs automatically on the next
-> tool call.
+> **Note:** The JWT is stored in-memory only — never written to disk. If the MCP server
+> process restarts, re-auth runs automatically on the next tool call.
 
 ### 4c — Install the Quorum skill (user-level)
 
 The skill file tells Claude Code *when* and *how* to use Quorum's tools automatically —
 session-start protocol, recall before decisions, reflect after tasks.
 
-Install it at the **user level** so it is active in every project on your machine
-without any per-repo setup:
+If you ran `npx @as-quorum/mcp install` in step 4a, the skill is already installed.
+Otherwise, install it manually:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
+npx @as-quorum/mcp install --skip-mcp   # skill only (if MCP already registered)
 ```
 
 That's all. No per-project changes, no commits needed. Every Claude Code session
 on your machine now has the Quorum skill available.
 
 > If you prefer project-level installation (e.g. to pin a specific skill version
-> per repo), copy to `.claude/skills/quorum.md` inside the project instead and
-> commit it.
+> per repo), copy to `.claude/skills/quorum.md` inside the project instead and commit it.
 
 ---
 
@@ -342,8 +345,8 @@ The `project` field is display-only and has no effect on routing.
 | 1. Create config | Copy `example.quorum.json` → `<group_id>.quorum.json`, edit for your team |
 | 2. Upload | `awslocal s3 cp <group_id>.quorum.json s3://quorum-configs/<group_id>.quorum.json` + sync |
 | 3. Verify | Open `http://localhost:3002` → sign in → confirm your project card appears |
-| 4. MCP | `claude mcp add quorum -- node /path/to/quorum/src/server.js` + `QUORUM_GATEWAY_URL` |
-| 5. Skill | `cp skill/SKILL.md ~/.claude/skills/quorum.md` |
+| 4. MCP | `npx @as-quorum/mcp install` (registers MCP + skill) |
+| 5. Skill | Included in step 4 — or `npx @as-quorum/mcp install --skip-mcp` |
 | 6. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
 
 ---
@@ -351,6 +354,6 @@ The `project` field is display-only and has no effect on routing.
 ## Next steps
 
 - [QUICKSTART.md](QUICKSTART.md) — Get Quorum itself running (if not already)
-- [skill/SKILL.md](../skill/SKILL.md) — How Claude Code uses Quorum tools during sessions
+- [quorum-mcp skill/SKILL.md](https://github.com/as-quorum/quorum-mcp/blob/prod/skill/SKILL.md) — How Claude Code uses Quorum tools during sessions
 - [ARCHITECTURE.md](ARCHITECTURE.md) — How governance, versioning, and conflict resolution work
 - [DEPLOYMENT.md](DEPLOYMENT.md) — Helm / production deployment

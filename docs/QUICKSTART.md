@@ -74,9 +74,6 @@ The first run takes 3–5 minutes (Docker image pulls). Subsequent runs are unde
 ✓ LocalStack S3 ready
 ✓ Seed complete
 
-  Add Quorum to Claude Code:
-    claude mcp add quorum -- node /path/to/quorum/src/server.js
-
   Dashboard:  http://localhost:3002
   Gateway:    http://localhost:3001/health
   LocalStack: http://localhost:4566/_localstack/health
@@ -87,19 +84,16 @@ The first run takes 3–5 minutes (Docker image pulls). Subsequent runs are unde
 ## Step 3 — Verify the stack is running
 
 ```bash
-# All 7 services should show "running" or "healthy"
+# All services should show "running" or "healthy"
 docker compose ps
 
 # Gateway health check
 curl http://localhost:3001/health
-# {"status":"ok","version":"0.2.0"}
+# {"status":"healthy","components":{...}}
 
-# Verify the audit chain is intact
-node cli.js audit verify
-# Chain verified: N entries, no tampering detected
-
-# Check seeded knowledge is queryable
-node cli.js history auth:token-strategy
+# Verify the audit chain is intact (ops CLI)
+node scripts/audit-cli.js verify
+# ✓ Chain integrity: OK (N entries verified)
 ```
 
 Open the dashboard in your browser: **http://localhost:3002**
@@ -108,23 +102,23 @@ Open the dashboard in your browser: **http://localhost:3002**
 
 ## Step 4 — Connect to Claude Code
 
+The MCP server is a separate package — `@as-quorum/mcp` — maintained in the
+[`quorum-mcp`](https://github.com/as-quorum/quorum-mcp) repo.
+
 ```bash
-# Replace /path/to/quorum with your actual clone path
-claude mcp add quorum -- node /path/to/quorum/src/server.js
+# Install and register in one step (copies skill + runs claude mcp add)
+npx @as-quorum/mcp install
+
+# Or — if running from a local clone of quorum-mcp:
+npm install && npm run build:all
+claude mcp add quorum -- node /path/to/quorum-mcp/dist/server.js
 
 # Verify Claude can see the tools
 claude mcp list
-# quorum: remember, recall, search, reflect, history, export, forget, review
+# quorum: remember, recall, search, reflect, history, export, forget, review, pending, authenticate
 ```
 
-Once connected, Claude Code automatically uses Quorum's tools during sessions.
-The `skill/SKILL.md` file documents how Claude is expected to use them — install it
-at the **user level** so it is active in every project without any per-repo setup:
-
-```bash
-mkdir -p ~/.claude/skills
-cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
-```
+`npx @as-quorum/mcp install` handles both MCP registration and skill installation in one step.
 
 ---
 
@@ -138,10 +132,10 @@ cp /path/to/quorum/skill/SKILL.md ~/.claude/skills/quorum.md
 | `falkordb` | http://localhost:3000 | Graph database browser UI |
 | `postgresql` | localhost:5432 | Audit log store (dual-store with graph) |
 | `localstack` | http://localhost:4566 | AWS S3 emulation — team config bucket |
-| `quorum` (MCP) | http://localhost:8000 | MCP server — run locally, not via Docker |
+| `quorum-mcp` | local process | MCP server — run via `npx @as-quorum/mcp` or `claude mcp add` |
 
-> **Note:** The `quorum` MCP server in Docker Compose is for integration testing only.
-> In normal use, Claude Code runs it locally via `node src/server.js` (Step 4 above).
+> **Note:** The MCP server (`@as-quorum/mcp`) runs as a local process managed by Claude Code — it is not
+> part of the Docker Compose stack. See Step 4 above for setup.
 
 ---
 
@@ -172,18 +166,40 @@ npm run seed
 
 ## CLI reference
 
-The `cli.js` provides operational commands — run from the project root:
+### Ops audit CLI (`scripts/audit-cli.js`)
+
+Gateway-backed compliance tool — requires `QUORUM_GITHUB_TOKEN` + `QUORUM_GATEWAY_URL`:
 
 ```bash
-# Audit
-node cli.js audit verify          # verify SHA256 chain integrity
-node cli.js audit export          # export full audit log as JSONL
+# Verify tamper-evident SHA256 chain integrity
+node scripts/audit-cli.js verify
 
-# Knowledge inspection
-node cli.js history auth:token-strategy   # version timeline for a topic:key
-node cli.js history db:migration-strategy
+# Audit lineage for a specific knowledge node
+node scripts/audit-cli.js lineage auth:token-strategy
 
-# Maintenance jobs (also available as npm run job:*)
+# Export full audit log as JSONL (optional date range)
+node scripts/audit-cli.js export --from 2026-01-01 --to 2026-06-01
+
+# Summary stats (total entries, latest position)
+node scripts/audit-cli.js stats
+```
+
+Or via npm:
+```bash
+npm run audit:cli -- verify
+npm run audit:cli -- lineage auth:token-strategy
+```
+
+### Knowledge CLI (`quorum` binary from `@as-quorum/mcp`)
+
+```bash
+# Version history for a topic:key
+npx @as-quorum/mcp history auth:token-strategy
+```
+
+### Maintenance jobs
+
+```bash
 node scripts/decay-confidence.js --dry-run    # preview confidence decay
 node scripts/archive-audit.js    --dry-run    # preview audit archival
 node scripts/recheck-conflicts.js             # re-evaluate stale conflicts

@@ -29,18 +29,17 @@ Graphiti resolves conflicts automatically by recency. Quorum questions whether r
 
 ```mermaid
 graph TD
-    CC[Claude Code / AI Agents] -->|MCP stdio| MCP[Quorum MCP Server<br/>Node.js :8000]
+    CC[Claude Code / AI Agents] -->|MCP stdio| MCP["@as-quorum/mcp<br/>Node.js (local process)"]
     Browser[Dashboard<br/>React :3002] -->|HTTPS| Nginx[Nginx<br/>:3002]
     Nginx -->|proxy /auth /api /config /pg /graphiti| GW[Quorum Gateway<br/>Express :3001]
-    MCP -->|QUORUM_GATEWAY_URL set| GW
-    MCP -->|direct - no gateway| PG[(PostgreSQL<br/>Audit Store :5432)]
+    MCP -->|always via gateway HTTP| GW
     GW -->|JWT-gated proxy /graphiti/*| Graphiti[Graphiti MCP<br/>Python :8001]
-    GW --> PG
+    GW --> PG[(PostgreSQL<br/>Audit Store :5432)]
     GW -->|HeadBucket / GetObject| S3[S3 / LocalStack<br/>Project configs :4566]
     Graphiti --> FalkorDB[(FalkorDB<br/>:6379)]
 ```
 
-The MCP server hosts the governance layer (`conflict.js`, `authority.js`, `provenance.js`, `confidence.js`, `constitutional.js`) and the audit pipeline. When `QUORUM_GATEWAY_URL` is set the MCP server proxies all Graphiti calls through the Gateway, which enforces JWT auth and injects the project's `group_id`. When unset (single-tenant local mode) the MCP server talks to Graphiti directly. The audit secondary store (PostgreSQL) is always written by the MCP server itself — the Gateway also exposes a JWT-gated REST surface on `/pg/*` for the Dashboard.
+The MCP server (`@as-quorum/mcp`, maintained in the `quorum-mcp` repo) hosts the governance layer and audit pipeline. It **always** communicates with the Gateway over HTTP — there is no direct database path. The Gateway enforces JWT auth, injects `group_id` from the JWT claim into every Graphiti call, and exposes the `/pg/*` REST surface for both the MCP server and the Dashboard.
 
 ---
 
@@ -57,8 +56,14 @@ The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fr
 | POST | `/auth/token` | Exchange a GitHub PAT for a Quorum JWT (verifies the PAT, looks up the member in project config, signs ES256 JWT with `group_id` and role claims) |
 | POST | `/auth/refresh` | Refresh an unexpired JWT — extends `exp` without re-running OAuth |
 | GET | `/.well-known/jwks.json` | Public JWKS for ES256 verification — consumed by MCP server, Dashboard, and any third-party verifier |
+| GET | `/.well-known/oauth-authorization-server` | RFC8414 metadata — MCP clients auto-discover all OAuth endpoints from here |
+| POST | `/oauth/register` | RFC7591 dynamic client registration — MCP client self-registers, no manual setup |
+| GET | `/oauth/authorize` | Start PKCE S256 flow → redirect to GitHub |
+| GET | `/oauth/callback` | GitHub callback → enrich with project config claims → issue 60s single-use auth code |
+| POST | `/oauth/token` | Exchange auth code + PKCE verifier → Gateway-MCP ES256 JWT |
 | POST | `/graphiti/*` | JWT-authenticated proxy to Graphiti. `group_id` is injected from the JWT claim (clients cannot spoof project scope) |
-| GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over the PostgreSQL audit store — used by the Dashboard for audit timelines and version history |
+| GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over PostgreSQL — used by Dashboard and MCP server for versions, audit, pending decisions |
+| GET | `/pg/audit/lineage/:topic/:key` | Ordered audit trail for a knowledge node (JOIN audit_log + version_audit_links) |
 | GET | `/config/:projectId` | Fetch a project's `quorum.config.json` from S3 (cached) |
 | POST | `/config/validate` | Validate a config payload against the Zod schema before write — no auth required |
 | GET | `/schema/config` | Serve `quorum.config.schema.json` for editor validation and autocomplete — no auth required |
@@ -651,7 +656,7 @@ Deprecates knowledge. Never hard deletes.
 
 ## Self-Evolving Skill Design
 
-The Claude Code skill (`skill/SKILL.md`) instructs Claude to:
+The Claude Code skill (bundled with `@as-quorum/mcp` at `skill/SKILL.md`) instructs Claude to:
 
 **At session start:**
 - Call `search()` with current task description
