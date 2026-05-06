@@ -10,7 +10,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+COPY mcp/package.json ./mcp/
+COPY gateway/package.json ./gateway/
+COPY dashboard/package.json ./dashboard/
+RUN npm ci --only=production --workspaces --include-workspace-root
 
 # ── Runtime stage ──────────────────────────────────────────────
 FROM node:20-alpine AS runtime
@@ -21,11 +24,12 @@ WORKDIR /app
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
-COPY src/ ./src/
+COPY mcp/ ./mcp/
+COPY gateway/ ./gateway/
 
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:3001/health || exit 1
 
-CMD ["node", "src/gateway/server.js"]
+CMD ["node", "gateway/src/server.js"]

@@ -51,53 +51,54 @@ Quorum checks existing knowledge graph
 - **Authority-weighted writes** — a junior engineer's addition does not silently overwrite a senior architect's ADR
 - **Self-evolving** — Claude Code skill reflects after every task and adds learnings automatically
 - **Human at the fork** — agents operate autonomously on established knowledge; humans only intervene at genuine ambiguity
+- **Quorum Gateway** — Express service that fronts Graphiti and PostgreSQL with ES256 JWT, GitHub OAuth, and S3-backed per-project configuration
+- **Quorum Dashboard** — React SPA for browsing the knowledge graph, resolving conflicts, reviewing drafts, and editing project config — with session expiry handling and re-auth flows built in
 - **Export to human** — everything Quorum knows, exportable as Markdown or Confluence markup
 
 ---
 
 ## Architecture
 
+```mermaid
+graph LR
+    Agent[Claude Code<br/>AI Agents] -->|MCP stdio| Quorum[Quorum MCP Server]
+    Human[Dashboard<br/>browser] --> Gateway[Quorum Gateway<br/>JWT + S3 config]
+    Quorum --> Gateway
+    Gateway --> Graphiti[Graphiti<br/>temporal KG]
+    Graphiti --> FalkorDB[(FalkorDB)]
+    Gateway --> PG[(PostgreSQL<br/>audit)]
+    Gateway --> S3[(S3<br/>project config)]
 ```
-Claude Code / AI Agents
-        │ MCP
-        ▼
-┌─────────────────────┐
-│  Quorum MCP Server  │
-│  (Node.js)          │
-├─────────────────────┤
-│  Governance Layer   │  ← The differentiator
-│  Conflict detection │
-│  Authority weights  │
-│  Provenance track   │
-│  Confidence scores  │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  Graphiti Engine    │  ← Temporal knowledge graph (OSS)
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  FalkorDB / Neo4j   │  ← Graph storage
-│  / AWS Neptune      │
-└─────────────────────┘
-```
+
+The **Quorum MCP Server** speaks MCP stdio with Claude Code and AI agents. The **Quorum Gateway** (Express :3001) handles GitHub OAuth, issues ES256 JWTs, serves project config from S3, and proxies authenticated traffic to Graphiti and PostgreSQL. The **Quorum Dashboard** (React :3002, served via Nginx) is the human-facing surface for graph exploration, conflict resolution, draft review, audit timelines, and project configuration.
 
 ---
 
 ## Quick Start
 
+> **Full step-by-step guide:** [QUICKSTART.md](docs/QUICKSTART.md)
+
+**Prerequisites:** Node.js 20+, Docker Desktop, `pip install awscli-local`, OpenAI API key
+
 ```bash
-git clone https://github.com/yourusername/quorum
+git clone https://github.com/ayansasmal/quorum.git
 cd quorum
-cp .env.example .env   # add your LLM API key
+cp .env.example .env          # set OPENAI_API_KEY — the only required change
 
-docker-compose up -d
+./scripts/setup.sh docker     # start stack, upload configs to S3, seed knowledge graph
 
-# Add to Claude Code
+# Connect to Claude Code (replace path with your clone location)
 claude mcp add quorum -- node /path/to/quorum/src/server.js
 
-# Verify
-claude "What does Quorum know about auth?"
+# Install the Quorum skill at user level — active in every project on your machine
+cp skill/SKILL.md ~/.claude/skills/quorum.md
+```
+
+After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
+
+```bash
+node cli.js audit verify      # verify audit chain integrity
+node cli.js history auth:token-strategy   # inspect seeded knowledge
 ```
 
 ---
@@ -166,15 +167,15 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 ## Roadmap
 
-- **v0.1** — Core MCP server + Graphiti integration + conflict detection
-- **v0.2** — Full governance (authority weighting, human-in-the-loop, confidence scoring)
-- **v0.3** — Self-evolving Claude Code skill
-- **v0.4** — Export (Markdown + Confluence) + multi-team namespacing
-- **v1.0** — Production ready
-- **Future** — Confluence ingestion, Draw.io parsing, cross-org federation
+- **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack, seed data with contradictions
+- **v0.2** (current) — Quorum Gateway (ES256 JWT, S3-backed project config), `.quorum` project files, multi-project scoping, authority weighting, confidence decay, human-in-the-loop conflict resolution, self-evolving `skill/SKILL.md`, project selector with search + pagination, `<group_id>.quorum.json` config naming, flat S3 bucket, JSON Schema endpoint (`GET /schema/config`), Crossplane-based IaC, LocalStack for local dev, Express gateway + React dashboard
+- **v0.3** — PR knowledge ingestion (`ingest_pr`), post-merge confidence feedback loop
+- **v0.4** — Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`, `search_atlassian`, `sync_atlassian`), Markdown + Confluence export
+- **v1.0** — Production hardening, AWS Neptune support, hosted docs
+- **Future** — Diagram ingestion (image → Mermaid), cross-org federation, analytics dashboard
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Apache 2.0 licensed.
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Apache 2.0 licensed.

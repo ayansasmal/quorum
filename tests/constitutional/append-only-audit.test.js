@@ -14,14 +14,14 @@ import { describe, it, expect } from 'vitest'
 import {
   enforceAppendOnlyAudit,
   ConstitutionalViolation,
-} from '../../src/governance/constitutional.js'
-import { updateEntry, deleteEntry } from '../../src/audit/secondary.js'
+} from '../../mcp/src/governance/constitutional.js'
+import { updateEntry, deleteEntry } from '../../mcp/src/audit/secondary.js'
 import {
   hashEntry,
   buildEntryWithHash,
   verifyChain,
   ChainIntegrityViolation,
-} from '../../src/audit/chain.js'
+} from '../../mcp/src/audit/chain.js'
 
 // ── enforceAppendOnlyAudit ────────────────────────────────────────────────────
 

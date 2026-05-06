@@ -14,8 +14,8 @@ import {
   enforceNoHardDelete,
   validateManifestHasNoDeleteTools,
   ConstitutionalViolation,
-} from '../../src/governance/constitutional.js'
-import { BLOCKED_METHODS, isMethodBlocked } from '../../src/graph/client.js'
+} from '../../mcp/src/governance/constitutional.js'
+import { BLOCKED_METHODS, isMethodBlocked } from '../../mcp/src/graph/client.js'
 
 // ── Rule enforcement functions ────────────────────────────────────────────────
 

@@ -13,7 +13,7 @@ import {
   enforceNoSelfApproval,
   enforceConflictPartyCannotSelfResolve,
   ConstitutionalViolation,
-} from '../../src/governance/constitutional.js'
+} from '../../mcp/src/governance/constitutional.js'
 
 // ── enforceNoSelfApproval ─────────────────────────────────────────────────────
 

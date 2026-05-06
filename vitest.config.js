@@ -14,8 +14,8 @@ export default defineConfig({
     include: ['tests/**/*.test.js'],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.js'],
-      exclude: ['src/server.js'],
+      include: ['mcp/src/**/*.js', 'gateway/src/**/*.js'],
+      exclude: ['mcp/src/server.js'],
       reporter: ['text', 'json', 'html'],
       thresholds: {
         lines: 80,

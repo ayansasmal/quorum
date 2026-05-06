@@ -10,13 +10,21 @@ coverage/
 logs/
 !logs/.gitkeep
 
+# Editor tooling — local workspace settings (never commit)
+.vscode/
+.idea/
+
+# AI tooling — local state and worktree artifacts (never commit)
+.claude/
+.claire/
+
+# Local project configs — contain real github_usernames and git emails.
+# Copy example.quorum.json to configs/<group_id>.quorum.json to get started.
+# These are uploaded to LocalStack S3 by init-localstack.sh and never go in git.
+configs/*.quorum.json
+
 # Crossplane real credentials (never commit)
 crossplane/credentials/aws-creds-secret.yaml
 
-# Terraform — state and secrets never go in git
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
-terraform/terraform.tfvars
-terraform/quorum.tfplan
+# Infrastructure tooling state — never go in git
+.terraform/

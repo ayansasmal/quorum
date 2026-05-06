@@ -1,4 +1,27 @@
+name: quorum
+
 services:
+  # LocalStack — AWS S3 emulation for local dev.
+  # The gateway reads team config from S3; for local Docker Compose runs we point
+  # it here instead of real AWS. Bucket is created by scripts/init-localstack.sh
+  # (called automatically by setup.sh docker after the stack is healthy).
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
   falkordb:
     image: falkordb/falkordb:latest
     ports:
@@ -24,7 +47,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quorum"]
+      test: ["CMD-SHELL", "pg_isready -U quorum -d quorum_audit"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -70,8 +93,15 @@ services:
       - POSTGRES_USER=quorum
       - POSTGRES_PASSWORD=quorum_local
       - POSTGRES_DB=quorum_audit
-      - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-company-quorum-configs}
-      - AWS_REGION=${AWS_REGION:-ap-southeast-2}
+      - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-quorum-configs}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      # LocalStack — S3 calls inside the Docker network go here (not real AWS)
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - QUORUM_DDB_CONFIGS_TABLE=${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}
+      - QUORUM_DDB_USER_PROJECTS_TABLE=${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}
+      - QUORUM_SYNC_SECRET=${QUORUM_SYNC_SECRET:-}
       # JWT signing keys — generate with openssl, store in secrets manager for production
       # Leave unset in dev: gateway generates an ephemeral key pair automatically
       - QUORUM_JWT_PRIVATE_KEY=${QUORUM_JWT_PRIVATE_KEY:-}
@@ -79,6 +109,12 @@ services:
       - QUORUM_GATEWAY_PORT=3001
       # Local dev only — skip S3, load config from this path inside the container
       - QUORUM_CONFIG_PATH=${QUORUM_CONFIG_PATH:-}
+      # GitHub OAuth — register at github.com/settings/developers
+      # Homepage URL: http://localhost:3002  |  Callback URL: http://localhost:3002/auth/callback
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:3002/auth/callback}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3002}
       - NODE_ENV=${NODE_ENV:-development}
     volumes:
       - ./quorum.config.example.json:/app/quorum.config.example.json:ro
@@ -87,12 +123,30 @@ services:
         condition: service_healthy
       graphiti:
         condition: service_healthy
+      localstack:
+        condition: service_healthy
+        required: false   # setup.sh may reuse an external LocalStack; skip if absent
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      # Accept 200 (healthy) or 503 (degraded) — both mean the gateway is alive.
+      # curl -f would kill the container whenever any downstream component is down.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/health | grep -qE '^(200|503)$'"]
       interval: 30s
       timeout: 10s
-      start_period: 15s
+      start_period: 30s
       retries: 3
+
+  # Quorum Dashboard — React/Vite app served by Nginx.
+  # Nginx proxies /auth, /api, /.well-known, /config, /health to the Gateway service.
+  # Access at http://localhost:3002 (port 3001 is taken by Gateway, 3000 by FalkorDB UI).
+  quorum-dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3002:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
 
   # Quorum MCP — runs on engineer machines via Claude Code MCP config, not Docker.
   # Kept here for local integration testing of the full central stack.
@@ -131,3 +185,4 @@ services:
 volumes:
   falkordb_data:
   postgres_data:
+  localstack_data:

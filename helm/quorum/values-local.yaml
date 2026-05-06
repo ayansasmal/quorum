@@ -1,6 +1,18 @@
 # Quorum Helm Chart — Docker Desktop Kubernetes overrides
 # Usage: helm upgrade --install quorum ./helm/quorum -f helm/quorum/values-local.yaml
 
+# ── Dashboard local overrides ─────────────────────────────────────────────────
+# NodePort 30080 lets you reach the dashboard at http://localhost:30080 on Docker Desktop.
+# No ingress controller required for local dev.
+dashboard:
+  replicaCount: 1
+  ingress:
+    enabled: false
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30080
+
 gateway:
   replicaCount: 1
   ingress:

@@ -267,3 +267,144 @@ CREATE INDEX IF NOT EXISTS idx_kv_project_topic_key_status
   ON knowledge_versions (project_id, topic, key, status);
 
 GRANT UPDATE (project_id) ON knowledge_versions TO quorum_app;
+
+-- ── Entity type + summary (dashboard graph view) ───────────────────────────────
+-- entity_type: Decision | Pattern | Constraint | Runbook | Requirement | unknown
+-- summary:     short human-readable label for graph node tooltips
+ALTER TABLE knowledge_versions
+  ADD COLUMN IF NOT EXISTS entity_type TEXT NOT NULL DEFAULT 'unknown',
+  ADD COLUMN IF NOT EXISTS summary     TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_kv_entity_type ON knowledge_versions (entity_type)
+  WHERE status = 'ACTIVE';
+
+GRANT UPDATE (entity_type, summary) ON knowledge_versions TO quorum_app;
+
+-- ── Bump log (GAP-24 — confidence endorsement audit trail) ─────────────────────
+-- Append-only record of every bump action. Used for:
+--   1. 7-day per-author cooldown enforcement
+--   2. Audit trail of who endorsed what and with what role delta
+CREATE TABLE IF NOT EXISTS bump_log (
+  id            SERIAL PRIMARY KEY,
+  author        TEXT        NOT NULL,
+  topic         TEXT        NOT NULL,
+  key           TEXT        NOT NULL,
+  project_id    TEXT        NOT NULL DEFAULT 'default',
+  role          TEXT        NOT NULL,
+  delta_applied NUMERIC     NOT NULL,
+  bumped_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bump_log_cooldown
+  ON bump_log (author, topic, key, project_id, bumped_at DESC);
+
+GRANT INSERT, SELECT ON bump_log TO quorum_app;
+GRANT USAGE, SELECT ON SEQUENCE bump_log_id_seq TO quorum_app;
+
+-- ── Projects table (GAP-20) ────────────────────────────────────────────────────
+-- Central config store. Each project has a unique token (stored as SHA-256 hash).
+-- Replaces per-project S3 config files. Members/domains/governance are JSONB columns.
+-- config_version enables optimistic locking (GAP-25): PATCH must supply current version.
+CREATE TABLE IF NOT EXISTS projects (
+  id                TEXT PRIMARY KEY,          -- proj-abc123 | 'global'
+  slug              TEXT UNIQUE NOT NULL,      -- human-readable short name
+  name              TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED')),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by        TEXT NOT NULL,             -- github username of creator
+
+  -- Full governance config (replaces S3 config file)
+  members           JSONB NOT NULL DEFAULT '[]',
+  -- [{ github_username, role, team, base_confidence }]
+  domains           JSONB NOT NULL DEFAULT '[]',
+  -- [{ name, conflict_threshold }]
+  governance        JSONB NOT NULL DEFAULT '{}',
+  -- { conflict_threshold, authority_threshold, notifications: { webhook_url } }
+
+  schema_version    INTEGER NOT NULL DEFAULT 1,
+  config_version    INTEGER NOT NULL DEFAULT 0, -- optimistic lock (GAP-25)
+  config_updated_at TIMESTAMPTZ,
+  config_updated_by TEXT,
+
+  -- Enterprise integrations (all optional)
+  github_org        TEXT,
+  github_repo       TEXT,
+  jira_project      TEXT,
+  slack_channel     TEXT,
+
+  -- Project token for MCP server auth (bcrypt hash; plaintext returned once on creation)
+  token_hash        TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_status    ON projects (status);
+CREATE INDEX IF NOT EXISTS idx_projects_members   ON projects USING GIN (members);
+CREATE INDEX IF NOT EXISTS idx_projects_slug      ON projects (slug);
+
+GRANT INSERT, SELECT ON projects TO quorum_app;
+GRANT UPDATE (members, domains, governance, status, config_version,
+              config_updated_at, config_updated_by, token_hash)
+  ON projects TO quorum_app;
+
+-- ── GAP-27: Global namespace bootstrap ────────────────────────────────────────
+-- The 'global' project is a reserved namespace readable by all projects.
+-- Only principal_architect role may write to it; all writes enter DRAFT.
+-- 'not-a-real-token' ensures this project cannot be used as an MCP token target.
+INSERT INTO projects (id, slug, name, created_by, members, governance, token_hash)
+VALUES (
+  'global',
+  'global',
+  'Global Shared Knowledge',
+  'system',
+  '[{"github_username": "system", "role": "principal_architect", "team": "platform", "base_confidence": 1.0}]',
+  '{"description": "Company-wide policy namespace. Readable by all projects. Writable by principal_architect only. All writes enter DRAFT."}',
+  'not-a-real-token'
+) ON CONFLICT (id) DO NOTHING;
+
+-- ── GAP-21: Domain track record (author_domain_stats) ───────────────────────
+-- Tracks per-author per-domain expertise signals used in authority scoring.
+-- Incremented by: recall() → recalled_count, review(approve) → approved_count,
+--                 remember() supersede → superseded_count.
+-- Primary key prevents duplicate rows; UPSERT pattern used for all increments.
+CREATE TABLE IF NOT EXISTS author_domain_stats (
+  author            TEXT        NOT NULL,
+  domain            TEXT        NOT NULL,
+  project_id        TEXT        NOT NULL DEFAULT 'default',
+  approved_count    INTEGER     NOT NULL DEFAULT 0,
+  recalled_count    INTEGER     NOT NULL DEFAULT 0,
+  superseded_count  INTEGER     NOT NULL DEFAULT 0,
+  last_updated      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (author, domain, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ads_author_domain ON author_domain_stats (author, domain, project_id);
+
+GRANT INSERT, SELECT ON author_domain_stats TO quorum_app;
+GRANT UPDATE (approved_count, recalled_count, superseded_count, last_updated)
+  ON author_domain_stats TO quorum_app;
+
+-- ── GAP-05: Audit log archival columns ───────────────────────────────────────
+-- Append-only: archival marks entries with a pointer to S3 — never deletes rows.
+-- archived_at + archive_s3_key are both nullable; NULL means not yet archived.
+-- Partial index speeds the archival script's "find unarchived rows" query.
+ALTER TABLE audit_log
+  ADD COLUMN IF NOT EXISTS archived_at    TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS archive_s3_key TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_archived ON audit_log (archived_at)
+  WHERE archived_at IS NULL;
+
+GRANT UPDATE (archived_at, archive_s3_key) ON audit_log TO quorum_app;
+
+-- ── GAP-03: PENDING_CONFLICT_CHECK status ─────────────────────────────────────
+-- Extend the status CHECK constraint to include PENDING_CONFLICT_CHECK.
+-- This status is set when Graphiti is unavailable at write time so conflict
+-- detection is deferred to the recheck-conflicts CronJob.
+DO $$
+BEGIN
+  ALTER TABLE knowledge_versions
+    DROP CONSTRAINT IF EXISTS knowledge_versions_status_check;
+  ALTER TABLE knowledge_versions
+    ADD CONSTRAINT knowledge_versions_status_check
+      CHECK (status IN ('ACTIVE','DRAFT','SUPERSEDED','DEPRECATED','REJECTED','PENDING_CONFLICT_CHECK'));
+END
+$$;

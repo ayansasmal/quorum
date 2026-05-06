@@ -8,10 +8,20 @@
  *   - auth:token-strategy with 3 versions to demonstrate history CLI
  *   - 13 other knowledge nodes across auth, api, db, infra, testing
  *   - One deliberate contradiction pair for conflict detection demo
+ *
+ * Idempotency:
+ *   Skips gracefully if seed data already exists.
+ *   Pass --force to clear seed data and re-seed from scratch.
+ *
+ * Usage:
+ *   node scripts/seed.js            # skip if already seeded
+ *   node scripts/seed.js --force    # clear and re-seed
  */
 
 import pg from 'pg'
-import { handler as rememberHandler } from '../src/tools/remember.js'
+import { handler as rememberHandler } from '../mcp/src/tools/remember.js'
+
+const FORCE = process.argv.includes('--force')
 
 const pool = new pg.Pool({
   host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -21,10 +31,59 @@ const pool = new pg.Pool({
   password: process.env.POSTGRES_PASSWORD ?? 'quorum_local',
 })
 
+/** Seed sentinel — if this topic:key exists at v1, the seed has already run. */
+const SENTINEL = { topic: 'auth', key: 'token-strategy' }
+
+/**
+ * Check whether seed data already exists.
+ * @returns {Promise<boolean>}
+ */
+async function isAlreadySeeded() {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM knowledge_versions
+     WHERE topic = $1 AND key = $2 AND version = 1
+     LIMIT 1`,
+    [SENTINEL.topic, SENTINEL.key],
+  )
+  return rows.length > 0
+}
+
+/**
+ * Remove all seed data so the seed can run again cleanly.
+ * Only used with --force — never called in production.
+ */
+async function clearSeedData() {
+  const seedTopicKeys = [
+    ['auth', 'token-strategy'],
+    ['auth', 'delegation-flow'],
+    ['auth', 'rate-limiting'],
+    ['api',  'error-standards'],
+    ['api',  'versioning'],
+    ['api',  'pagination'],
+    ['db',   'connection-pooling'],
+    ['db',   'migration-strategy'],
+    ['db',   'naming-conventions'],
+    ['infra','secrets-management'],
+    ['infra','retry-strategy'],
+    ['testing','unit-strategy'],
+    ['testing','integration-scope'],
+  ]
+
+  for (const [topic, key] of seedTopicKeys) {
+    await pool.query(
+      `DELETE FROM knowledge_versions WHERE topic = $1 AND key = $2`,
+      [topic, key],
+    )
+  }
+}
+
+/**
+ * Wrap rememberHandler with consistent logging.
+ * @param {object} params
+ */
 async function remember(params) {
   try {
     const result = await rememberHandler(pool, params)
-    const label = `${params.topic}:${params.key} (v?)`
     if (result?.status === 'conflict_detected') {
       console.log(`  ⚠️  ${params.topic}:${params.key} → conflict detected (expected for demo)`)
     } else {
@@ -39,6 +98,18 @@ async function remember(params) {
 
 async function seed() {
   console.log('\n── Seeding Quorum knowledge ─────────────────────────────\n')
+
+  // ── Idempotency check ────────────────────────────────────────────────────────
+  if (await isAlreadySeeded()) {
+    if (!FORCE) {
+      console.log('  ℹ️  Already seeded — skipping. Pass --force to re-seed.\n')
+      console.log('── Seed skipped ──────────────────────────────────────────\n')
+      return
+    }
+    console.log('  🗑️  --force: clearing existing seed data...')
+    await clearSeedData()
+    console.log('  ✓  Cleared. Re-seeding...\n')
+  }
 
   // ── auth:token-strategy — 3 versions to demonstrate history CLI ─────────────
   console.log('auth domain...')

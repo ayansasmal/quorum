@@ -19,11 +19,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { ConstitutionalViolation } from '../../src/governance/constitutional.js'
+import { ConstitutionalViolation } from '../../mcp/src/governance/constitutional.js'
 
 // ── Mocks (hoisted — must be at top level in ESM) ─────────────────────────────
 
-vi.mock('../../src/graph/client.js', () => ({
+vi.mock('../../mcp/src/graph/client.js', () => ({
   addEpisode: vi.fn(),
   addSupersedingEpisode: vi.fn(),
   searchNodes: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock('../../src/graph/client.js', () => ({
   isMethodBlocked: vi.fn((m) => ['delete_episode', 'delete_entity', 'purge'].includes(m)),
 }))
 
-vi.mock('../../src/graph/queries.js', () => ({
+vi.mock('../../mcp/src/graph/queries.js', () => ({
   getCurrentVersion: vi.fn(),
   getNextVersionNumber: vi.fn(),
   getVersionHistory: vi.fn(),
@@ -47,16 +47,18 @@ vi.mock('../../src/graph/queries.js', () => ({
   insertPendingDecision: vi.fn().mockResolvedValue(),
   getPendingDecisionById: vi.fn(),
   resolvePendingDecision: vi.fn().mockResolvedValue(),
+  // GAP-21: fire-and-forget domain stat increment — must be present in mock
+  incrementDomainStat: vi.fn().mockResolvedValue(),
 }))
 
-vi.mock('../../src/audit/pipeline.js', () => ({
+vi.mock('../../mcp/src/audit/pipeline.js', () => ({
   withAuditPipeline: vi.fn(async (_pg, _ctx, operation) => {
     const result = await operation()
     return result
   }),
 }))
 
-vi.mock('../../src/governance/conflict.js', () => ({
+vi.mock('../../mcp/src/governance/conflict.js', () => ({
   detectConflict: vi.fn(),
   resolveConflict: vi.fn(),
   generateEnrichment: vi.fn().mockResolvedValue({
@@ -73,7 +75,7 @@ vi.mock('../../src/governance/conflict.js', () => ({
   }),
 }))
 
-vi.mock('../../src/governance/authority.js', async (importOriginal) => {
+vi.mock('../../mcp/src/governance/authority.js', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
@@ -94,8 +96,8 @@ const mockPg = {}
 
 describe('remember — first version (v1)', () => {
   beforeEach(async () => {
-    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../src/graph/queries.js')
-    const { addEpisode } = await import('../../src/graph/client.js')
+    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../mcp/src/graph/queries.js')
+    const { addEpisode } = await import('../../mcp/src/graph/client.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(null)
     vi.mocked(getNextVersionNumber).mockResolvedValue(1)
@@ -106,7 +108,7 @@ describe('remember — first version (v1)', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('creates v1 as ACTIVE for a human identity', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
 
     const result = await handler(mockPg, {
       topic: 'auth',
@@ -121,8 +123,8 @@ describe('remember — first version (v1)', () => {
   })
 
   it('calls addEpisode (not addSupersedingEpisode) for first version', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { addEpisode, addSupersedingEpisode } = await import('../../src/graph/client.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { addEpisode, addSupersedingEpisode } = await import('../../mcp/src/graph/client.js')
 
     await handler(mockPg, {
       topic: 'auth',
@@ -135,8 +137,8 @@ describe('remember — first version (v1)', () => {
   })
 
   it('creates v1 as DRAFT when identity is claude', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { insertVersion } = await import('../../src/graph/queries.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { insertVersion } = await import('../../mcp/src/graph/queries.js')
 
     await handler(mockPg, {
       topic: 'testing',
@@ -150,8 +152,8 @@ describe('remember — first version (v1)', () => {
   })
 
   it('creates v1 as DRAFT when identity is anonymous', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { insertVersion } = await import('../../src/graph/queries.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { insertVersion } = await import('../../mcp/src/graph/queries.js')
 
     await handler(mockPg, {
       topic: 'auth',
@@ -164,8 +166,8 @@ describe('remember — first version (v1)', () => {
   })
 
   it('creates v1 as DRAFT when triggered_by is reflect', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { insertVersion } = await import('../../src/graph/queries.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { insertVersion } = await import('../../mcp/src/graph/queries.js')
 
     await handler(mockPg, {
       topic: 'api',
@@ -180,8 +182,8 @@ describe('remember — first version (v1)', () => {
   })
 
   it('normalizes tags to lowercase before storage', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { normalizeTags } = await import('../../src/governance/conflict.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { normalizeTags } = await import('../../mcp/src/governance/conflict.js')
 
     await handler(mockPg, {
       topic: 'auth',
@@ -212,9 +214,9 @@ describe('remember — superseding existing version', () => {
   }
 
   beforeEach(async () => {
-    const { getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus } = await import('../../src/graph/queries.js')
-    const { addSupersedingEpisode } = await import('../../src/graph/client.js')
-    const { detectConflict } = await import('../../src/governance/conflict.js')
+    const { getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus } = await import('../../mcp/src/graph/queries.js')
+    const { addSupersedingEpisode } = await import('../../mcp/src/graph/client.js')
+    const { detectConflict } = await import('../../mcp/src/governance/conflict.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(getNextVersionNumber).mockResolvedValue(2)
@@ -227,7 +229,7 @@ describe('remember — superseding existing version', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('throws REASON_REQUIRED when superseding without reason', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
 
     await expect(
       handler(mockPg, {
@@ -241,8 +243,8 @@ describe('remember — superseding existing version', () => {
   })
 
   it('calls addSupersedingEpisode (not addEpisode) when superseding', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { addEpisode, addSupersedingEpisode } = await import('../../src/graph/client.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { addEpisode, addSupersedingEpisode } = await import('../../mcp/src/graph/client.js')
 
     await handler(mockPg, {
       topic: 'auth',
@@ -257,7 +259,7 @@ describe('remember — superseding existing version', () => {
   })
 
   it('returns v2 on successful supersession', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
 
     const result = await handler(mockPg, {
       topic: 'auth',
@@ -273,8 +275,8 @@ describe('remember — superseding existing version', () => {
   })
 
   it('calls transitionVersionStatus to mark old version as SUPERSEDED', async () => {
-    const { handler } = await import('../../src/tools/remember.js')
-    const { transitionVersionStatus } = await import('../../src/graph/queries.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
+    const { transitionVersionStatus } = await import('../../mcp/src/graph/queries.js')
 
     await handler(mockPg, {
       topic: 'auth',
@@ -310,8 +312,8 @@ describe('remember — conflict detection', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('returns conflict_detected shape with conflict_id when human resolution is required', async () => {
-    const { getCurrentVersion } = await import('../../src/graph/queries.js')
-    const { detectConflict, resolveConflict } = await import('../../src/governance/conflict.js')
+    const { getCurrentVersion } = await import('../../mcp/src/graph/queries.js')
+    const { detectConflict, resolveConflict } = await import('../../mcp/src/governance/conflict.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(detectConflict).mockResolvedValue({
@@ -334,7 +336,7 @@ describe('remember — conflict detection', () => {
       },
     })
 
-    const { handler } = await import('../../src/tools/remember.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
 
     const result = await handler(mockPg, {
       topic: 'db',
@@ -352,8 +354,8 @@ describe('remember — conflict detection', () => {
   })
 
   it('conflict_detected result includes possible_split signal', async () => {
-    const { getCurrentVersion } = await import('../../src/graph/queries.js')
-    const { detectConflict, resolveConflict } = await import('../../src/governance/conflict.js')
+    const { getCurrentVersion } = await import('../../mcp/src/graph/queries.js')
+    const { detectConflict, resolveConflict } = await import('../../mcp/src/governance/conflict.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(detectConflict).mockResolvedValue({
@@ -376,7 +378,7 @@ describe('remember — conflict detection', () => {
       },
     })
 
-    const { handler } = await import('../../src/tools/remember.js')
+    const { handler } = await import('../../mcp/src/tools/remember.js')
 
     const result = await handler(mockPg, {
       topic: 'db',

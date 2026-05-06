@@ -1,0 +1,92 @@
+##
+## Quorum CI -- Dashboard Tests
+##
+## Runs on every push / PR that touches the dashboard source.
+##
+## The dashboard is a React/Vite app with no test suite yet.
+## The meaningful CI gates are:
+##   dashboard-build  -- vite production build (validates all imports + JSX compile)
+##   dashboard-docker -- Docker image build check (no push)
+##
+## When a test suite is added (vitest + @testing-library/react recommended),
+## add a dashboard-tests job here that runs: cd dashboard && npx vitest run
+##
+
+name: Dashboard CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+    paths:
+      - 'dashboard/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+  workflow_dispatch:
+
+jobs:
+  # -- Dashboard production build ----------------------------------------------
+  # A clean vite build proves: all imports resolve, JSX compiles, no dead
+  # exports, Tailwind purges correctly.
+  dashboard-build:
+    name: Dashboard Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build dashboard (production)
+        working-directory: dashboard
+        run: npm run build
+        env:
+          CI: true
+          NODE_ENV: production
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard/dist/
+          retention-days: 3
+
+  # -- Dashboard Docker build check -------------------------------------------
+  # Builds the Nginx container image. Validates the full image pipeline.
+  # Runs after dashboard-build so the dist/ artifact is already verified.
+  dashboard-docker:
+    name: Dashboard Docker Build
+    runs-on: ubuntu-latest
+    needs: dashboard-build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard/dist/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Dashboard image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dashboard
+          dockerfile: dashboard/Dockerfile
+          push: false
+          tags: quorum-dashboard:ci
+          cache-from: type=gha,scope=dashboard-ci
+          cache-to: type=gha,mode=max,scope=dashboard-ci
+          platforms: linux/amd64

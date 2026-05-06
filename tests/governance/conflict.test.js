@@ -14,11 +14,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { resolveConflict } from '../../src/governance/conflict.js'
+import { resolveConflict } from '../../mcp/src/governance/conflict.js'
 
 // ── Top-level mocks (hoisted before any imports by Vitest) ────────────────────
 
-vi.mock('../../src/graph/client.js', () => ({
+vi.mock('../../mcp/src/graph/client.js', () => ({
   searchNodes: vi.fn(),
   searchFacts: vi.fn(),
   addEpisode: vi.fn(),
@@ -122,8 +122,8 @@ describe('detectConflict — no conflict scenarios', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('returns { conflict: false } when no nodes are found', async () => {
-    const { detectConflict } = await import('../../src/governance/conflict.js')
-    const { searchNodes } = await import('../../src/graph/client.js')
+    const { detectConflict } = await import('../../mcp/src/governance/conflict.js')
+    const { searchNodes } = await import('../../mcp/src/graph/client.js')
     vi.mocked(searchNodes).mockResolvedValue({ nodes: [] })
 
     const result = await detectConflict('New content', 'auth', 'token-strategy')
@@ -131,8 +131,8 @@ describe('detectConflict — no conflict scenarios', () => {
   })
 
   it('returns { conflict: false } when all nodes are below similarity threshold', async () => {
-    const { detectConflict } = await import('../../src/governance/conflict.js')
-    const { searchNodes } = await import('../../src/graph/client.js')
+    const { detectConflict } = await import('../../mcp/src/governance/conflict.js')
+    const { searchNodes } = await import('../../mcp/src/graph/client.js')
     vi.mocked(searchNodes).mockResolvedValue({
       nodes: [
         { score: 0.5, summary: 'Unrelated knowledge', metadata: { key: 'other:key' } },
@@ -145,8 +145,8 @@ describe('detectConflict — no conflict scenarios', () => {
   })
 
   it('returns { conflict: false } when same topic:key has high similarity (update, not conflict)', async () => {
-    const { detectConflict } = await import('../../src/governance/conflict.js')
-    const { searchNodes } = await import('../../src/graph/client.js')
+    const { detectConflict } = await import('../../mcp/src/governance/conflict.js')
+    const { searchNodes } = await import('../../mcp/src/graph/client.js')
     vi.mocked(searchNodes).mockResolvedValue({
       nodes: [
         {
@@ -163,8 +163,8 @@ describe('detectConflict — no conflict scenarios', () => {
   })
 
   it('returns { conflict: false } when Graphiti is unavailable (fail open)', async () => {
-    const { detectConflict } = await import('../../src/governance/conflict.js')
-    const { searchNodes } = await import('../../src/graph/client.js')
+    const { detectConflict } = await import('../../mcp/src/governance/conflict.js')
+    const { searchNodes } = await import('../../mcp/src/graph/client.js')
     vi.mocked(searchNodes).mockRejectedValue(new Error('Connection refused'))
 
     const result = await detectConflict('New content', 'auth', 'token-strategy')

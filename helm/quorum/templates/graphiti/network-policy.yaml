@@ -1,0 +1,28 @@
+{{- if .Values.graphiti.networkPolicy.enabled }}
+# GAP-11: Restrict Graphiti ingress to the gateway pod only.
+# No service mesh required — K8s NetworkPolicy enforces the boundary.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "quorum.fullname" . }}-graphiti-allow-gateway
+  labels:
+    {{- include "quorum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: graphiti
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "quorum.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: graphiti
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow inbound traffic only from the gateway pod
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "quorum.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: gateway
+      ports:
+        - protocol: TCP
+          port: {{ .Values.graphiti.port }}
+{{- end }}

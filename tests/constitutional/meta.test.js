@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CONSTITUTIONAL_TEST_DIR = __dirname
-const CONSTITUTIONAL_SRC = join(__dirname, '../../src/governance/constitutional.js')
+const CONSTITUTIONAL_SRC = join(__dirname, '../../mcp/src/governance/constitutional.js')
 
 // ── Rule coverage ─────────────────────────────────────────────────────────────
 
@@ -66,37 +66,37 @@ describe('constitutional test suite coverage', () => {
 
 describe('constitutional.js exports', () => {
   it('exports ConstitutionalViolation', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.ConstitutionalViolation).toBe('function')
   })
 
   it('exports enforceNoHardDelete', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceNoHardDelete).toBe('function')
   })
 
   it('exports enforceAppendOnlyAudit', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceAppendOnlyAudit).toBe('function')
   })
 
   it('exports enforceReasonRequired', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceReasonRequired).toBe('function')
   })
 
   it('exports enforceNoSelfApproval', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceNoSelfApproval).toBe('function')
   })
 
   it('exports enforceMultiPartyConfig', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceMultiPartyConfig).toBe('function')
   })
 
   it('exports validateManifestHasNoDeleteTools', async () => {
-    const mod = await import('../../src/governance/constitutional.js')
+    const mod = await import('../../mcp/src/governance/constitutional.js')
     expect(typeof mod.enforceMultiPartyConfig).toBe('function')
   })
 })
