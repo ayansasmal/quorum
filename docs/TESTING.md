@@ -1,5 +1,17 @@
 # Quorum — Testing Strategy
 
+## Test Location
+
+| What | Where | Command |
+|------|-------|---------|
+| Constitutional tests (Layer 1) | `quorum-mcp/tests/constitutional/` | `npm test` in quorum-mcp |
+| Governance + tool tests (Layer 2) | `quorum-mcp/tests/governance/`, `quorum-mcp/tests/tools/` | `npm test` in quorum-mcp |
+| Gateway route tests | `engram/tests/gateway/` | `npm test` in engram (or `npm run test:gateway`) |
+
+Constitutional and governance tests live in the `quorum-mcp` repo since they test MCP server code. Gateway tests remain here since they test gateway routes.
+
+---
+
 ## Testing Philosophy
 
 Quorum has three fundamentally different kinds of code, each requiring a different testing approach:

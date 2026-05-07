@@ -23,6 +23,7 @@
  *   POST /pg/audit                            → writeAuditEntry
  *   GET  /pg/audit                            → getAllEntries
  *   GET  /pg/audit/count                      → countEntries
+ *   GET  /pg/audit/lineage/:topic/:key        → audit lineage for a knowledge node
  *   GET  /pg/audit/:id                        → getAuditEntry
  *
  *   GET  /pg/pending                          → fetch pending decisions
@@ -197,6 +198,25 @@ router.get('/audit/count', async (req, res) => {
   const projectId = req.user.project
   const count = await countEntries(pool, projectId)
   res.json({ count })
+})
+
+// GET /pg/audit/lineage/:topic/:key — ordered audit trail for a knowledge node
+router.get('/audit/lineage/:topic/:key', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { topic, key } = req.params
+  const projectId = req.user.project
+
+  const { rows } = await pool.query(
+    `SELECT al.entry_id, al.operation, al.author, al.timestamp,
+            al.outcome_json, al.governance_json, al.chain_position,
+            val.version, val.link_type
+     FROM audit_log al
+     JOIN version_audit_links val ON al.entry_id = val.audit_entry_id
+     WHERE val.topic = $1 AND val.key = $2 AND al.project_id = $3
+     ORDER BY al.chain_position ASC`,
+    [topic, key, projectId],
+  )
+  res.json({ entries: rows })
 })
 
 // GET /pg/audit/:id

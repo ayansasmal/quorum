@@ -46,7 +46,7 @@ graph TD
 ## Current State (v0.2)
 
 **Built and working:**
-- MCP server with 10 tools: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`
+- MCP server (`@as-quorum/mcp`) with 10 tools — maintained in its own repo (`quorum-mcp`), installed via `npm install -g @as-quorum/mcp`
 - Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, DynamoDB read-through cache, rate limiting, JWKS endpoint
 - Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status
 - Project selector: search + pagination (10/page), full light/dark theme, cancel-back-to-project support
@@ -60,12 +60,10 @@ graph TD
 - Multi-project isolation via `group_id` scoping in every graph operation
 - Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema at `src/config/quorum.schema.json`
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
-- Self-evolving skill: `mcp/skill/SKILL.md` (user-level install at `~/.claude/skills/quorum/`) + `mcp/skill/references/`
 - Local dev: Docker Compose + LocalStack (S3 + DynamoDB); `setup.sh docker clean --volumes` reliably wipes all data
-- Monorepo: `mcp/` (`@as-quorum/mcp`, npm-published), `gateway/` (self-hosted), `dashboard/` (self-hosted)
-- `@as-quorum/mcp` has no `pg` dependency — all DB access goes through the gateway's `/pg/*` REST API
 - OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
-- Per-package CLAUDE.md: `mcp/CLAUDE.md`, `gateway/CLAUDE.md`, `dashboard/CLAUDE.md`
+- Ops audit CLI: `scripts/audit-cli.js` — verify/lineage/export/stats via gateway HTTP (no direct pg)
+- `GET /pg/audit/lineage/:topic/:key` — audit lineage endpoint for compliance queries
 
 **Not yet built (v0.3+):** PR ingestion, Atlassian integration
 
@@ -76,28 +74,10 @@ graph TD
 ## Project Structure
 
 ```
-mcp/                    ← @as-quorum/mcp (published to npm)
-  src/
-    server.js           ← MCP server entry point + .quorum auto-discovery
-    quorum-file.js      ← .quorum project file loader
-    tools/              ← MCP tool implementations (one file per tool)
-    governance/         ← conflict.js · authority.js · confidence.js · provenance.js
-    audit/              ← pipeline.js · chain.js · primary.js · secondary.js
-    graph/              ← client.js · schema.js · queries.js
-    config/             ← schema.js · quorum.schema.json · loader.js
-    identity/           ← resolver.js (4-layer identity chain)
-    gateway/
-      client.js         ← MCP's outbound HTTP client (gateway mode only)
-    export/             ← markdown.js · confluence.js
-    prompts/            ← loader.js
-  dist/                 ← compiled output (esbuild, gitignored)
-  cli.js                ← CLI entry point (quorum init, quorum install)
-  skill/                ← SKILL.md + references/ (bundled with npm package)
-
 gateway/                ← @as-quorum/gateway (private, enterprise self-hosted)
   src/
     server.js           ← Gateway entry point (Express :3001)
-    routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump
+    routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump · governance
     middleware/         ← verify-jwt · project · rate-limit
     keys.js · config-cache.js · ddb.js · errors.js
 
@@ -108,11 +88,13 @@ dashboard/src/          ← React dashboard (private, enterprise self-hosted)
   api/                  ← typed API clients
 
 tests/
-  constitutional/       ← 100% coverage required, blocks CI
-  governance/ · tools/ · gateway/
+  gateway/              ← gateway route tests (auth · graphiti)
 
 scripts/                ← seed · audit-scan · decay · archive · recheck
+  audit-cli.js          ← ops audit CLI (verify · lineage · export · stats) via gateway HTTP
 ```
+
+> MCP server source: `github.com/as-quorum/quorum-mcp` (canonical) — installed as `@as-quorum/mcp`
 
 ---
 
@@ -167,10 +149,10 @@ Full defaults: [.env.example](.env.example)
 ## Getting Started
 
 ```bash
-./scripts/setup.sh docker            # start full stack + upload configs to S3
-npm run mcp:install   # from repo root
-cp skill/SKILL.md ~/.claude/skills/quorum.md   # user-level — active in all projects
-npm test
+./scripts/setup.sh docker      # start full stack + upload configs to S3
+npm run dev:gateway            # run gateway in dev mode
+npm test                       # run gateway tests
+node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + QUORUM_GITHUB_TOKEN)
 ```
 
 > [QUICKSTART.md](docs/QUICKSTART.md) · [ONBOARDING.md](docs/ONBOARDING.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md)

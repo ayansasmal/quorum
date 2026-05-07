@@ -18,6 +18,11 @@
  *   POST /auth/token                    — GitHub OAuth/PAT token + project_id → signed ES256 JWT
  *   POST /auth/refresh                  — renew JWT without re-auth (Bearer JWT → new JWT)
  *   GET  /.well-known/jwks.json         — public key for local JWT verification
+ *   GET  /.well-known/oauth-authorization-server — RFC8414 OAuth metadata (MCP auth)
+ *   POST /oauth/register                — RFC7591 dynamic client registration
+ *   GET  /oauth/authorize               — start PKCE S256 flow → GitHub
+ *   GET  /oauth/callback                — GitHub callback → issue auth code
+ *   POST /oauth/token                   — exchange auth code + PKCE verifier → JWT
  *   POST /graphiti/*                    — JWT-authenticated Graphiti proxy
  *   GET|POST|PATCH /pg/*                — JWT-authenticated PostgreSQL REST API
  *   GET  /config/:projectId             — project config from S3
@@ -41,6 +46,7 @@ import net     from 'net'
 import { loadKeys } from './keys.js'
 import authRoutes      from './routes/auth.js'
 import oauthRoutes     from './routes/oauth.js'
+import mcpOauthRouter, { metadataHandler } from './routes/mcp-oauth.js'
 import jwksRoutes      from './routes/jwks.js'
 import graphitiRoutes  from './routes/graphiti.js'
 import pgRoutes        from './routes/pg.js'
@@ -79,6 +85,7 @@ const pool = new pg.Pool({
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
+app.use(express.urlencoded({ extended: false }))
 
 // Make pool accessible to route handlers
 app.locals.pool = pool
@@ -87,6 +94,8 @@ app.locals.pool = pool
 
 app.use('/auth',                              oauthRoutes)  // GET /auth/github, GET /auth/callback
 app.use('/auth',                              authRoutes)   // POST /auth/token
+app.get('/.well-known/oauth-authorization-server', metadataHandler)  // RFC8414 MCP OAuth metadata
+app.use('/oauth',                             mcpOauthRouter)  // MCP OAuth 2.1 Authorization Server
 app.use('/.well-known/jwks.json',            jwksRoutes)
 // JWT-gated routes: per-engineer + per-project rate limits applied (GAP-14, GAP-31)
 app.use('/graphiti', verifyJwt, engineerLimit, projectLimit, graphitiRoutes)
@@ -246,6 +255,7 @@ async function startup() {
   app.listen(PORT, () => {
     console.error(`[Gateway] ✓ Listening on port ${PORT}`)
     console.error(`[Gateway] JWKS: http://localhost:${PORT}/.well-known/jwks.json`)
+    console.error(`[Gateway] OAuth metadata: http://localhost:${PORT}/.well-known/oauth-authorization-server`)
     console.error(`[Gateway] Health: http://localhost:${PORT}/health`)
   })
 }

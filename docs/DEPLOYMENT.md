@@ -79,8 +79,8 @@ cp .env.example .env
 # One-command setup (requires Docker Desktop + pip install awscli-local)
 ./scripts/setup.sh docker
 
-# Verify
-node cli.js audit verify
+# Verify audit chain
+node scripts/audit-cli.js verify
 ```
 
 ### Environment Variables
