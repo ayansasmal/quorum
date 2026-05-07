@@ -14,7 +14,6 @@
 | BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | ✅ Done | Conditional guard → unconditional overwrite. See detail below. |
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
-| BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-02 + BL-07. `bin` field + npm org already done. |
 | BL-04 | LLM retry + `reflect()` fallback | P3 | 🟡 To Do | Retry wrapper on gateway governance HTTP calls + `reflect()` fallback when extraction returns []. Startup env check dropped — MCP has no OPENAI_API_KEY dep. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | 🟡 To Do | Add `ARG GRAPHITI_REF` + Dependabot rule. |
 | BL-06 | Confidence decay automation in gateway | P4 | 🟡 To Do | `setInterval` in gateway process + `GET /admin/decay/status`. |
@@ -24,7 +23,7 @@
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
 | BL-11 | Gateway LLM governance endpoints | P1 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract`. ⚠️ MCP already routes governance calls here (9066c8f) — endpoints missing = silent degradation today. |
 | BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
-| BL-13 | SDLC Hooks + Skill Integration | P2 | 🔵 In Progress | 5 hook scripts + `hooks.js` + SKILL.md update. Branch: quorum-mcp `feat-sdlc-hooks`. Blocked on BL-11. Spec + plan in `docs/superpowers/`. |
+| BL-13 | SDLC Hooks + Skill Integration | P2 | ✅ Done | 5 hook scripts + `hooks.js` + SKILL.md. Merged to quorum-mcp `prod`. 13 unit tests passing. |
 
 ---
 
@@ -80,32 +79,6 @@ Use `getGatewayClient()` after loading `.quorum` file defaults at CLI startup.
 - [ ] `import pg from 'pg'` removed from `cli.js`
 - [ ] All commands work via gateway HTTP
 - [ ] `grep -r "from 'pg'" mcp/` returns no output
-
----
-
-### 🟡 BL-03 — `npx quorum start` command
-**File:** `mcp/cli.js`
-
-Foundation already done: `bin.quorum = ./dist/cli.js` in `mcp/package.json`, npm org `as-quorum` created, `quorum init` works.
-
-Missing: the `start` subcommand that launches the lite Docker stack.
-
-```js
-program
-  .command('start')
-  .description('Start the Quorum local stack (lite mode — no Graphiti)')
-  .action(() => {
-    // spawn docker compose -f <bundled lite compose> up -d
-  })
-```
-
-**Blocked on:** BL-02 (no pg in published package) · BL-07 (lite compose must exist first)
-
-**Acceptance criteria:**
-- [ ] `npx quorum start` pulls and starts the lite stack
-- [ ] `npx quorum stop` brings it down
-- [ ] `docker-compose.lite.yml` bundled in npm package via `"files"` in package.json
-- [ ] README updated with one-liner install
 
 ---
 
@@ -328,7 +301,7 @@ Implement the standard MCP OAuth 2.1 Authorization Server flow so `quorum-mcp` c
 
 ---
 
-### 🔵 BL-13 — SDLC Hooks + Skill Integration
+### ✅ BL-13 — SDLC Hooks + Skill Integration
 **Repos:** quorum-mcp (primary) · engram (`.gitignore` only)
 **Branch:** quorum-mcp `feat-sdlc-hooks`
 **Spec:** `docs/superpowers/specs/2026-05-06-quorum-sdlc-integration-design.md`
@@ -418,8 +391,9 @@ Items resolved in reverse-chronological order.
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
+| 2026-05-07 | BL-13 ✅ Done: merged to quorum-mcp prod — 5 hooks, hooks.js, SKILL.md, 13 tests passing | feat/sdlc-hooks |
 | 2026-05-07 | BL-11 priority P2→P1: MCP governance calls already routed to gateway (9066c8f) — endpoints missing = silent degradation | (backlog) |
-| 2026-05-07 | BL-13 added: SDLC hooks + skill integration — spec + plan in place, worktree started in quorum-mcp | (backlog) |
 | 2026-05-06 | quorum-mcp BL-10 complete (f37f560) — full OAuth round-trip live (gateway BL-12 + mcp client both done) | f37f560 |
 | 2026-05-04 | BL-01: `group_id` isolation bypass — unconditional overwrite in `graphiti.js` + 6 tests + DEPLOYMENT.md | pending commit |
 | 2026-05-03 | Per-package `CLAUDE.md` for `mcp/`, `gateway/`, `dashboard/` | `95e2cae` |
