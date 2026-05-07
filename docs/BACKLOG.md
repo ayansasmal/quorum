@@ -15,15 +15,16 @@
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-02 + BL-07. `bin` field + npm org already done. |
-| BL-04 | LLM retry + `reflect()` fallback + startup check | P3 | 🟡 To Do | 3 small independent changes, ship as one commit. |
+| BL-04 | LLM retry + `reflect()` fallback | P3 | 🟡 To Do | Retry wrapper on gateway governance HTTP calls + `reflect()` fallback when extraction returns []. Startup env check dropped — MCP has no OPENAI_API_KEY dep. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | 🟡 To Do | Add `ARG GRAPHITI_REF` + Dependabot rule. |
 | BL-06 | Confidence decay automation in gateway | P4 | 🟡 To Do | `setInterval` in gateway process + `GET /admin/decay/status`. |
-| BL-07 | Graphiti graceful degradation + lite compose | P5 | 🟡 To Do | `graphitiAvailable` flag + `docker-compose.lite.yml`. Unblocks BL-03. |
+| BL-07 | Graphiti graceful degradation + lite compose | P5 | 🟡 To Do | lite compose = engram (this repo); `graphitiAvailable` flag = quorum-mcp. Unblocks BL-03. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
-| BL-11 | Gateway LLM governance endpoints | P2 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract` — removes OPENAI_API_KEY from quorum-mcp. |
-| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. Unblocks quorum-mcp BL-10. |
+| BL-11 | Gateway LLM governance endpoints | P1 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract`. ⚠️ MCP already routes governance calls here (9066c8f) — endpoints missing = silent degradation today. |
+| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
+| BL-13 | SDLC Hooks + Skill Integration | P2 | 🔵 In Progress | 5 hook scripts + `hooks.js` + SKILL.md update. Branch: quorum-mcp `feat-sdlc-hooks`. Blocked on BL-11. Spec + plan in `docs/superpowers/`. |
 
 ---
 
@@ -108,33 +109,30 @@ program
 
 ---
 
-### 🟡 BL-04 — LLM retry + `reflect()` fallback + startup check
-**Files:** `mcp/src/governance/conflict.js` · `mcp/src/tools/reflect.js` · `mcp/src/server.js`
+### 🟡 BL-04 — LLM retry + `reflect()` fallback
+**Files:** `src/governance/conflict.js` · `src/tools/reflect.js`
 
-Three independent changes, one commit:
+> **Scope updated 2026-05-07:** `OPENAI_API_KEY` was removed from quorum-mcp (9066c8f).
+> All LLM calls now route through gateway HTTP. Startup env check no longer applies.
+
+Two independent changes, one commit:
 
 **1. Retry wrapper** (`conflict.js`)
-Wrap `callLLM()` with 3-attempt exponential backoff (200ms → 400ms → 800ms).
-Covers all three call sites: contradiction check, enrichment, extraction.
+Wrap `gw._post('/governance/detect-conflict')` (and `/governance/enrich`, `/governance/extract`)
+with 3-attempt exponential backoff (200ms → 400ms → 800ms). Covers all three governance call sites.
+Requires BL-11 gateway endpoints to be live for retries to have effect.
 
 **2. `reflect()` fallback** (`reflect.js`)
-When `extractKnowledge()` returns `[]` (missing API key or LLM error), store the raw
+When `extractKnowledge()` returns `[]` (gateway unavailable or extraction error), store the raw
 task summary as a single DRAFT observation:
 ```js
 { confidence: 0.35, entity_type: 'observation', content: taskSummary, tags: ['unextracted'] }
 ```
 The `unextracted` tag makes it easy to find and re-process later.
 
-**3. Startup env check** (`server.js`, 1 line)
-```js
-if (!process.env.OPENAI_API_KEY)
-  console.error('[Quorum] WARNING: OPENAI_API_KEY not set — LLM features disabled')
-```
-
 **Acceptance criteria:**
-- [ ] Transient LLM 500s are retried up to 3 times with backoff
-- [ ] `reflect()` always stores something even without LLM
-- [ ] Missing API key is logged at startup, not silently swallowed
+- [ ] Transient gateway errors on governance endpoints retried up to 3 times with backoff
+- [ ] `reflect()` always stores something even when gateway extraction fails
 
 ---
 
@@ -330,6 +328,52 @@ Implement the standard MCP OAuth 2.1 Authorization Server flow so `quorum-mcp` c
 
 ---
 
+### 🔵 BL-13 — SDLC Hooks + Skill Integration
+**Repos:** quorum-mcp (primary) · engram (`.gitignore` only)
+**Branch:** quorum-mcp `feat-sdlc-hooks`
+**Spec:** `docs/superpowers/specs/2026-05-06-quorum-sdlc-integration-design.md`
+**Plan:** `docs/superpowers/plans/2026-05-06-quorum-sdlc-integration.md`
+
+Wire 5 Claude Code hook scripts + extend `quorum install` so installing the MCP
+automatically enforces Quorum knowledge capture and validation across the full engineering SDLC.
+No per-project manual configuration — hooks are silent in projects without a `.quorum` file.
+
+**SDLC coverage:**
+
+| SDLC Moment | Hook | Signal |
+|-------------|------|--------|
+| Session start (once/day) | `UserPromptSubmit` | `[QUORUM: session_start_required]` |
+| Before implementation write | SKILL.md pull-protocol | Discipline-enforced via `using-superpowers` |
+| Task completion | `PostToolUse: TodoWrite` | `[QUORUM: task-completed]` |
+| Memory/CLAUDE.md written | `PostToolUse: Write/Edit` | `[QUORUM: knowledge-source-updated]` |
+| Before git commit | `PreToolUse: Bash(git commit*)` | `[QUORUM: pre-commit]` + staged files |
+| Session end | `Stop` | `[QUORUM: N file(s) changed — reflect()?]` |
+
+**Files (all in quorum-mcp):**
+- `hooks/quorum-session-start.sh` · `quorum-stop.sh` · `quorum-pre-commit.sh` · `quorum-task-complete.sh` · `quorum-knowledge-source.sh`
+- `src/install/hooks.js` — safe `settings.json` merge (idempotent, `id`-keyed dedup)
+- `tests/install/hooks.test.js` — 4 unit tests for merge logic
+- `cli.js` — extend `install` with `--skip-hooks` option
+- `skill/SKILL.md` — ALWAYS invoke frontmatter + hook signal table + pull-protocol rule
+
+**Files (engram):**
+- `.gitignore` — add `.quorum-session`, `.quorum-reflected`, `.quorum-offline.log`
+
+**Blocked on:** BL-11 (gateway LLM endpoints must exist for session-start governance calls to function end-to-end)
+
+**Acceptance criteria:**
+- [ ] `npx @as-quorum/mcp install` installs skill + 5 hooks + wires `settings.json` atomically
+- [ ] Re-install is idempotent — no duplicate hook entries (verified by `hooks.test.js`)
+- [ ] All hooks are silent in projects without a `.quorum` file
+- [ ] Session-start fires once per calendar day (date dedup via `.quorum-session`)
+- [ ] Stop hook fires only when ≥3 files changed and `.quorum-reflected` absent
+- [ ] Pre-commit fires only when the bash command contains `git commit`
+- [ ] SKILL.md: `ALWAYS invoke` in frontmatter, hook signal table present, pull-protocol present
+- [ ] `.quorum-session` and `.quorum-reflected` in `.gitignore`
+- [ ] Verify `CLAUDE_TOOL_INPUT` / `CLAUDE_TOOL_OUTPUT` env var names against Claude Code docs before shipping
+
+---
+
 ### 🟡 BL-11 — Gateway LLM governance endpoints
 **Files (new):** `gateway/src/routes/governance.js` · `gateway/src/server.js`
 
@@ -374,6 +418,9 @@ Items resolved in reverse-chronological order.
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-07 | BL-11 priority P2→P1: MCP governance calls already routed to gateway (9066c8f) — endpoints missing = silent degradation | (backlog) |
+| 2026-05-07 | BL-13 added: SDLC hooks + skill integration — spec + plan in place, worktree started in quorum-mcp | (backlog) |
+| 2026-05-06 | quorum-mcp BL-10 complete (f37f560) — full OAuth round-trip live (gateway BL-12 + mcp client both done) | f37f560 |
 | 2026-05-04 | BL-01: `group_id` isolation bypass — unconditional overwrite in `graphiti.js` + 6 tests + DEPLOYMENT.md | pending commit |
 | 2026-05-03 | Per-package `CLAUDE.md` for `mcp/`, `gateway/`, `dashboard/` | `95e2cae` |
 | 2026-05-03 | OpenAPI 3.1 spec at `gateway/openapi.yaml` (~40 routes) | `95e2cae` |
