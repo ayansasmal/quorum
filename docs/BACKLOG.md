@@ -15,7 +15,7 @@
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | ✅ Done | `ARG GRAPHITI_SHA` + `git checkout` in `Dockerfile.graphiti`. Pinned to `c427615` (2026-05-07). Update manually when taking upstream changes. |
-| BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
+| BL-10 | `DEPLOYMENT.md` — component security model | Docs | ✅ Done | Full rewrite: two-party arch, OAuth 2.1 flow, engineer onboarding, secrets table, multi-team isolation. |
 | BL-11 | Gateway LLM governance endpoints | P1 | ✅ Done | `gateway/src/routes/governance.js` + `gateway/src/llm.js`. JWT-authenticated. OPENAI_API_KEY gateway-only. OpenAPI spec updated. |
 | BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
 | BL-13 | SDLC Hooks + Skill Integration | P2 | ✅ Done | 5 hook scripts + `hooks.js` + SKILL.md. Merged to quorum-mcp `prod`. 13 unit tests passing. |
@@ -247,6 +247,7 @@ Items resolved in reverse-chronological order.
 | 2026-05-08 | BL-06 dropped: gateway setInterval fragile on restart/scale-out; use external k8s CronJob calling existing `scripts/decay-confidence.js` | (backlog) |
 | 2026-05-08 | BL-07 narrowed to lite compose only: MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status; surface failures, don't hide them | (backlog) |
 | 2026-05-08 | BL-09 dropped: prompts moved to gateway as inlined template literals (BL-11); `src/prompts/*.md` in quorum-mcp now orphaned; response normalization too simple to unit-test | (backlog) |
+| 2026-05-08 | BL-10 ✅ Done: `docs/DEPLOYMENT.md` rewritten — two-party architecture, OAuth 2.1 engineer flow, updated env vars, secrets table, multi-team isolation enforcement chain | feat/dashboard |
 | 2026-05-08 | BL-11 ✅ Done: `gateway/src/routes/governance.js` + `gateway/src/llm.js` — 3 endpoints, JWT auth, OpenAI via native fetch, 503 when unconfigured | feat/dashboard |
 | 2026-05-07 | BL-11 priority P2→P1: MCP governance calls already routed to gateway (9066c8f) — endpoints missing = silent degradation | (backlog) |
 | 2026-05-06 | quorum-mcp BL-10 complete (f37f560) — full OAuth round-trip live (gateway BL-12 + mcp client both done) | f37f560 |
