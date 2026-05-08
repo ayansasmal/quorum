@@ -87,18 +87,15 @@ cp .env.example .env          # set OPENAI_API_KEY — the only required change
 
 ./scripts/setup.sh docker     # start stack, upload configs to S3, seed knowledge graph
 
-# Connect to Claude Code (replace path with your clone location)
-claude mcp add quorum -- node /path/to/quorum/src/server.js
-
-# Install the Quorum skill at user level — active in every project on your machine
-cp skill/SKILL.md ~/.claude/skills/quorum.md
+# Install the Quorum MCP server (separate package — installs skill + registers with Claude Code)
+npm install -g @as-quorum/mcp
+quorum install
 ```
 
 After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
 
 ```bash
-node cli.js audit verify      # verify audit chain integrity
-node cli.js history auth:token-strategy   # inspect seeded knowledge
+node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL + QUORUM_GITHUB_TOKEN)
 ```
 
 ---

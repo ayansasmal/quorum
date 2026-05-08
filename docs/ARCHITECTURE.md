@@ -45,7 +45,7 @@ The MCP server (`@as-quorum/mcp`, maintained in the `quorum-mcp` repo) hosts the
 
 ## Quorum Gateway
 
-The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fronts every shared backend. It is the single trust boundary between humans/agents and the data plane (Graphiti, PostgreSQL, S3). The MCP server, the Dashboard, and external automations all authenticate against the Gateway with ES256 JWTs.
+The Gateway (`gateway/src/server.js`) is an Express service on port 3001 that fronts every shared backend. It is the single trust boundary between humans/agents and the data plane (Graphiti, PostgreSQL, S3). The MCP server, the Dashboard, and external automations all authenticate against the Gateway with ES256 JWTs.
 
 ### API Surface
 

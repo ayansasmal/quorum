@@ -715,50 +715,34 @@ onEngineerFlagsLLMDecision(decision) {
 
 ## CI Pipeline
 
+The engram repo has two workflows. Constitutional, governance, and tool tests live in the `quorum-mcp` repo CI — those test MCP server code.
+
+**`test.yml`** — runs on push/PR to `main`/`prod`:
+
 ```yaml
-# .github/workflows/tests.yml
-
 jobs:
-  constitutional-tests:
-    name: Layer 1 — Constitutional Tests (blocking, never skip)
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:constitutional
-      - run: npm run coverage:constitutional  # must be 100%
-      - run: npm run audit:constitutional-bypass  # scans for bypass patterns
-
-  governance-tests:
-    name: Layer 2 — Governance Logic Tests
-    needs: constitutional-tests
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:governance
-
-  llm-tests:
-    name: Layer 3 — LLM Accuracy Tests
-    needs: governance-tests
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:llm:golden-dataset
-      - run: npm run test:llm:adversarial
-
-  meta-tests:
-    name: Meta — Test Suite Integrity
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:meta
-
-  # Ensures constitutional tests were never skipped
-  constitutional-guard:
-    name: Guard — Constitutional tests must not be skipped
-    needs: constitutional-tests
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail if constitutional tests were skipped
-        if: needs.constitutional-tests.result == 'skipped'
-        run: exit 1
+  gateway-tests:     # blocking — npm run test:gateway (tests/gateway/)
+  audit-scan:        # informational — npm run audit:scan-bypasses + audit:scan-harddeletes
+  coverage:          # full coverage report — needs gateway-tests
 ```
+
+**`test-gateway.yml`** — runs on push/PR to `feat/**`, `fix/**` that touches `gateway/**`:
+
+```yaml
+jobs:
+  gateway-tests:     # npm run test:gateway
+  gateway-build:     # Docker image build check (no push) — validates Dockerfile.gateway
+```
+
+**`build.yml`** — runs on push to `prod` only:
+
+```yaml
+jobs:
+  build-mcp:         # builds ghcr.io/{repo}:* from Dockerfile
+  build-gateway:     # builds ghcr.io/{repo}-gateway:* from Dockerfile.gateway
+```
+
+Constitutional and governance tests run in the **`quorum-mcp` repo CI**, not here.
 
 ---
 

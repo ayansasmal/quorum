@@ -58,7 +58,7 @@ graph TD
 - Governance: conflict detection (semantic + LLM), authority weighting, confidence decay, human-in-the-loop
 - Versioning: append-only, bidirectional audit↔version references, `triggered_by` on every write
 - Multi-project isolation via `group_id` scoping in every graph operation
-- Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema at `src/config/quorum.schema.json`
+- Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema served at `GET /schema/config` (Zod schema at `gateway/src/shared/config/schema.js`)
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
 - Local dev: Docker Compose + LocalStack (S3 + DynamoDB); `setup.sh docker clean --volumes` reliably wipes all data
 - OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
@@ -79,6 +79,8 @@ gateway/                ← @as-quorum/gateway (private, enterprise self-hosted)
     server.js           ← Gateway entry point (Express :3001)
     routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump · governance
     middleware/         ← verify-jwt · project · rate-limit
+    shared/             ← vendored copies of quorum-mcp shared modules (no npm dep)
+                           config/ · graph/ · audit/ · governance/
     keys.js · config-cache.js · ddb.js · errors.js
 
 dashboard/src/          ← React dashboard (private, enterprise self-hosted)
@@ -104,11 +106,11 @@ The constitutional test suite enforces all of these at 100% coverage:
 
 | Rule | Enforced in |
 |------|-------------|
-| No hard delete | `BLOCKED_METHODS` in `src/graph/client.js` |
-| Audit append-only | `updateEntry()` / `deleteEntry()` always throw in `src/audit/pipeline.js` |
-| Reason required (≥10 chars) | Tool layer validation in `src/tools/remember.js` and `src/tools/forget.js` |
-| No self-approval | `reviewer !== author` check in `src/tools/review.js` |
-| Claude writes always DRAFT | `author === 'claude'` forces DRAFT in `storeFirst()` |
+| No hard delete | `BLOCKED_METHODS` in `gateway/src/shared/graph/client.js` + `quorum-mcp/src/graph/client.js` |
+| Audit append-only | `updateEntry()` / `deleteEntry()` always throw in `gateway/src/shared/audit/secondary.js` |
+| Reason required (≥10 chars) | `gateway/src/shared/governance/constitutional.js` + MCP tool layer (`quorum-mcp`) |
+| No self-approval | `enforceNoSelfApproval()` in `gateway/src/shared/governance/constitutional.js` |
+| Claude writes always DRAFT | `author === 'claude'` forces DRAFT in `storeFirst()` — in `quorum-mcp` |
 | `triggered_by` always set | Schema enforcement — never null |
 | Atomic ACTIVE transition | Old version → SUPERSEDED and new → ACTIVE in one transaction |
 | Bidirectional audit↔version | Every version record carries `created_by_audit`; every audit entry carries `version_id` |
