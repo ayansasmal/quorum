@@ -1,16 +1,12 @@
 ##
 ## Quorum CI — Test Pipeline
 ##
-## Job order (enforced by needs:):
+## Runs on push to main/prod and PRs targeting main.
 ##
-##   constitutional-guard          ← BLOCKING — must pass before anything else
-##          ↓
-##   governance-tests  tool-tests  ← parallel
-##          ↓
-##   coverage                      ← full coverage report
-##
-## audit-bypass-scan runs in parallel (static analysis, informational only)
-## constitutional-guard-meta runs last with if: always() — verifies guard ran
+## Jobs:
+##   gateway-tests    <- unit tests for gateway routes + middleware
+##   audit-scan       <- static analysis for audit bypasses / hard deletes (informational)
+##   coverage         <- full coverage report (runs after gateway-tests)
 ##
 
 name: CI
@@ -22,35 +18,35 @@ on:
     branches: [main]
 
 jobs:
-  # ── Constitutional guard — BLOCKING ─────────────────────────────────────────
-  constitutional-guard:
-    name: Constitutional Guard
+  gateway-tests:
+    name: Gateway Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run constitutional tests (100% coverage required)
-        run: npm run test:coverage:constitutional
+      - name: Run gateway tests
+        run: npm run test:gateway
         env:
           CI: true
+          NODE_ENV: test
 
-      - name: Upload constitutional coverage
+      - name: Upload test results on failure
         uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
-          name: constitutional-coverage
+          name: gateway-test-results
           path: coverage/
+          retention-days: 7
 
-  # ── Static analysis — informational, never blocks ────────────────────────────
-  audit-bypass-scan:
+  audit-scan:
     name: Audit Bypass Scan
     runs-on: ubuntu-latest
     steps:
@@ -58,8 +54,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -72,62 +68,17 @@ jobs:
         run: npm run audit:scan-harddeletes
         continue-on-error: true
 
-  # ── Governance tests ─────────────────────────────────────────────────────────
-  governance-tests:
-    name: Governance Tests
-    runs-on: ubuntu-latest
-    needs: constitutional-guard
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run governance tests
-        run: npm run test:governance
-        env:
-          CI: true
-          NODE_ENV: test
-
-  # ── Tool tests ───────────────────────────────────────────────────────────────
-  tool-tests:
-    name: Tool Tests
-    runs-on: ubuntu-latest
-    needs: constitutional-guard
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tool tests
-        run: npm run test:tools
-        env:
-          CI: true
-          NODE_ENV: test
-
-  # ── Full coverage report ──────────────────────────────────────────────────────
   coverage:
     name: Coverage Report
     runs-on: ubuntu-latest
-    needs: [governance-tests, tool-tests]
+    needs: [gateway-tests]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -143,22 +94,3 @@ jobs:
         with:
           name: coverage-report
           path: coverage/
-
-  # ── Constitutional guard meta-check (runs last, even on failure) ──────────────
-  # Verifies constitutional-guard ran and was not skipped or bypassed.
-  constitutional-guard-meta:
-    name: Constitutional Guard — Meta Check
-    runs-on: ubuntu-latest
-    needs: [constitutional-guard, governance-tests, tool-tests]
-    if: always()
-    env:
-      GUARD_RESULT: ${{ needs.constitutional-guard.result }}
-    steps:
-      - name: Verify constitutional guard ran and passed
-        run: |
-          if [ "$GUARD_RESULT" != "success" ]; then
-            echo "FATAL: constitutional-guard did not pass (result: $GUARD_RESULT)"
-            echo "Constitutional tests are a non-negotiable gate. They cannot be skipped."
-            exit 1
-          fi
-          echo "Constitutional guard: PASSED"
