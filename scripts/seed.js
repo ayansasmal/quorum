@@ -1,8 +1,9 @@
 /**
  * Quorum seed data.
  *
- * Calls remember() tool directly (not via MCP) so the full audit trail,
- * governance pipeline, and version chain are created correctly.
+ * Writes knowledge entries directly to PostgreSQL using the gateway shared
+ * modules. Does not go through the MCP protocol. Full audit trail, version
+ * history, and status transitions are applied.
  *
  * Includes:
  *   - auth:token-strategy with 3 versions to demonstrate history CLI
@@ -18,8 +19,15 @@
  *   node scripts/seed.js --force    # clear and re-seed
  */
 
+import { createHash, randomUUID } from 'node:crypto'
 import pg from 'pg'
-import { handler as rememberHandler } from '../mcp/src/tools/remember.js'
+import {
+  getCurrentVersion,
+  getNextVersionNumber,
+  insertVersion,
+  transitionVersionStatus,
+} from '../gateway/src/shared/graph/queries.js'
+import { writeAuditEntry } from '../gateway/src/shared/audit/secondary.js'
 
 const FORCE = process.argv.includes('--force')
 
@@ -35,7 +43,6 @@ const pool = new pg.Pool({
 const SENTINEL = { topic: 'auth', key: 'token-strategy' }
 
 /**
- * Check whether seed data already exists.
  * @returns {Promise<boolean>}
  */
 async function isAlreadySeeded() {
@@ -48,10 +55,6 @@ async function isAlreadySeeded() {
   return rows.length > 0
 }
 
-/**
- * Remove all seed data so the seed can run again cleanly.
- * Only used with --force — never called in production.
- */
 async function clearSeedData() {
   const seedTopicKeys = [
     ['auth', 'token-strategy'],
@@ -78,40 +81,103 @@ async function clearSeedData() {
 }
 
 /**
- * Wrap rememberHandler with consistent logging.
- * @param {object} params
+ * Write a knowledge entry to PostgreSQL with version history and audit trail.
+ * Replicates core remember logic without MCP protocol overhead.
+ *
+ * @param {{ topic: string, key: string, content: string, author: string,
+ *            confidence?: number, reason?: string, entity_type?: string,
+ *            tags?: string[], project_id?: string }} params
  */
 async function remember(params) {
+  const {
+    topic,
+    key,
+    content,
+    author,
+    confidence = 0.7,
+    reason = 'seed data',
+    entity_type = 'Decision',
+    tags = [],
+    project_id = 'default',
+  } = params
+
   try {
-    const result = await rememberHandler(pool, params)
-    if (result?.status === 'conflict_detected') {
-      console.log(`  ⚠️  ${params.topic}:${params.key} → conflict detected (expected for demo)`)
-    } else {
-      console.log(`  ✓  ${params.topic}:${params.key} → ${result?.status ?? 'ok'} v${result?.version ?? '?'}`)
+    const contentHash = createHash('sha256').update(content).digest('hex')
+    const now = new Date().toISOString()
+    const triggeredBy = randomUUID()
+
+    const [nextVersion, active] = await Promise.all([
+      getNextVersionNumber(pool, topic, key, project_id),
+      getCurrentVersion(pool, topic, key, project_id),
+    ])
+
+    const record = await insertVersion(pool, {
+      topic,
+      key,
+      version: nextVersion,
+      status: 'ACTIVE',
+      content_hash: contentHash,
+      author,
+      author_role: 'unknown',
+      confidence,
+      starting_confidence: confidence,
+      created_at: now,
+      created_by_audit: triggeredBy,
+      triggered_by: triggeredBy,
+      conflict_id: null,
+      graphiti_episode_id: null,
+      supersedes_version: active?.version ?? null,
+      supersedes_reason: active ? reason : null,
+      superseded_by_version: null,
+      superseded_by_author: null,
+      superseded_at: null,
+      tags,
+      project_id,
+      entity_type,
+      summary: content.slice(0, 200),
+    })
+
+    if (active) {
+      await transitionVersionStatus(pool, topic, key, active.version, 'SUPERSEDED', {
+        supersededByVersion: nextVersion,
+        supersededByAuthor: author,
+      })
     }
-    return result
+
+    await writeAuditEntry(pool, {
+      id: triggeredBy,
+      topic,
+      key,
+      version: nextVersion,
+      action: 'remember',
+      author,
+      content_hash: contentHash,
+      details: { reason, tags, entity_type },
+      version_id: record.id,
+    })
+
+    const status = active ? `v${active.version} → v${nextVersion}` : `v${nextVersion} (new)`
+    console.log(`  ✓  ${topic}:${key} → ${status}`)
   } catch (err) {
-    console.error(`  ✗  ${params.topic}:${params.key} → ${err.message}`)
-    return null
+    console.error(`  ✗  ${topic}:${key} → ${err.message}`)
   }
 }
 
 async function seed() {
   console.log('\n── Seeding Quorum knowledge ─────────────────────────────\n')
 
-  // ── Idempotency check ────────────────────────────────────────────────────────
   if (await isAlreadySeeded()) {
     if (!FORCE) {
-      console.log('  ℹ️  Already seeded — skipping. Pass --force to re-seed.\n')
+      console.log('  Already seeded — skipping. Pass --force to re-seed.\n')
       console.log('── Seed skipped ──────────────────────────────────────────\n')
       return
     }
-    console.log('  🗑️  --force: clearing existing seed data...')
+    console.log('  --force: clearing existing seed data...')
     await clearSeedData()
-    console.log('  ✓  Cleared. Re-seeding...\n')
+    console.log('  Cleared. Re-seeding...\n')
   }
 
-  // ── auth:token-strategy — 3 versions to demonstrate history CLI ─────────────
+  // auth:token-strategy — 3 versions to demonstrate history CLI
   console.log('auth domain...')
 
   await remember({
@@ -166,7 +232,6 @@ async function seed() {
     tags: ['auth', 'rate-limiting', 'api-gateway'],
   })
 
-  // ── api domain ─────────────────────────────────────────────────────────────
   console.log('api domain...')
 
   await remember({
@@ -199,7 +264,6 @@ async function seed() {
     tags: ['api', 'pagination', 'cursor'],
   })
 
-  // ── db domain ──────────────────────────────────────────────────────────────
   console.log('db domain...')
 
   await remember({
@@ -232,7 +296,6 @@ async function seed() {
     tags: ['db', 'naming', 'conventions'],
   })
 
-  // ── infra domain ───────────────────────────────────────────────────────────
   console.log('infra domain...')
 
   await remember({
@@ -255,7 +318,6 @@ async function seed() {
     tags: ['infra', 'retry', 'circuit-breaker', 'resilience'],
   })
 
-  // ── testing domain ─────────────────────────────────────────────────────────
   console.log('testing domain...')
 
   await remember({
@@ -278,9 +340,8 @@ async function seed() {
     tags: ['testing', 'integration', 'postgresql', 'no-mocks'],
   })
 
-  // ── Deliberate contradiction for conflict detection demo ───────────────────
-  // db:connection-pooling says pool size 10.
-  // This new entry contradicts it for high-concurrency scenarios.
+  // Deliberate contradiction for conflict detection demo:
+  // db:connection-pooling says pool size 10; this says 50 for batch services.
   console.log('\nAdding deliberate contradiction (conflict detection demo)...')
 
   await remember({
@@ -295,9 +356,8 @@ async function seed() {
 
   console.log('\n── Seed complete ─────────────────────────────────────────')
   console.log('\nTo verify:')
-  console.log('  node cli.js history auth:token-strategy')
-  console.log('  node cli.js audit verify')
-  console.log('  node cli.js audit stats\n')
+  console.log('  node scripts/audit-cli.js stats')
+  console.log('  node scripts/audit-cli.js lineage auth token-strategy\n')
 }
 
 seed()
