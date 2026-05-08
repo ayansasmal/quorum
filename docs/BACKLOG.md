@@ -15,8 +15,6 @@
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | ✅ Done | `ARG GRAPHITI_SHA` + `git checkout` in `Dockerfile.graphiti`. Pinned to `c427615` (2026-05-07). Update manually when taking upstream changes. |
-| BL-07 | Graphiti lite compose | P5 | 🟡 To Do | `docker-compose.lite.yml` without Graphiti/FalkorDB for platform team evaluation. MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status. |
-| BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
 | BL-11 | Gateway LLM governance endpoints | P1 | ✅ Done | `gateway/src/routes/governance.js` + `gateway/src/llm.js`. JWT-authenticated. OPENAI_API_KEY gateway-only. OpenAPI spec updated. |
 | BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
@@ -89,45 +87,6 @@ vulnerability is flagged. The upgrade path is documented in a comment in the Doc
 **Acceptance criteria:**
 - [x] `Dockerfile.graphiti` pins a specific Graphiti commit SHA (`c427615`, 2026-05-07)
 - [x] Upgrade path documented in a comment above the `ARG` line
-
----
-
-### 🟡 BL-07 — Graphiti lite compose
-**Files:** `docker-compose.lite.yml` · `docs/QUICKSTART.md`
-
-6 Docker containers is too much for platform teams evaluating Quorum. A lite compose drops
-Graphiti and FalkorDB so teams can see the gateway, dashboard, and PostgreSQL running in
-under 30 seconds before committing to the full stack.
-
-`docker-compose.lite.yml` — copy of `docker-compose.yml` with `graphiti` and `falkordb` services
-removed. Add "Try without the full stack" section to `QUICKSTART.md`.
-
-Note: MCP `graphitiAvailable` flag dropped — gateway `/health` already reports Graphiti status
-clearly. Surface the failure, don't hide it behind a degraded flag.
-
-**Acceptance criteria:**
-- [ ] `docker-compose.lite.yml` starts gateway + dashboard + PostgreSQL only
-- [ ] `docs/QUICKSTART.md` has a "Lite evaluation" section pointing to this file
-
----
-
-### 🟡 BL-08 — `ingest_pr()` MCP tool
-**Files (new):** `mcp/src/pr/github.js` · `mcp/src/pr/extractor.js` · `mcp/src/tools/ingest_pr.js`
-
-```
-ingest_pr({ pr_url: "https://github.com/org/repo/pull/123", dry_run: true })
-```
-
-- `dry_run: true` (default) — returns would-be DRAFTs for review, stores nothing
-- `dry_run: false` — stores via `remember()` with `triggered_by: 'ingest_pr'`
-- If a `principal_architect` approved the PR, elevate extracted confidence +0.10
-- GitHub Action for automatic ingest deferred until extraction quality validated
-
-**Acceptance criteria:**
-- [ ] `dry_run: true` returns extracted items without storing
-- [ ] `dry_run: false` stores via the normal `remember()` pipeline
-- [ ] Principal architect approval elevates confidence
-- [ ] Works with `GITHUB_TOKEN` env for private repos
 
 ---
 
@@ -265,7 +224,7 @@ JWT-authenticated (`verifyJwt`). Prompts are inlined in the route — gateway is
 | Reflect Activity dashboard panel | Build after `reflect()` usage data exists |
 | Helm CronJob for decay | Use external k8s CronJob calling `scripts/decay-confidence.js` |
 | PENDING_CONFLICT_CHECK dashboard badge | Deferred to v1.0 |
-| GitHub Action for PR ingest | After BL-08 manual quality validated |
+| GitHub Action for PR ingest | Dropped — SKILL.md + hooks already capture PR knowledge via reflect() |
 | Notifications (Slack, webhook) | Skipped — explicit product decision |
 | LLM accuracy CI gate | Needs real usage data for golden dataset |
 | Hosted docs site | After core features stable |
@@ -281,6 +240,8 @@ Items resolved in reverse-chronological order.
 |------|------|--------|
 | 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
 | 2026-05-07 | BL-13 ✅ Done: merged to quorum-mcp prod — 5 hooks, hooks.js, SKILL.md, 13 tests passing | feat/sdlc-hooks |
+| 2026-05-08 | BL-07 dropped: lite compose is platform-team infra — they compose their own setup; a generic lite file would be in their way | (backlog) |
+| 2026-05-08 | BL-08 dropped: SKILL.md + hooks already capture PR knowledge via reflect() and remember() — dedicated tool is redundant | (backlog) |
 | 2026-05-08 | BL-05 ✅ Done: `Dockerfile.graphiti` pins `GRAPHITI_SHA=c427615` — reproducible builds, manual upgrade path documented in comment | feat/dashboard |
 | 2026-05-08 | BL-04 dropped: clear error messages already actionable; LLM can guide engineer to retry — automatic retry adds complexity without value | (backlog) |
 | 2026-05-08 | BL-06 dropped: gateway setInterval fragile on restart/scale-out; use external k8s CronJob calling existing `scripts/decay-confidence.js` | (backlog) |
