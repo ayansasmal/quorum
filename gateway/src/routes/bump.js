@@ -29,7 +29,7 @@ import {
   getLastBump,
   insertBump,
   updateConfidence,
-} from '@as-quorum/mcp/graph/queries'
+} from '../shared/graph/queries.js'
 
 const router = Router()
 

@@ -149,9 +149,10 @@ services:
         condition: service_healthy
 
   # Quorum MCP — runs on engineer machines via Claude Code MCP config, not Docker.
-  # Kept here for local integration testing of the full central stack.
-  # In production, engineers run this locally: node src/server.js
+  # Opt-in only: docker compose --profile mcp up
+  # Requires @as-quorum/mcp to be published to npm.
   quorum:
+    profiles: ["mcp"]
     build: .
     ports:
       - "8000:8000"

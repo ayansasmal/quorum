@@ -44,13 +44,13 @@ import {
   transitionVersionStatus,
   insertVersionAuditLink,
   getVersionsByTag,
-} from '@as-quorum/mcp/graph/queries'
+} from '../shared/graph/queries.js'
 import {
   writeAuditEntry,
   getAuditEntry,
   getAllEntries,
   countEntries,
-} from '@as-quorum/mcp/audit/secondary'
+} from '../shared/audit/secondary.js'
 
 const router = Router()
 

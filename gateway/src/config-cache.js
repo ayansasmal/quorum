@@ -10,7 +10,7 @@
  */
 
 import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
-import { QuorumConfigSchema } from '@as-quorum/mcp/config/schema'
+import { QuorumConfigSchema } from './shared/config/schema.js'
 import { getConfig as ddbGetConfig, putConfig as ddbPutConfig, syncProjectMembers as ddbSyncProjectMembers } from './ddb.js'
 
 const TTL_MS = 5 * 60 * 1000 // 5 minutes

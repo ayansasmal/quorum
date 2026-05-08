@@ -17,7 +17,7 @@
 
 import { Router } from 'express'
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
-import { QuorumConfigSchema } from '@as-quorum/mcp/config/schema'
+import { QuorumConfigSchema } from '../shared/config/schema.js'
 import { putConfig, syncProjectMembers } from '../ddb.js'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 

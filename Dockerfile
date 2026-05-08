@@ -1,28 +1,18 @@
-# ── Builder stage ──────────────────────────────────────────────
-FROM node:20-alpine AS builder
+# Quorum MCP Server — Dockerfile
+#
+# Used only for local integration testing of the full central stack.
+# In production, engineers run the MCP server locally via Claude Code:
+#   claude mcp add --scope user quorum -- node <path>/dist/server.js
 
-WORKDIR /app
-
-COPY package.json package-lock.json* ./
-COPY mcp/package.json ./mcp/
-COPY gateway/package.json ./gateway/
-COPY dashboard/package.json ./dashboard/
-RUN npm ci --only=production --workspaces --include-workspace-root
-
-# ── Runtime stage ──────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:20-alpine
 
 RUN apk add --no-cache curl
 
-WORKDIR /app
-
-COPY --from=builder /app/node_modules ./node_modules
-COPY package.json ./
-COPY mcp/ ./mcp/
+RUN npm install -g @as-quorum/mcp
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["node", "mcp/src/server.js"]
+CMD ["quorum-mcp"]

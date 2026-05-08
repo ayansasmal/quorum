@@ -235,9 +235,10 @@ cmd_docker() {
 }
 
 # ── docker rebuild ────────────────────────────────────────────────────────────
-# Rebuild all custom images (gateway, graphiti, quorum, dashboard) from scratch,
+# Rebuild all custom images (gateway, graphiti, dashboard) from scratch,
 # then restart the stack. Skips LocalStack — existing data is preserved.
 # Use after Dockerfile or source code changes that don't hot-reload.
+# The quorum MCP service is opt-in (profile: mcp) and excluded from default builds.
 
 cmd_docker_rebuild() {
   header "Quorum — Rebuild Docker Images"
@@ -251,7 +252,7 @@ cmd_docker_rebuild() {
   docker compose down --remove-orphans 2>/dev/null || true
 
   info "Rebuilding images without cache..."
-  docker compose build --no-cache --parallel gateway quorum-dashboard quorum graphiti
+  docker compose build --no-cache --parallel gateway quorum-dashboard graphiti
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."

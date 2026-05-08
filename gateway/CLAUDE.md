@@ -41,6 +41,14 @@ src/
     verify-jwt.js         — ES256 JWT verification, attaches req.user
     project.js            — Injects project scope from JWT
     rate-limit.js         — Rate limiting middleware
+  shared/                 — Vendored copies of quorum-mcp shared modules (no npm dep)
+    config/schema.js      — QuorumConfigSchema (zod)
+    graph/schema.js       — KnowledgeStatus enum
+    graph/queries.js      — Shared SQL query functions (pass real pg.Pool)
+    graph/client.js       — Graphiti client (searchNodes, etc.)
+    audit/chain.js        — SHA256 tamper-evident chain
+    audit/secondary.js    — writeAuditEntry (pass real pg.Pool)
+    governance/constitutional.js — Constitutional enforcement
   keys.js                 — ES256 key generation/loading
   config-cache.js         — In-memory config cache
   ddb.js                  — DynamoDB client (quorum-configs + quorum-user-projects tables)
@@ -64,16 +72,21 @@ npm run docker:start
 
 ---
 
-## Workspace Import
+## Shared Modules (`src/shared/`)
 
-Imports from `@as-quorum/mcp` via npm workspaces:
-- `@as-quorum/mcp/config/schema` — QuorumConfigSchema
-- `@as-quorum/mcp/graph/queries` — shared SQL query functions (used with real pg.Pool)
-- `@as-quorum/mcp/graph/client` — Graphiti client
-- `@as-quorum/mcp/audit/secondary` — Audit log functions (used with real pg.Pool)
-- `@as-quorum/mcp/governance/constitutional` — Constitutional enforcement
+The gateway vendors copies of shared logic from `quorum-mcp` directly under `src/shared/`. There is **no npm dependency** on `@as-quorum/mcp` — this decouples the Docker build from the MCP repo entirely.
 
-When calling functions from `graph/queries` and `audit/secondary`, always pass a real `pg.Pool`. The duck-type guards in those files will fall through to the SQL path.
+When either repo changes shared logic (queries, audit, constitutional rules), the files must be manually synced.
+
+| File | Purpose |
+|------|---------|
+| `config/schema.js` | QuorumConfigSchema (zod) |
+| `graph/schema.js` | KnowledgeStatus enum |
+| `graph/queries.js` | SQL query helpers — always pass a real `pg.Pool` |
+| `graph/client.js` | Graphiti HTTP client (`searchNodes`, etc.) |
+| `audit/chain.js` | SHA256 tamper-evident chain helpers |
+| `audit/secondary.js` | `writeAuditEntry` — always pass a real `pg.Pool` |
+| `governance/constitutional.js` | Constitutional enforcement (self-approval, reason checks) |
 
 ---
 
