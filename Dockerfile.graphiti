@@ -21,10 +21,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl && \
 
 WORKDIR /app
 
-# Sparse-clone only the mcp_server directory to keep the image small
-RUN git clone --depth 1 --filter=blob:none --sparse \
+# Pinned Graphiti commit SHA — update this when taking upstream changes.
+# To upgrade: check https://github.com/getzep/graphiti/commits/main,
+# pick a commit, test locally, then update GRAPHITI_SHA here.
+ARG GRAPHITI_SHA=c427615044678f4bde026745d8d28a16504868c5
+
+# Sparse-clone only the mcp_server directory to keep the image small,
+# then checkout the pinned SHA so builds are reproducible.
+RUN git clone --filter=blob:none --sparse \
       https://github.com/getzep/graphiti.git /tmp/graphiti && \
     cd /tmp/graphiti && \
+    git checkout "${GRAPHITI_SHA}" && \
     git sparse-checkout set mcp_server && \
     mv mcp_server /app/ && \
     rm -rf /tmp/graphiti

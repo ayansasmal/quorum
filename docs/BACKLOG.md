@@ -14,7 +14,7 @@
 | BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | ✅ Done | Conditional guard → unconditional overwrite. See detail below. |
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
-| BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | 🟡 To Do | Add `ARG GRAPHITI_REF` + Dependabot rule. |
+| BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | ✅ Done | `ARG GRAPHITI_SHA` + `git checkout` in `Dockerfile.graphiti`. Pinned to `c427615` (2026-05-07). Update manually when taking upstream changes. |
 | BL-07 | Graphiti lite compose | P5 | 🟡 To Do | `docker-compose.lite.yml` without Graphiti/FalkorDB for platform team evaluation. MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
@@ -79,32 +79,16 @@ Use `getGatewayClient()` after loading `.quorum` file defaults at CLI startup.
 
 ---
 
-### 🟡 BL-05 — Pin Graphiti git SHA in Dockerfile
-**Files:** `Dockerfile.graphiti` · `.github/dependabot.yml`
+### ✅ BL-05 — Pin Graphiti git SHA in Dockerfile
+**File:** `Dockerfile.graphiti`
 
-```dockerfile
-# In Dockerfile.graphiti — replace branch with pinned SHA
-ARG GRAPHITI_REF=<commit-sha>
-# To upgrade: find the desired commit at https://github.com/getzep/graphiti
-# and update GRAPHITI_REF here.
-```
-
-Add `.github/dependabot.yml`:
-```yaml
-version: 2
-updates:
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-```
-
-No GHCR image publishing — that's a maintenance obligation not worth taking on yet.
+`ARG GRAPHITI_SHA` + `git checkout "${GRAPHITI_SHA}"` makes builds reproducible.
+No automation — update the SHA manually when taking upstream changes or when a
+vulnerability is flagged. The upgrade path is documented in a comment in the Dockerfile.
 
 **Acceptance criteria:**
-- [ ] `Dockerfile.graphiti` pins a specific Graphiti commit SHA
-- [ ] Dependabot rule proposes SHA bump PRs
-- [ ] Upgrade path documented in a comment
+- [x] `Dockerfile.graphiti` pins a specific Graphiti commit SHA (`c427615`, 2026-05-07)
+- [x] Upgrade path documented in a comment above the `ARG` line
 
 ---
 
@@ -297,6 +281,7 @@ Items resolved in reverse-chronological order.
 |------|------|--------|
 | 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
 | 2026-05-07 | BL-13 ✅ Done: merged to quorum-mcp prod — 5 hooks, hooks.js, SKILL.md, 13 tests passing | feat/sdlc-hooks |
+| 2026-05-08 | BL-05 ✅ Done: `Dockerfile.graphiti` pins `GRAPHITI_SHA=c427615` — reproducible builds, manual upgrade path documented in comment | feat/dashboard |
 | 2026-05-08 | BL-04 dropped: clear error messages already actionable; LLM can guide engineer to retry — automatic retry adds complexity without value | (backlog) |
 | 2026-05-08 | BL-06 dropped: gateway setInterval fragile on restart/scale-out; use external k8s CronJob calling existing `scripts/decay-confidence.js` | (backlog) |
 | 2026-05-08 | BL-07 narrowed to lite compose only: MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status; surface failures, don't hide them | (backlog) |
