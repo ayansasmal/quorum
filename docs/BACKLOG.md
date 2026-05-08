@@ -14,12 +14,9 @@
 | BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | ✅ Done | Conditional guard → unconditional overwrite. See detail below. |
 | BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | ✅ Done | `mcp/` deleted; `@as-quorum/mcp` from `file:../../quorum-mcp`; `scripts/audit-cli.js` created; tests migrated to quorum-mcp. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added before `/audit/:id` in `gateway/src/routes/pg.js`. Used by `audit-cli lineage`. |
-| BL-04 | LLM retry + `reflect()` fallback | P3 | 🟡 To Do | Retry wrapper on gateway governance HTTP calls + `reflect()` fallback when extraction returns []. Startup env check dropped — MCP has no OPENAI_API_KEY dep. |
 | BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | 🟡 To Do | Add `ARG GRAPHITI_REF` + Dependabot rule. |
-| BL-06 | Confidence decay automation in gateway | P4 | 🟡 To Do | `setInterval` in gateway process + `GET /admin/decay/status`. |
-| BL-07 | Graphiti graceful degradation + lite compose | P5 | 🟡 To Do | lite compose = engram (this repo); `graphitiAvailable` flag = quorum-mcp. Unblocks BL-03. |
+| BL-07 | Graphiti lite compose | P5 | 🟡 To Do | `docker-compose.lite.yml` without Graphiti/FalkorDB for platform team evaluation. MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
-| BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
 | BL-11 | Gateway LLM governance endpoints | P1 | ✅ Done | `gateway/src/routes/governance.js` + `gateway/src/llm.js`. JWT-authenticated. OPENAI_API_KEY gateway-only. OpenAPI spec updated. |
 | BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
@@ -82,33 +79,6 @@ Use `getGatewayClient()` after loading `.quorum` file defaults at CLI startup.
 
 ---
 
-### 🟡 BL-04 — LLM retry + `reflect()` fallback
-**Files:** `src/governance/conflict.js` · `src/tools/reflect.js`
-
-> **Scope updated 2026-05-07:** `OPENAI_API_KEY` was removed from quorum-mcp (9066c8f).
-> All LLM calls now route through gateway HTTP. Startup env check no longer applies.
-
-Two independent changes, one commit:
-
-**1. Retry wrapper** (`conflict.js`)
-Wrap `gw._post('/governance/detect-conflict')` (and `/governance/enrich`, `/governance/extract`)
-with 3-attempt exponential backoff (200ms → 400ms → 800ms). Covers all three governance call sites.
-Requires BL-11 gateway endpoints to be live for retries to have effect.
-
-**2. `reflect()` fallback** (`reflect.js`)
-When `extractKnowledge()` returns `[]` (gateway unavailable or extraction error), store the raw
-task summary as a single DRAFT observation:
-```js
-{ confidence: 0.35, entity_type: 'observation', content: taskSummary, tags: ['unextracted'] }
-```
-The `unextracted` tag makes it easy to find and re-process later.
-
-**Acceptance criteria:**
-- [ ] Transient gateway errors on governance endpoints retried up to 3 times with backoff
-- [ ] `reflect()` always stores something even when gateway extraction fails
-
----
-
 ### 🟡 BL-05 — Pin Graphiti git SHA in Dockerfile
 **Files:** `Dockerfile.graphiti` · `.github/dependabot.yml`
 
@@ -138,68 +108,22 @@ No GHCR image publishing — that's a maintenance obligation not worth taking on
 
 ---
 
-### 🟡 BL-06 — Confidence decay automation in gateway
-**Files:** `gateway/src/server.js` · `gateway/src/routes/admin.js` · `scripts/decay-confidence.js`
+### 🟡 BL-07 — Graphiti lite compose
+**Files:** `docker-compose.lite.yml` · `docs/QUICKSTART.md`
 
-`npm run job:decay` exists but must be run manually. No new container needed — the gateway is always running.
+6 Docker containers is too much for platform teams evaluating Quorum. A lite compose drops
+Graphiti and FalkorDB so teams can see the gateway, dashboard, and PostgreSQL running in
+under 30 seconds before committing to the full stack.
 
-```js
-// gateway/src/server.js — on startup
-const DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000  // check daily
-async function maybeRunDecay() {
-  const lastRun = await getLastDecayTimestamp()
-  if (Date.now() - lastRun > 7 * 24 * 60 * 60 * 1000) {
-    await runDecay()
-    await setLastDecayTimestamp(Date.now())
-  }
-}
-maybeRunDecay()
-setInterval(maybeRunDecay, DECAY_INTERVAL_MS)
-```
+`docker-compose.lite.yml` — copy of `docker-compose.yml` with `graphiti` and `falkordb` services
+removed. Add "Try without the full stack" section to `QUICKSTART.md`.
 
-Expose `GET /admin/decay/status` → `{ last_run, nodes_decayed, confidence_distribution }`.
+Note: MCP `graphitiAvailable` flag dropped — gateway `/health` already reports Graphiti status
+clearly. Surface the failure, don't hide it behind a degraded flag.
 
 **Acceptance criteria:**
-- [ ] Decay runs automatically if 7 days have elapsed since last run
-- [ ] `GET /admin/decay/status` returns last run time and stats
-- [ ] Decay run logged: `[Quorum] Decay run: N nodes updated`
-- [ ] K8s CronJob manifest deferred to v1.0
-
----
-
-### 🟡 BL-07 — Graphiti graceful degradation + lite compose
-**Files:** `mcp/src/graph/client.js` · `docker-compose.lite.yml` · `docs/QUICKSTART.md`
-
-6 Docker containers is too much for evaluation. No mock — just graceful degradation:
-
-```js
-// mcp/src/graph/client.js
-let graphitiAvailable = false
-
-export async function ping() {
-  try {
-    const res = await fetch(`${GRAPHITI_URL}/health`, { signal: AbortSignal.timeout(2000) })
-    graphitiAvailable = res.ok
-  } catch {
-    graphitiAvailable = false
-  }
-  return graphitiAvailable
-}
-
-// All search/graph functions check the flag first
-export async function searchNodes(query, groupId) {
-  if (!graphitiAvailable) return { results: [], degraded: true }
-  // ... existing code
-}
-```
-
-`docker-compose.lite.yml` — copy of `docker-compose.yml` with `graphiti` and `falkordb`
-services removed. Add "Try without the full stack" section to QUICKSTART.md.
-
-**Acceptance criteria:**
-- [ ] Server starts and tools work when Graphiti is unavailable
-- [ ] `search()` returns `degraded: true` instead of throwing
-- [ ] `docker-compose.lite.yml` spins up in under 30 seconds
+- [ ] `docker-compose.lite.yml` starts gateway + dashboard + PostgreSQL only
+- [ ] `docs/QUICKSTART.md` has a "Lite evaluation" section pointing to this file
 
 ---
 
@@ -220,25 +144,6 @@ ingest_pr({ pr_url: "https://github.com/org/repo/pull/123", dry_run: true })
 - [ ] `dry_run: false` stores via the normal `remember()` pipeline
 - [ ] Principal architect approval elevates confidence
 - [ ] Works with `GITHUB_TOKEN` env for private repos
-
----
-
-### 🟡 BL-09 — Prompt rendering unit tests
-**Files:** `tests/governance/prompt-rendering.test.js` · `scripts/validate-prompts.js`
-
-Three LLM prompts live in `mcp/src/prompts/` and are editable. Tests cover the
-deterministic parts (rendering, parsing) — not LLM output quality.
-
-1. Unit-test: `buildConflictPrompt(node1, node2)` produces expected string
-2. Unit-test: LLM response parser handles all shapes (object, array, null, malformed JSON)
-3. `scripts/validate-prompts.js` — 5–10 labelled fixture cases, run manually before a model upgrade
-
-Full TP/FP accuracy gate with golden dataset is a v1.0 concern.
-
-**Acceptance criteria:**
-- [ ] Prompt rendering functions have unit tests
-- [ ] Parser handles malformed LLM output without throwing
-- [ ] Manual validation script exists and is documented in CONTRIBUTING.md
 
 ---
 
@@ -374,8 +279,8 @@ JWT-authenticated (`verifyJwt`). Prompts are inlined in the route — gateway is
 | Item | Reason |
 |------|--------|
 | Reflect Activity dashboard panel | Build after `reflect()` usage data exists |
-| Helm CronJob for decay | After gateway setInterval decay is proven (BL-06) |
-| PENDING_CONFLICT_CHECK dashboard badge | Needs BL-06 first |
+| Helm CronJob for decay | Use external k8s CronJob calling `scripts/decay-confidence.js` |
+| PENDING_CONFLICT_CHECK dashboard badge | Deferred to v1.0 |
 | GitHub Action for PR ingest | After BL-08 manual quality validated |
 | Notifications (Slack, webhook) | Skipped — explicit product decision |
 | LLM accuracy CI gate | Needs real usage data for golden dataset |
@@ -392,6 +297,10 @@ Items resolved in reverse-chronological order.
 |------|------|--------|
 | 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
 | 2026-05-07 | BL-13 ✅ Done: merged to quorum-mcp prod — 5 hooks, hooks.js, SKILL.md, 13 tests passing | feat/sdlc-hooks |
+| 2026-05-08 | BL-04 dropped: clear error messages already actionable; LLM can guide engineer to retry — automatic retry adds complexity without value | (backlog) |
+| 2026-05-08 | BL-06 dropped: gateway setInterval fragile on restart/scale-out; use external k8s CronJob calling existing `scripts/decay-confidence.js` | (backlog) |
+| 2026-05-08 | BL-07 narrowed to lite compose only: MCP `graphitiAvailable` flag dropped — gateway `/health` already surfaces Graphiti status; surface failures, don't hide them | (backlog) |
+| 2026-05-08 | BL-09 dropped: prompts moved to gateway as inlined template literals (BL-11); `src/prompts/*.md` in quorum-mcp now orphaned; response normalization too simple to unit-test | (backlog) |
 | 2026-05-08 | BL-11 ✅ Done: `gateway/src/routes/governance.js` + `gateway/src/llm.js` — 3 endpoints, JWT auth, OpenAI via native fetch, 503 when unconfigured | feat/dashboard |
 | 2026-05-07 | BL-11 priority P2→P1: MCP governance calls already routed to gateway (9066c8f) — endpoints missing = silent degradation | (backlog) |
 | 2026-05-06 | quorum-mcp BL-10 complete (f37f560) — full OAuth round-trip live (gateway BL-12 + mcp client both done) | f37f560 |
