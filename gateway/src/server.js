@@ -37,6 +37,9 @@
  *   POST /api/bump/:topic/:key          — dashboard: confidence bump (JWT auth)
  *   POST /sync/configs                  — trigger full S3→DDB sync (sync token or principal_architect JWT)
  *   GET  /schema/config                 — quorum.config.schema.json for editor validation (no auth)
+ *   POST /governance/detect-conflict    — LLM contradiction check between two knowledge nodes (JWT auth)
+ *   POST /governance/enrich             — LLM reviewer brief for a confirmed conflict (JWT auth)
+ *   POST /governance/extract            — LLM knowledge extraction from a task summary (JWT auth)
  *   GET  /health                        — health check
  */
 
@@ -56,6 +59,7 @@ import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
 import syncRoutes, { syncAllConfigs } from './routes/sync.js'
 import schemaRoutes from './routes/schema.js'
+import governanceRoutes from './routes/governance.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
 import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
@@ -108,6 +112,8 @@ app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) //
 app.use('/sync',                              syncRoutes)
 // Schema endpoint — public, no auth (editor validation + autocomplete)
 app.use('/schema',                            schemaRoutes)
+// Governance LLM endpoints — JWT auth (MCP GatewayClient sends Bearer token)
+app.use('/governance',                        governanceRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 

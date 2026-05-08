@@ -1355,6 +1355,127 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  # Governance LLM — /governance
+
+  /governance/detect-conflict:
+    post:
+      tags: [Governance]
+      summary: LLM contradiction check between two knowledge nodes
+      description: |
+        Asks the gateway LLM whether two pieces of engineering knowledge contradict each other.
+        Called by the MCP `remember()` tool during conflict detection.
+        Returns `contradicts: false` on uncertainty (conservative bias).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [existing, incoming]
+              properties:
+                existing: { type: string, description: Existing knowledge node content }
+                incoming: { type: string, description: Incoming knowledge node content }
+      responses:
+        '200':
+          description: Contradiction analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contradicts:      { type: boolean }
+                  reason:           { type: string }
+                  possible_split:   { type: boolean }
+                  split_suggestion: { type: string, nullable: true }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /governance/enrich:
+    post:
+      tags: [Governance]
+      summary: LLM reviewer brief for a confirmed conflict
+      description: |
+        Generates a structured analysis brief to help a human reviewer decide between
+        two conflicting knowledge nodes. Called at conflict-creation time so reviewers
+        get instant analysis without waiting for an LLM call during review.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [existing, incoming, conflict_reason]
+              properties:
+                existing:         { type: string }
+                incoming:         { type: string }
+                conflict_reason:  { type: string }
+                possible_split:   { type: boolean, default: false }
+                split_suggestion: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Reviewer brief
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis:               { type: string }
+                  risks_if_approved:      { type: array, items: { type: string } }
+                  questions_for_reviewer: { type: array, items: { type: string } }
+                  existing_rationale:     { type: string, nullable: true }
+                  possible_split:         { type: boolean }
+                  split_suggestion:       { type: string, nullable: true }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /governance/extract:
+    post:
+      tags: [Governance]
+      summary: LLM knowledge extraction from a completed task summary
+      description: |
+        Extracts reusable, team-specific engineering knowledge from a task summary.
+        Called by the MCP `reflect()` tool. Returns 0–3 items; empty array is valid
+        when the task contains nothing worth extracting.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_summary]
+              properties:
+                task_summary:   { type: string }
+                decisions_made: { type: array, items: { type: string }, default: [] }
+                patterns_used:  { type: array, items: { type: string }, default: [] }
+      responses:
+        '200':
+          description: Extracted knowledge items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    maxItems: 3
+                    items:
+                      type: object
+                      properties:
+                        topic:       { type: string }
+                        key:         { type: string }
+                        content:     { type: string }
+                        entity_type: { type: string, enum: [Decision, Pattern, Constraint, Runbook, Requirement] }
+                        confidence:  { type: number, enum: [0.35, 0.55, 0.75] }
+                        mode:        { type: string, enum: [echoing, extracting, generalising] }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
 tags:
   - name: Health
     description: Gateway health check
@@ -1376,3 +1497,5 @@ tags:
     description: Confidence bump operations
   - name: Admin
     description: Administrative operations (sync, config management)
+  - name: Governance
+    description: LLM-powered governance — conflict detection, reviewer enrichment, knowledge extraction

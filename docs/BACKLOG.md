@@ -21,7 +21,7 @@
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-10 | `DEPLOYMENT.md` — component security model | Docs | 🟡 To Do | ~15 min. Direct mode is gone; document current single-path architecture. |
-| BL-11 | Gateway LLM governance endpoints | P1 | 🟡 To Do | `POST /governance/detect-conflict · /governance/enrich · /governance/extract`. ⚠️ MCP already routes governance calls here (9066c8f) — endpoints missing = silent degradation today. |
+| BL-11 | Gateway LLM governance endpoints | P1 | ✅ Done | `gateway/src/routes/governance.js` + `gateway/src/llm.js`. JWT-authenticated. OPENAI_API_KEY gateway-only. OpenAPI spec updated. |
 | BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | ✅ Done | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT; wired in `server.js`. quorum-mcp BL-10 client also ✅ Done (f37f560) — full OAuth round-trip live. |
 | BL-13 | SDLC Hooks + Skill Integration | P2 | ✅ Done | 5 hook scripts + `hooks.js` + SKILL.md. Merged to quorum-mcp `prod`. 13 unit tests passing. |
 
@@ -347,26 +347,25 @@ No per-project manual configuration — hooks are silent in projects without a `
 
 ---
 
-### 🟡 BL-11 — Gateway LLM governance endpoints
-**Files (new):** `gateway/src/routes/governance.js` · `gateway/src/server.js`
+### ✅ BL-11 — Gateway LLM governance endpoints
+**Files (new):** `gateway/src/routes/governance.js` · `gateway/src/llm.js`
+**Files (modified):** `gateway/src/server.js` · `gateway/openapi.yaml` · `.env.example`
 
 Three endpoints that move LLM calls out of `quorum-mcp` and into the gateway.
-The MCP already calls these endpoints and degrades gracefully when they return 404.
+JWT-authenticated (`verifyJwt`). Prompts are inlined in the route — gateway is self-contained.
 
 | Endpoint | Input | Output |
 |----------|-------|--------|
-| `POST /governance/detect-conflict` | `{ existing, incoming }` | `{ contradicts, reason, possible_split, split_suggestion? }` |
-| `POST /governance/enrich` | `{ existing, incoming, conflict_reason, possible_split, split_suggestion? }` | `{ analysis, risks_if_approved[], questions_for_reviewer[], existing_rationale?, possible_split, split_suggestion? }` |
+| `POST /governance/detect-conflict` | `{ existing, incoming }` | `{ contradicts, reason, possible_split, split_suggestion }` |
+| `POST /governance/enrich` | `{ existing, incoming, conflict_reason, possible_split, split_suggestion }` | `{ analysis, risks_if_approved[], questions_for_reviewer[], existing_rationale, possible_split, split_suggestion }` |
 | `POST /governance/extract` | `{ task_summary, decisions_made?, patterns_used? }` | `{ items: ExtractedItem[] }` |
 
-The LLM prompt templates live in `quorum-mcp/src/prompts/` — either copy them into the gateway
-or expose a `GET /governance/prompts/:name` endpoint so the gateway can read them remotely.
-
 **Acceptance criteria:**
-- [ ] All three endpoints implemented and authenticated (JWT required)
-- [ ] `OPENAI_API_KEY` used only in gateway — not referenced anywhere in `quorum-mcp`
-- [ ] MCP gracefully degrades when gateway returns 404 (endpoint not yet live)
-- [ ] Endpoints documented in `gateway/openapi.yaml`
+- [x] All three endpoints implemented and authenticated (JWT required)
+- [x] `OPENAI_API_KEY` used only in gateway — not referenced anywhere in `quorum-mcp`
+- [x] 503 returned when `OPENAI_API_KEY` not set (clear error, not a crash)
+- [x] Endpoints documented in `gateway/openapi.yaml`
+- [x] `.env.example` updated — `OPENAI_API_KEY` noted as gateway + Graphiti shared var
 
 ---
 
@@ -393,6 +392,7 @@ Items resolved in reverse-chronological order.
 |------|------|--------|
 | 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
 | 2026-05-07 | BL-13 ✅ Done: merged to quorum-mcp prod — 5 hooks, hooks.js, SKILL.md, 13 tests passing | feat/sdlc-hooks |
+| 2026-05-08 | BL-11 ✅ Done: `gateway/src/routes/governance.js` + `gateway/src/llm.js` — 3 endpoints, JWT auth, OpenAI via native fetch, 503 when unconfigured | feat/dashboard |
 | 2026-05-07 | BL-11 priority P2→P1: MCP governance calls already routed to gateway (9066c8f) — endpoints missing = silent degradation | (backlog) |
 | 2026-05-06 | quorum-mcp BL-10 complete (f37f560) — full OAuth round-trip live (gateway BL-12 + mcp client both done) | f37f560 |
 | 2026-05-04 | BL-01: `group_id` isolation bypass — unconditional overwrite in `graphiti.js` + 6 tests + DEPLOYMENT.md | pending commit |
