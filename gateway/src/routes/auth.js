@@ -1,27 +1,28 @@
 /**
- * Quorum Gateway — Authentication route.
+ * Quorum Gateway — Authentication routes.
  *
  * POST /auth/token
  *   Exchange a GitHub personal access token for a short-lived ES256 JWT.
+ *   v0.3: JWT contains only { sub, is_admin } — all project/role context
+ *   is resolved per-request from the profile cache (see verify-jwt.js).
  *
- *   The gateway verifies the GitHub token server-side (GET /user API call) so
- *   the username cannot be self-asserted. It then looks up the username in the
- *   project's quorum.config.json to determine role + team.
+ * POST /auth/refresh
+ *   Extend a still-valid JWT without re-authenticating with GitHub.
  *
- *   Engineers never need raw DB credentials — only this JWT.
+ * POST /auth/projects  (pre-JWT discovery — dashboard project selector)
+ *   Return projects accessible to the caller using only a GitHub token.
  *
- * Response: { token, expires_in, sub, project, role, team }
- *
- * Token TTL: 1 hour. No refresh tokens — re-auth via GitHub token at each
- * MCP server startup (cheap: one HTTP call per session).
+ * GET  /auth/projects  → 410 Gone (replaced by GET /user/profile/{sub})
+ * POST /auth/switch    → 410 Gone (replaced by X-Quorum-Project header)
  */
 
 import { Router } from 'express'
 import { SignJWT } from 'jose'
+import { randomUUID } from 'node:crypto'
 import { getKeys } from '../keys.js'
-import { loadProjectConfig } from '../config-cache.js'
+import { loadProjectConfig, isPlatformAdmin } from '../config-cache.js'
 import { verifyJwt } from '../middleware/verify-jwt.js'
-import { getUserProjects, getGuestProjects } from '../ddb.js'
+import { getUserProjects } from '../ddb.js'
 
 const router = Router()
 
@@ -29,15 +30,14 @@ const TOKEN_TTL_SECONDS = 3600 // 1 hour
 
 /**
  * Verify a GitHub token by calling the GitHub user API.
- * Returns the verified GitHub login (username) — never trusts caller-supplied name.
  * @param {string} githubToken
- * @returns {Promise<string>} GitHub login (username)
+ * @returns {Promise<string>} GitHub login
  */
 async function verifyGitHubToken(githubToken) {
   const response = await fetch('https://api.github.com/user', {
     headers: {
       Authorization: `Bearer ${githubToken}`,
-      'User-Agent': 'quorum-gateway/0.2.0',
+      'User-Agent': 'quorum-gateway/0.3.0',
     },
   })
 
@@ -53,10 +53,9 @@ async function verifyGitHubToken(githubToken) {
 
 /**
  * Find a member in the project config by their GitHub username.
- * Returns the member record or null if not found.
  * @param {object} config
  * @param {string} githubUsername
- * @returns {{ name: string, team: string | null, role: string | null, github_username?: string } | null}
+ * @returns {object | null}
  */
 function findMember(config, githubUsername) {
   return config.members.find(
@@ -64,144 +63,30 @@ function findMember(config, githubUsername) {
   ) ?? null
 }
 
-// POST /auth/token
-router.post('/token', async (req, res) => {
-  const { github_token, project_id } = req.body ?? {}
-
-  if (!github_token) {
-    return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
-  }
-  if (!project_id) {
-    return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
-  }
-
-  // 1. Verify GitHub token — username cannot be self-asserted
-  let githubLogin
-  try {
-    githubLogin = await verifyGitHubToken(github_token)
-  } catch (err) {
-    return res.status(401).json({ error: 'github_auth_failed', message: err.message })
-  }
-
-  // 2. Load project config — determines role + team
-  let config
-  try {
-    config = await loadProjectConfig(project_id)
-  } catch (err) {
-    return res.status(404).json({
-      error: 'project_not_found',
-      message: `Project '${project_id}' not found or config load failed: ${err.message}`,
-    })
-  }
-
-  // 3. Look up member — reject if not a member and project does not allow guest access
-  const member = findMember(config, githubLogin)
-  if (member === null && config.guest_access !== true) {
-    return res.status(403).json({
-      error:   'not_a_member',
-      message: `You are not a member of project '${project_id}'`,
-    })
-  }
-
-  const role = member?.role ?? null
-  const team = member?.team ?? null
-
-  // Base confidence from role (used by local Quorum's authority resolution)
-  const baseConfidence = role && config.roles?.[role]
-    ? config.roles[role].base_confidence
-    : 0.5
-
-  // Derive the canonical project slug from the config (group_id is the authoritative
-  // identifier — consistent with /auth/switch which also uses config.group_id).
-  const slug = config.group_id ?? project_id
-
-  // 4. Sign ES256 JWT
+/**
+ * Issue a slim ES256 JWT containing only { sub, is_admin }.
+ * @param {string} sub
+ * @param {boolean} isAdmin
+ * @returns {Promise<string>} signed JWT
+ */
+async function issueToken(sub, isAdmin) {
   const { privateKey, kid } = getKeys()
-
-  const token = await new SignJWT({
-    sub:             githubLogin,
-    project:         slug,
-    role,
-    team,
-    method:          'github_token',
-    base_confidence: baseConfidence,
-  })
+  return new SignJWT({ sub, is_admin: isAdmin })
     .setProtectedHeader({ alg: 'ES256', kid })
     .setIssuedAt()
     .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
     .setIssuer('quorum-gateway')
+    .setJti(randomUUID())
     .sign(privateKey)
-
-  res.json({
-    token,
-    expires_in:      TOKEN_TTL_SECONDS,
-    sub:             githubLogin,
-    project:         slug,
-    role,
-    team,
-    base_confidence: baseConfidence,
-    member_found:    member !== null,
-  })
-})
-
-// ── Shared helper ──────────────────────────────────────────────────────────────
-
-/**
- * Fetch all projects accessible to a given GitHub login from DDB/S3.
- * Member projects and guest-accessible projects are merged; member entry wins
- * on conflict. Falls through to an empty array on error (best-effort).
- *
- * @param {string} githubLogin
- * @returns {Promise<Array<object>>}
- */
-async function fetchProjectsForUser(githubLogin) {
-  const [ddbProjects, guestProjects] = await Promise.all([
-    getUserProjects(githubLogin),
-    getGuestProjects(),
-  ])
-
-  const memberMap = new Map()
-  for (const p of ddbProjects ?? []) {
-    memberMap.set(p.project_id, {
-      id:           p.project_id,
-      slug:         p.project_slug ?? p.project_id,
-      name:         p.project_name ?? p.project_id,
-      role:         p.role         ?? null,
-      team:         p.team         ?? null,
-      member_count: null,
-      is_guest:     false,
-    })
-  }
-
-  for (const g of guestProjects ?? []) {
-    if (!memberMap.has(g.project_id)) {
-      memberMap.set(g.project_id, {
-        id:           g.project_id,
-        slug:         g.project_slug ?? g.project_id,
-        name:         g.project_name ?? g.project_id,
-        role:         null,
-        team:         null,
-        member_count: null,
-        is_guest:     true,
-      })
-    }
-  }
-
-  return [...memberMap.values()]
 }
 
-// POST /auth/projects
-// Discover all projects the caller belongs to using only a GitHub OAuth token.
-// Intentionally sits outside JWT auth — this is the step BEFORE JWT issuance.
-// Used by the dashboard project selector to populate cards after OAuth.
-router.post('/projects', async (req, res) => {
-  const { github_token } = req.body ?? {}
+// POST /auth/token
+router.post('/token', async (req, res) => {
+  const { github_token, project_id } = req.body ?? {}
 
-  if (!github_token) {
-    return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
-  }
+  if (!github_token) return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
+  if (!project_id)   return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
 
-  // Verify GitHub token server-side — caller cannot self-assert their username
   let githubLogin
   try {
     githubLogin = await verifyGitHubToken(github_token)
@@ -209,77 +94,6 @@ router.post('/projects', async (req, res) => {
     return res.status(401).json({ error: 'github_auth_failed', message: err.message })
   }
 
-  // Fast path — member projects from DDB + guest-accessible projects merged.
-  // Falls through to PostgreSQL only if combined result is empty or DDB errors.
-  try {
-    const projects = await fetchProjectsForUser(githubLogin)
-    if (projects.length > 0) {
-      return res.json({ projects, github_login: githubLogin, source: 'ddb' })
-    }
-  } catch {
-    // Fall through to PostgreSQL
-  }
-
-  const pool = req.app.locals.pool
-  try {
-    const result = await pool.query(
-      `SELECT id, slug, name, status, config_version, created_at, members
-       FROM projects
-       WHERE status = 'ACTIVE'
-         AND members @> $1::jsonb`,
-      [JSON.stringify([{ github_username: githubLogin }])],
-    )
-
-    const projects = result.rows.map((row) => {
-      const member = row.members.find(
-        (m) => m.github_username?.toLowerCase() === githubLogin.toLowerCase(),
-      )
-      return {
-        id:           row.id,
-        slug:         row.slug,
-        name:         row.name,
-        role:         member?.role  ?? null,
-        team:         member?.team  ?? null,
-        member_count: row.members.length,
-        created_at:   row.created_at,
-        is_guest:     false,
-      }
-    })
-
-    res.json({ projects, github_login: githubLogin, source: 'db' })
-  } catch (err) {
-    res.status(500).json({ error: 'db_error', message: err.message })
-  }
-})
-
-// GET /auth/projects
-// Refresh the project list for an already-authenticated user using their JWT.
-// Used by the dashboard when entering the project switcher so the list is always
-// fresh — avoids relying on the sessionStorage cache which can go stale.
-router.get('/projects', verifyJwt, async (req, res) => {
-  const githubLogin = req.user.sub
-  try {
-    const projects = await fetchProjectsForUser(githubLogin)
-    res.json({ projects, github_login: githubLogin, source: 'ddb' })
-  } catch (err) {
-    res.status(500).json({ error: 'fetch_failed', message: err.message })
-  }
-})
-
-// POST /auth/switch
-// Switch the active project scope without re-authenticating with GitHub.
-// The existing JWT proves identity; this issues a new JWT scoped to the target project.
-// Uses the same config source (DDB/S3 via loadProjectConfig) as POST /auth/token.
-// Guests (role === null) are allowed when the target project has guest_access === true.
-router.post('/switch', verifyJwt, async (req, res) => {
-  const { project_id } = req.body ?? {}
-  const caller         = req.user.sub
-
-  if (!project_id) {
-    return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
-  }
-
-  // Load config from DDB/S3 — same source as /auth/token
   let config
   try {
     config = await loadProjectConfig(project_id)
@@ -290,7 +104,7 @@ router.post('/switch', verifyJwt, async (req, res) => {
     })
   }
 
-  const member = findMember(config, caller)
+  const member = findMember(config, githubLogin)
   if (member === null && config.guest_access !== true) {
     return res.status(403).json({
       error:   'not_a_member',
@@ -298,70 +112,79 @@ router.post('/switch', verifyJwt, async (req, res) => {
     })
   }
 
+  const isAdmin = await isPlatformAdmin(githubLogin)
+  const token   = await issueToken(githubLogin, isAdmin)
+
+  // Response still includes role/team/project for backward-compatible clients.
+  // These are derived from the project config — not embedded in the token itself.
   const role           = member?.role ?? null
   const team           = member?.team ?? null
-  const baseConfidence = role && config.roles?.[role]
-    ? config.roles[role].base_confidence
-    : 0.5
-
-  const slug = config.group_id ?? project_id
-
-  const { privateKey, kid } = getKeys()
-  const token = await new SignJWT({
-    sub:             caller,
-    project:         slug,
-    role,
-    team,
-    method:          'jwt_switch',
-    base_confidence: baseConfidence,
-  })
-    .setProtectedHeader({ alg: 'ES256', kid })
-    .setIssuedAt()
-    .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
-    .setIssuer('quorum-gateway')
-    .sign(privateKey)
+  const baseConfidence = role && config.roles?.[role] ? config.roles[role].base_confidence : 0.5
+  const slug           = config.group_id ?? project_id
 
   res.json({
     token,
     expires_in:      TOKEN_TTL_SECONDS,
-    sub:             caller,
+    sub:             githubLogin,
     project:         slug,
     role,
     team,
     base_confidence: baseConfidence,
+    is_admin:        isAdmin,
+    member_found:    member !== null,
   })
 })
 
 // POST /auth/refresh
-// Exchange a still-valid Quorum JWT for a fresh one — no GitHub re-auth needed.
-// The existing JWT IS the proof of identity; we just extend the expiry.
-// Rate-limited by the per-engineer limit applied in server.js.
 router.post('/refresh', verifyJwt, async (req, res) => {
-  const { sub, project, role, team, method, base_confidence } = req.user
-  const { privateKey, kid } = getKeys()
+  const { sub } = req.user
+  const isAdmin = await isPlatformAdmin(sub)
+  const token   = await issueToken(sub, isAdmin)
+  res.json({ token, expires_in: TOKEN_TTL_SECONDS, sub, is_admin: isAdmin })
+})
 
-  const token = await new SignJWT({
-    sub,
-    project,
-    role,
-    team,
-    method: method ?? 'jwt',
-    base_confidence,
+// POST /auth/projects — pre-JWT project discovery for dashboard project selector.
+// Uses only a GitHub token — this is the step BEFORE JWT issuance.
+router.post('/projects', async (req, res) => {
+  const { github_token } = req.body ?? {}
+  if (!github_token) return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
+
+  let githubLogin
+  try {
+    githubLogin = await verifyGitHubToken(github_token)
+  } catch (err) {
+    return res.status(401).json({ error: 'github_auth_failed', message: err.message })
+  }
+
+  try {
+    const rows = await getUserProjects(githubLogin)
+    const projects = rows.map((r) => ({
+      id:       r.project_id,
+      slug:     r.project_slug ?? r.project_id,
+      name:     r.project_name ?? r.project_id,
+      role:     r.role         ?? null,
+      team:     r.team         ?? null,
+      is_guest: false,
+    }))
+    res.json({ projects, github_login: githubLogin, source: 'ddb' })
+  } catch (err) {
+    res.status(500).json({ error: 'fetch_failed', message: err.message })
+  }
+})
+
+// GET /auth/projects — retired in v0.3; use GET /user/profile/{sub}
+router.get('/projects', (_req, res) => {
+  res.status(410).json({
+    error:   'endpoint_retired',
+    message: 'GET /auth/projects was retired in v0.3. Use GET /user/profile/{sub} instead.',
   })
-    .setProtectedHeader({ alg: 'ES256', kid })
-    .setIssuedAt()
-    .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
-    .setIssuer('quorum-gateway')
-    .sign(privateKey)
+})
 
-  res.json({
-    token,
-    expires_in:      TOKEN_TTL_SECONDS,
-    sub,
-    project,
-    role,
-    team,
-    base_confidence,
+// POST /auth/switch — retired in v0.3; use X-Quorum-Project header
+router.post('/switch', (_req, res) => {
+  res.status(410).json({
+    error:   'endpoint_retired',
+    message: 'POST /auth/switch was retired in v0.3. Set X-Quorum-Project header instead.',
   })
 })
 

@@ -113,27 +113,49 @@ else
   warn "Add project configs as configs/<group_id>.quorum.json (copy example.quorum.json)"
 fi
 
-# ── DynamoDB tables ────────────────────────────────────────────────────────────
-CONFIGS_TABLE="${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}"
-USER_PROJECTS_TABLE="${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}"
-
-# quorum-configs — project config cache
-if awslocal dynamodb describe-table --table-name "$CONFIGS_TABLE" --region "$REGION" &>/dev/null 2>&1; then
-  ok "DynamoDB table already exists: $CONFIGS_TABLE"
+# ── Admin config (configs/.quorum) ────────────────────────────────────────────
+# The gateway loads this on startup to determine platform admins.
+# Seeds once — skip if already present in S3.
+ADMIN_S3_KEY="configs/.quorum"
+if awslocal s3api head-object --bucket "$BUCKET" --key "$ADMIN_S3_KEY" --region "$REGION" &>/dev/null 2>&1; then
+  ok "Admin config already seeded: s3://$BUCKET/$ADMIN_S3_KEY"
 else
-  awslocal dynamodb create-table \
-    --table-name "$CONFIGS_TABLE" \
-    --attribute-definitions AttributeName=project_id,AttributeType=S \
-    --key-schema AttributeName=project_id,KeyType=HASH \
-    --billing-mode PAY_PER_REQUEST \
-    --region "$REGION" > /dev/null
-  # Enable TTL on the ttl attribute
-  awslocal dynamodb update-time-to-live \
-    --table-name "$CONFIGS_TABLE" \
-    --time-to-live-specification "Enabled=true,AttributeName=ttl" \
-    --region "$REGION" > /dev/null
-  ok "DynamoDB table created: $CONFIGS_TABLE"
+  # Resolve first admin: QUORUM_FIRST_ADMIN env var, then git config, then prompt
+  FIRST_ADMIN="${QUORUM_FIRST_ADMIN:-}"
+  if [[ -z "$FIRST_ADMIN" ]]; then
+    FIRST_ADMIN="$(git config user.name 2>/dev/null || true)"
+  fi
+  if [[ -z "$FIRST_ADMIN" ]]; then
+    read -rp "  Enter GitHub username for first platform admin: " FIRST_ADMIN
+  fi
+
+  ADMIN_JSON=$(printf '{
+  "admins": [
+    {
+      "github_username": "%s",
+      "added_at": "%s",
+      "added_by": "system"
+    }
+  ],
+  "version": 1,
+  "updated_at": "%s"
+}' "$FIRST_ADMIN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+
+  echo "$ADMIN_JSON" > /tmp/quorum-admin-config.json
+  awslocal s3api put-object \
+    --bucket       "$BUCKET" \
+    --key          "$ADMIN_S3_KEY" \
+    --body         /tmp/quorum-admin-config.json \
+    --content-type "application/json" \
+    --region       "$REGION" > /dev/null
+  rm -f /tmp/quorum-admin-config.json
+  ok "Admin config seeded: s3://$BUCKET/$ADMIN_S3_KEY (admin: $FIRST_ADMIN)"
 fi
+
+# ── DynamoDB tables ────────────────────────────────────────────────────────────
+# Note: quorum-configs table is retired in v0.3 — Redis now serves config cache.
+# Only quorum-user-projects is needed.
+USER_PROJECTS_TABLE="${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}"
 
 # quorum-user-projects — user→project mapping with GSI
 if awslocal dynamodb describe-table --table-name "$USER_PROJECTS_TABLE" --region "$REGION" &>/dev/null 2>&1; then

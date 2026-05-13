@@ -158,7 +158,9 @@ export function verifyChain(entries) {
  */
 export async function nextChainPosition(client) {
   const result = await client.query(
-    'SELECT COALESCE(MAX(chain_position), 0) + 1 AS next_pos FROM audit_log',
+    `UPDATE audit_chain_counter SET next_position = next_position + 1
+     WHERE id = 1
+     RETURNING next_position - 1 AS next_pos`,
   )
   return result.rows[0].next_pos
 }

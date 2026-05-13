@@ -55,6 +55,7 @@ services:
   # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP.
   # Graphiti has no npm package — do NOT try to import it into Node.js.
   graphiti:
+    image: graphiti-mcp:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile.graphiti
@@ -76,10 +77,22 @@ services:
       falkordb:
         condition: service_healthy
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Quorum Gateway — central microservice, holds all infrastructure credentials.
   # Engineers only need QUORUM_GATEWAY_URL + their GitHub token.
   # Exposes port 3001. In production, place behind a TLS-terminating load balancer.
   gateway:
+    image: quorum-gateway:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile.gateway
@@ -102,6 +115,9 @@ services:
       - QUORUM_DDB_CONFIGS_TABLE=${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}
       - QUORUM_DDB_USER_PROJECTS_TABLE=${QUORUM_DDB_USER_PROJECTS_TABLE:-quorum-user-projects}
       - QUORUM_SYNC_SECRET=${QUORUM_SYNC_SECRET:-}
+      - REDIS_URL=redis://redis:6379
+      - QUORUM_ADMIN_CACHE_TTL=${QUORUM_ADMIN_CACHE_TTL:-300}
+      - QUORUM_PROFILE_CACHE_TTL=${QUORUM_PROFILE_CACHE_TTL:-300}
       # JWT signing keys — generate with openssl, store in secrets manager for production
       # Leave unset in dev: gateway generates an ephemeral key pair automatically
       - QUORUM_JWT_PRIVATE_KEY=${QUORUM_JWT_PRIVATE_KEY:-}
@@ -110,10 +126,10 @@ services:
       # Local dev only — skip S3, load config from this path inside the container
       - QUORUM_CONFIG_PATH=${QUORUM_CONFIG_PATH:-}
       # GitHub OAuth — register at github.com/settings/developers
-      # Homepage URL: http://localhost:3002  |  Callback URL: http://localhost:3002/auth/callback
+      # Homepage URL: http://localhost:3002  |  Callback URL: http://localhost:3001/oauth/callback
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:3002/auth/callback}
+      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:3001/oauth/callback}
       - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3002}
       - NODE_ENV=${NODE_ENV:-development}
     volumes:
@@ -126,6 +142,8 @@ services:
       localstack:
         condition: service_healthy
         required: false   # setup.sh may reuse an external LocalStack; skip if absent
+      redis:
+        condition: service_healthy
     healthcheck:
       # Accept 200 (healthy) or 503 (degraded) — both mean the gateway is alive.
       # curl -f would kill the container whenever any downstream component is down.
@@ -139,6 +157,7 @@ services:
   # Nginx proxies /auth, /api, /.well-known, /config, /health to the Gateway service.
   # Access at http://localhost:3002 (port 3001 is taken by Gateway, 3000 by FalkorDB UI).
   quorum-dashboard:
+    image: quorum-dashboard:${IMAGE_TAG:-latest}
     build:
       context: ./dashboard
       dockerfile: Dockerfile
@@ -153,6 +172,7 @@ services:
   # Requires @as-quorum/mcp to be published to npm.
   quorum:
     profiles: ["mcp"]
+    image: quorum:${IMAGE_TAG:-latest}
     build: .
     ports:
       - "8000:8000"

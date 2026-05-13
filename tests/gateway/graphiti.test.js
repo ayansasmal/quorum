@@ -17,6 +17,16 @@ import http from 'node:http'
 import express from 'express'
 import { SignJWT } from 'jose'
 
+// ── Mocks ─────────────────────────────────────────────────────────────────────
+
+vi.mock('../../gateway/src/config-cache.js', () => ({
+  loadUserProfile: vi.fn().mockResolvedValue({
+    github_username: 'alice',
+    is_admin: false,
+    projects: [{ group_id: 'test-project', role: 'engineer', base_confidence: 0.7, is_owner: false, team: 'platform' }],
+  }),
+}))
+
 // ── Imports ────────────────────────────────────────────────────────────────────
 
 import { loadKeys }     from '../../gateway/src/keys.js'
@@ -36,8 +46,9 @@ app.use(express.json())
 app.use('/graphiti', graphitiRoutes)
 
 beforeAll(async () => {
+  // v0.3 slim JWT — only sub + is_admin; project is sent via X-Quorum-Project header
   const { privateKey } = await loadKeys()
-  token = await new SignJWT({ sub: 'alice', project: 'test-project', role: 'engineer', team: 'platform', base_confidence: 0.7 })
+  token = await new SignJWT({ sub: 'alice', is_admin: false })
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuer('quorum-gateway')
     .setExpirationTime('1h')
@@ -78,6 +89,8 @@ function post(path, body, authToken = token) {
       'Content-Length': Buffer.byteLength(payload),
     }
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+    // v0.3: project context sent via header; verify-jwt reads it and resolves role from profile
+    headers['X-Quorum-Project'] = 'test-project'
 
     const req = http.request(
       { hostname: '127.0.0.1', port, path, method: 'POST', headers },
@@ -97,20 +110,62 @@ function post(path, body, authToken = token) {
 }
 
 /**
- * Stub fetch to simulate a Graphiti response, capturing the forwarded request body.
- * @param {{ capturedBody?: object }} store - mutated with the parsed body the route forwards
+ * Stub fetch to simulate a Graphiti response, capturing the forwarded request.
+ * @param {{ capturedBody?: object, capturedHeaders?: object }} store - mutated on each call
+ * @param {{ sessionId?: string|null, status?: number, contentType?: string }} [opts]
  */
-function mockGraphiti(store = {}) {
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, opts) => {
-    store.capturedBody = JSON.parse(opts.body)
+function mockGraphiti(store = {}, { sessionId = null, status = 200, contentType = 'application/json' } = {}) {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, fetchOpts) => {
+    store.capturedBody    = JSON.parse(fetchOpts.body)
+    store.capturedHeaders = fetchOpts.headers
+    const headerMap = { 'content-type': contentType }
+    if (sessionId) headerMap['mcp-session-id'] = sessionId
     return {
-      ok: true,
-      status: 200,
-      headers: { get: () => 'application/json' },
-      json: async () => ({ result: 'ok' }),
+      ok:      status < 400,
+      status,
+      headers: { get: (name) => headerMap[name.toLowerCase()] ?? null },
+      json:    async () => ({ result: 'ok' }),
+      text:    async () => 'unexpected plain-text response',
     }
   }))
   return store
+}
+
+/**
+ * POST to the test server, returning status, parsed body, and response headers.
+ * Use instead of post() when the test needs to inspect response headers.
+ * @param {string} path
+ * @param {object} body
+ * @param {string} [authToken]
+ * @param {Record<string, string>} [extraHeaders]
+ * @returns {Promise<{ status: number, body: object | string, headers: http.IncomingHttpHeaders }>}
+ */
+function postFull(path, body, authToken = token, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const headers = {
+      'Content-Type':      'application/json',
+      'Content-Length':    Buffer.byteLength(payload),
+      'X-Quorum-Project':  'test-project',
+      ...extraHeaders,
+    }
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path, method: 'POST', headers },
+      (res) => {
+        let raw = ''
+        res.on('data', (chunk) => { raw += chunk })
+        res.on('end', () => {
+          try   { resolve({ status: res.statusCode, body: JSON.parse(raw), headers: res.headers }) }
+          catch { resolve({ status: res.statusCode, body: raw,             headers: res.headers }) }
+        })
+      },
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -178,5 +233,70 @@ describe('POST /graphiti/*path — group_id isolation', () => {
 
     expect(status).toBe(502)
     expect(body.error).toBe('graphiti_unavailable')
+  })
+})
+
+describe('POST /graphiti/*path — MCP session ID forwarding', () => {
+  it('forwards Mcp-Session-Id from Graphiti response back to the caller', async () => {
+    mockGraphiti({}, { sessionId: 'graphiti-session-abc123' })
+
+    const { status, headers } = await postFull('/graphiti/mcp', { params: {} })
+
+    expect(status).toBe(200)
+    expect(headers['mcp-session-id']).toBe('graphiti-session-abc123')
+  })
+
+  it('always forwards Accept header upstream so Graphiti does not return 406', async () => {
+    const store = mockGraphiti()
+
+    await postFull('/graphiti/mcp', { params: {} }, token, {
+      'Accept': 'application/json, text/event-stream',
+    })
+
+    expect(store.capturedHeaders['Accept']).toBe('application/json, text/event-stream')
+  })
+
+  it('falls back to the required Accept value when caller omits it', async () => {
+    const store = mockGraphiti()
+
+    await postFull('/graphiti/mcp', { params: {} })
+
+    expect(store.capturedHeaders['Accept']).toBe('application/json, text/event-stream')
+  })
+
+  it('forwards caller Mcp-Session-Id upstream to Graphiti', async () => {
+    const store = mockGraphiti()
+
+    await postFull('/graphiti/mcp', { params: {} }, token, { 'Mcp-Session-Id': 'caller-session-xyz' })
+
+    expect(store.capturedHeaders['Mcp-Session-Id']).toBe('caller-session-xyz')
+  })
+
+  it('does not inject Mcp-Session-Id upstream when the caller omits it', async () => {
+    const store = mockGraphiti()
+
+    await postFull('/graphiti/mcp', { params: {} })
+
+    expect(store.capturedHeaders['Mcp-Session-Id']).toBeUndefined()
+  })
+
+  it('does not forward session ID when Graphiti response has none', async () => {
+    mockGraphiti({})
+
+    const { headers } = await postFull('/graphiti/mcp', { params: {} })
+
+    expect(headers['mcp-session-id']).toBeUndefined()
+  })
+
+  it('proxies non-JSON Graphiti responses without crashing', async () => {
+    // Graphiti's TransportSecurityMiddleware used to return "Invalid Host header" as
+    // plain text. This caused response.json() to throw an unhandled SyntaxError.
+    // The proxy must pass non-JSON through gracefully rather than crash.
+    mockGraphiti({}, { status: 421, contentType: 'text/plain' })
+
+    const { status } = await postFull('/graphiti/mcp', { params: {} })
+
+    // 421 is forwarded as-is; the important thing is no unhandled exception
+    expect(status).toBe(421)
   })
 })

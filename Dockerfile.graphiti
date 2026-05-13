@@ -42,6 +42,14 @@ WORKDIR /app/mcp_server
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir ".[falkordb]"
 
+# Patch: FastMCP defaults host='127.0.0.1' which auto-enables TransportSecurityMiddleware
+# with allowed_hosts=["127.0.0.1:*","localhost:*"]. Docker inter-container calls arrive
+# with the service hostname (e.g. graphiti:8000) which that allowlist rejects with 421.
+# Passing host='0.0.0.0' at construction time bypasses the auto-enable entirely.
+# The post-init mcp.settings.host = '0.0.0.0' assignment in main.py is still present
+# but doesn't update the already-constructed middleware — hence the constructor patch.
+RUN python3 -c "import pathlib; f=pathlib.Path('src/graphiti_mcp_server.py'); s=f.read_text(); s=s.replace('    instructions=GRAPHITI_MCP_INSTRUCTIONS,\n)', \"    instructions=GRAPHITI_MCP_INSTRUCTIONS,\n    host='0.0.0.0',\n)\"); f.write_text(s); print('patched FastMCP host=0.0.0.0')"
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \

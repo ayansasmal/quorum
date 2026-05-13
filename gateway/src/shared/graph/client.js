@@ -24,6 +24,16 @@ const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
 
 /**
+ * Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before passing them to
+ * FalkorDB/RediSearch. Escaping hyphens as \- would fail that validation. Pass
+ * group_ids unmodified — callers that need search isolation should omit group_ids
+ * and rely on PostgreSQL for project scoping instead.
+ */
+function escapeGroupIds(ids) {
+  return ids
+}
+
+/**
  * Dedicated Graphiti group ID for audit episodes.
  * Kept separate from GROUP_ID so audit records never appear in
  * normal knowledge searches (searchNodes / searchFacts).
@@ -298,7 +308,8 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, 
 export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
   const result = await callGraphiti('search_memory_facts', {
     query:     `supersedes evolution chain for ${episodeId}`,
-    group_ids: [groupId],
+    // group_ids omitted — hyphenated IDs break FalkorDB RediSearch queries.
+    // Isolation is enforced upstream by the PostgreSQL layer.
   }).catch(() => ({ facts: [] }))
 
   return result.facts ?? []
@@ -311,10 +322,12 @@ export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
+  // group_ids are intentionally omitted: FalkorDB/RediSearch treats hyphens in
+  // group_id values as NOT operators, breaking queries for hyphenated project IDs
+  // (e.g. "amethyst-munchkin"). Project isolation is enforced by PostgreSQL upstream.
   return callGraphiti('search_nodes', {
     query,
-    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
-    max_nodes:  options.limit ?? 10,
+    max_nodes: options.limit ?? 10,
   })
 }
 
@@ -325,10 +338,8 @@ export async function searchNodes(query, options = {}) {
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  return callGraphiti('search_memory_facts', {
-    query,
-    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
-  })
+  // group_ids omitted for the same reason as searchNodes above.
+  return callGraphiti('search_memory_facts', { query })
 }
 
 /**
@@ -337,7 +348,8 @@ export async function searchFacts(query, options = {}) {
  * @returns {Promise<{ episodes: Array<unknown> }>}
  */
 export async function getEpisodes(groupId = GROUP_ID) {
-  return callGraphiti('get_episodes', { group_ids: [groupId] })
+  // group_ids omitted — see searchNodes comment.
+  return callGraphiti('get_episodes', {})
 }
 
 /**

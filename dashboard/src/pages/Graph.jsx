@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useGraph } from '../api/graph.js'
+import { useStats } from '../api/stats.js'
 import GraphControls from '../components/graph/GraphControls.jsx'
 import KnowledgeGraph from '../components/graph/KnowledgeGraph.jsx'
 
@@ -7,10 +8,12 @@ export default function Graph() {
   const [domain, setDomain] = useState('')
 
   const { data, isLoading, error } = useGraph(domain || undefined)
+  const { data: statsData } = useStats()
+  const domains = (statsData?.domains ?? []).map((d) => d.domain)
 
   return (
     <div className="flex flex-col gap-4 h-[calc(100vh-7rem)]">
-      <GraphControls domain={domain} onDomainChange={setDomain} />
+      <GraphControls domain={domain} onDomainChange={setDomain} domains={domains} />
 
       {!domain ? (
         <div className="flex flex-1 items-center justify-center text-gray-600 text-sm rounded-lg border border-gray-200 dark:border-gray-800">
@@ -48,7 +51,15 @@ export default function Graph() {
             </span>
           ))}
           <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 bg-gray-500 border-dashed border-t border-gray-500" />
+            <span className="h-0.5 w-4 bg-blue-500" />
+            BELONGS TO
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-4 border-dashed border-t-2 border-green-500" />
+            SHARED TAG
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-4 border-dashed border-t-2 border-amber-500" />
             SUPERSEDES
           </span>
           <span className="flex items-center gap-1.5">

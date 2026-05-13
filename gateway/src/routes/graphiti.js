@@ -25,17 +25,31 @@ router.post('/*path', verifyJwt, async (req, res) => {
   const suffix = req.params.path || 'mcp';
   const target = `${GRAPHITI_URL()}/${suffix}`;
 
+  if (!req.user.project) {
+    return res.status(400).json({ error: 'X-Quorum-Project header required' })
+  }
+
   // group_id is owned by the S3 project config and carried in the JWT — callers never control it.
   // Unconditional overwrite prevents confused-deputy attacks where a caller supplies their own value.
   const body = { ...(req.body ?? {}), params: { ...(req.body?.params ?? {}) } };
   body.params.group_id = req.user.project;
   if (body.params.group_ids !== undefined) body.params.group_ids = [req.user.project];
 
+  // Forward MCP protocol headers from the caller to Graphiti.
+  // Accept is required: Graphiti's streamable-http transport returns 406 without it.
+  // Mcp-Session-Id is required for session reuse on all calls after initialize.
+  const upstreamHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': req.headers['accept'] ?? 'application/json, text/event-stream',
+  }
+  const sessionId = req.headers['mcp-session-id']
+  if (sessionId) upstreamHeaders['Mcp-Session-Id'] = sessionId
+
   let response;
   try {
     response = await fetch(target, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: upstreamHeaders,
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -50,6 +64,10 @@ router.post('/*path', verifyJwt, async (req, res) => {
   const data = contentType.includes('application/json')
     ? await response.json()
     : await response.text();
+
+  // Forward MCP session ID from Graphiti back to the caller so it can reuse the session.
+  const returnedSessionId = response.headers.get('mcp-session-id')
+  if (returnedSessionId) res.set('Mcp-Session-Id', returnedSessionId)
 
   res.status(response.status).set('Content-Type', contentType).json(data);
 });

@@ -15,11 +15,12 @@ import { useTheme }                  from '../../context/ThemeContext.jsx'
  * @param {{ title: string }} props
  */
 export default function Header({ title }) {
-  const { user, availableProjects, switchProject } = useAuth()
-  const { theme, toggle }                          = useTheme()
+  const { user, availableProjects, selectedProject, currentProjectData, switchProject } = useAuth()
+  const { theme, toggle } = useTheme()
 
-  // Only show the switcher if the user belongs to more than one project
-  const canSwitch = availableProjects.length > 1
+  const canSwitch   = availableProjects.length > 1
+  // Prefer display name from project metadata; fall back to group_id
+  const projectLabel = currentProjectData?.name ?? selectedProject ?? user?.project ?? null
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-950/90 backdrop-blur-sm px-6">
@@ -43,22 +44,22 @@ export default function Header({ title }) {
         {user && (
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-500">
 
-            {/* Project badge — doubles as the switch trigger when multi-project */}
-            {canSwitch ? (
+            {/* Project badge — reads selectedProject so it survives refresh */}
+            {projectLabel && (canSwitch ? (
               <button
                 type="button"
                 onClick={switchProject}
                 title="Switch project"
-                className="group flex items-center gap-1.5 rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-1 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className="group flex items-center gap-1.5 rounded-full border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors font-medium"
               >
-                {user.project}
-                <ArrowLeftRight className="h-3 w-3 text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
+                {projectLabel}
+                <ArrowLeftRight className="h-3 w-3 opacity-60 group-hover:opacity-100 transition-opacity" />
               </button>
             ) : (
-              <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-1 text-gray-700 dark:text-gray-300">
-                {user.project}
+              <span className="rounded-full border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1 text-blue-700 dark:text-blue-300 font-medium">
+                {projectLabel}
               </span>
-            )}
+            ))}
 
             {/* User identity */}
             <span>

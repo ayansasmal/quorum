@@ -33,16 +33,18 @@ Engineer's machine                     Platform stack
 Claude Code (MCP client)
   └─ @as-quorum/mcp
        └─ GatewayClient ──── HTTPS ──► Gateway :3001
-                              JWT          ├─ JWT-gated proxy ──► Graphiti :8001
-                                           └─ REST API ──────────► PostgreSQL :5432
+                  JWT + X-Quorum-Project   ├─ JWT-gated proxy ──► Graphiti :8001
+                                           ├─ REST API ──────────► PostgreSQL :5432
+                                           ├─ Profile/config cache ► Redis :6379
+                                           └─ Config + admin ────► S3 (LocalStack in dev)
 ```
 
 **Key properties:**
 
 - The MCP never holds database credentials or raw Graphiti URLs
 - `OPENAI_API_KEY` lives only on the gateway — the MCP never touches it
-- `group_id` is **unconditionally injected** by the gateway from the JWT `project` claim;
-  any caller-supplied value is silently discarded (BL-01 fix)
+- `group_id` is **unconditionally injected** by the gateway from the `X-Quorum-Project` header (v0.3); any caller-supplied value in the request body is silently discarded (BL-01 fix)
+- Active project is set via `X-Quorum-Project` request header — JWT is "pure identity" (`sub + is_admin` only); role and ownership are resolved per-request from the Redis profile cache
 - Identity chain: GitHub OAuth → ES256 JWT (1h TTL) → `req.user.project` on every request
 
 ### Engineer Authentication Flow (OAuth 2.1 + PKCE)
@@ -234,13 +236,17 @@ Docker Desktop → Settings → Kubernetes:
   FalkorDB limit:  2GB
   Gateway limit:   512MB
   PostgreSQL:      512MB
+  Redis limit:     256MB (maxmemory-policy: allkeys-lru)
   → Workable, close other heavy apps while running
 
 32GB Mac:
   Allocate to Docker Desktop: 16GB
   FalkorDB limit:  4GB
+  Redis limit:     256MB
   → Comfortable, no constraints
 ```
+
+> **Production note (v0.3+):** Redis is a required infrastructure dependency alongside PostgreSQL, FalkorDB, and S3. Use AWS ElastiCache (Redis OSS) or equivalent managed Redis in production deployments. Configure `REDIS_URL` in the gateway environment. Recommended: `maxmemory 512mb` with `allkeys-lru` policy for production workloads.
 
 ### Verify Cluster
 

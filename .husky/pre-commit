@@ -1,0 +1,2 @@
+# Add pre-commit checks here (lint-staged, type-check, etc.)
+# Example: npx lint-staged

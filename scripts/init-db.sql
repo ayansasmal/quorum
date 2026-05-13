@@ -27,6 +27,17 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_author ON audit_log (author);
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_log_tool ON audit_log (tool);
 
+-- Single-row counter for gap-free chain position allocation.
+-- UPDATE … RETURNING serializes concurrent writers without a sequence gap.
+CREATE TABLE IF NOT EXISTS audit_chain_counter (
+  id            INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  next_position BIGINT NOT NULL DEFAULT 1
+);
+-- Initialize from current max so re-running the schema on an existing DB is safe.
+INSERT INTO audit_chain_counter (id, next_position)
+SELECT 1, COALESCE(MAX(chain_position), 0) + 1 FROM audit_log
+ON CONFLICT (id) DO NOTHING;
+
 -- ── Knowledge versions ─────────────────────────────────────────────────────────
 -- Immutable once written (UNIQUE constraint on topic+key+version).
 -- Only status, superseded_by_*, and superseded_at may be updated — via
@@ -106,6 +117,7 @@ CREATE POLICY version_audit_links_insert_only
 
 -- Grant INSERT privilege on all tables to quorum_app
 GRANT INSERT ON audit_log TO quorum_app;
+GRANT SELECT, UPDATE ON audit_chain_counter TO quorum_app;
 GRANT INSERT ON knowledge_versions TO quorum_app;
 GRANT INSERT ON version_audit_links TO quorum_app;
 GRANT USAGE, SELECT ON SEQUENCE knowledge_versions_id_seq TO quorum_app;

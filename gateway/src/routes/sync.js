@@ -18,7 +18,8 @@
 import { Router } from 'express'
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 import { QuorumConfigSchema } from '../shared/config/schema.js'
-import { putConfig, syncProjectMembers } from '../ddb.js'
+import { syncProjectMembers } from '../ddb.js'
+import { invalidateProject } from '../config-cache.js'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 
 const router = Router()
@@ -29,10 +30,10 @@ let s3Client = null
 
 /**
  * Lazy S3Client honouring AWS_ENDPOINT_URL (LocalStack) and AWS_REGION.
- * Mirrors the client construction pattern from config-cache.js / health probe.
+ * Exported so config.js can reuse the same client for the upload endpoint.
  * @returns {S3Client}
  */
-function getS3() {
+export function getS3() {
   if (!s3Client) {
     const endpoint = process.env.AWS_ENDPOINT_URL
     s3Client = new S3Client({
@@ -83,11 +84,12 @@ async function inBatches(items, size, fn) {
 
 /**
  * Sync a single project's config + membership from S3 to DDB.
+ * Exported so config.js can call it after a new project config is uploaded.
  * @param {string} bucket
  * @param {string} projectId
  * @returns {Promise<{ project_id: string, ok: true } | { project_id: string, ok: false, error: string }>}
  */
-async function syncOneProject(bucket, projectId) {
+export async function syncOneProject(bucket, projectId) {
   try {
     const obj = await getS3().send(new GetObjectCommand({
       Bucket: bucket,
@@ -97,6 +99,7 @@ async function syncOneProject(bucket, projectId) {
     const raw  = JSON.parse(body)
     const config = QuorumConfigSchema.parse(raw)
 
+    const owner = config.owner ?? null
     const members = (config.members ?? []).map((m) => ({
       github_username: m.github_username,
       role:            m.role,
@@ -104,11 +107,11 @@ async function syncOneProject(bucket, projectId) {
       base_confidence: m.role && config.roles?.[m.role]
         ? config.roles[m.role].base_confidence
         : 0.5,
+      is_owner:        owner !== null && m.github_username === owner,
     })).filter((m) => m.github_username)
 
-    await putConfig(projectId, config, obj.ETag ?? null)
-    // group_id is the canonical slug (S3 key prefix, JWT claim).
-    // config.project is an optional display name — falls back to group_id when absent.
+    // Invalidate Redis config cache — next load will re-fetch from S3 fresh.
+    await invalidateProject(projectId)
     await syncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
 
     return { project_id: projectId, ok: true }

@@ -110,7 +110,7 @@ export async function getAuditEntry(pg, entryId) {
  * Retrieve all audit entries ordered by chain_position.
  * Used for chain verification and compliance export.
  * @param {import('pg').Pool} pg
- * @param {{ from?: string, to?: string, tool?: string, projectId?: string }} [options]
+ * @param {{ from?: string, to?: string, tool?: string, author?: string, topic?: string, limit?: number, projectId?: string }} [options]
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getAllEntries(pg, options = {}) {
@@ -135,12 +135,26 @@ export async function getAllEntries(pg, options = {}) {
     params.push(options.tool)
     conditions.push(`tool = $${params.length}`)
   }
+  if (options.author) {
+    params.push(options.author)
+    conditions.push(`author = $${params.length}`)
+  }
+  if (options.topic) {
+    params.push(`%${options.topic}%`)
+    conditions.push(`outcome_json::text ILIKE $${params.length}`)
+  }
 
   if (conditions.length > 0) {
     query += ' WHERE ' + conditions.join(' AND ')
   }
 
-  query += ' ORDER BY chain_position ASC'
+  query += ' ORDER BY chain_position DESC'
+
+  const limit = parseInt(options.limit, 10)
+  if (!isNaN(limit) && limit > 0) {
+    params.push(limit)
+    query += ` LIMIT $${params.length}`
+  }
 
   const result = await pg.query(query, params)
   return result.rows

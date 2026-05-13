@@ -17,6 +17,7 @@ import Knowledge       from './pages/Knowledge.jsx'
 import Audit           from './pages/Audit.jsx'
 import Config          from './pages/Config.jsx'
 import Status          from './pages/Status.jsx'
+import Admin           from './pages/Admin.jsx'
 
 /**
  * Registers the current JWT with the API client and sets up:
@@ -25,12 +26,14 @@ import Status          from './pages/Status.jsx'
  */
 function AppSetup({ children }) {
   const { token, authPhase, logout, refresh } = useAuth()
-  const qc                         = useQueryClient()
+  const qc                                   = useQueryClient()
 
-  useEffect(() => {
-    registerTokenGetter(() => token)
-    registerRefresher(refresh)
-  }, [token, refresh])
+  // Register synchronously in the render body — not in useEffect — so these
+  // callbacks are available before any child component's query effect fires.
+  // React effects run children-before-parents, so an AppSetup useEffect would
+  // run *after* Stats/Config/etc. have already made their first API call.
+  registerTokenGetter(() => token)
+  registerRefresher(refresh)
 
   useEffect(() => {
     registerLogout(logout)
@@ -65,6 +68,17 @@ function AppSetup({ children }) {
 function MemberRoute() {
   const { isGuest } = useAuth()
   if (isGuest) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
+/**
+ * Guard for admin-only routes (/admin).
+ * Non-admins are redirected to / — the Admin page itself shows an access-denied message
+ * as a second layer, but this prevents the route from rendering at all.
+ */
+function AdminRoute() {
+  const { user } = useAuth()
+  if (!user?.is_admin) return <Navigate to="/" replace />
   return <Outlet />
 }
 
@@ -118,6 +132,9 @@ export default function App() {
                   <Route path="/audit"   element={<Audit />} />
                   <Route path="/config"  element={<Config />} />
                   <Route path="/status"  element={<Status />} />
+                </Route>
+                <Route element={<AdminRoute />}>
+                  <Route path="/admin" element={<Admin />} />
                 </Route>
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />

@@ -17,6 +17,10 @@
  *   POST /pg/versions                         → insertVersion
  *   PATCH /pg/versions/:topic/:key/:version   → transitionVersionStatus
  *   GET  /pg/versions/by-tag/:tag             → getVersionsByTag
+ *   GET  /pg/versions/latest-draft/:topic/:key → getLatestDraftVersion
+ *   GET  /pg/versions/by-status/:status       → getVersionsByStatus
+ *   GET  /pg/versions/status-counts           → getVersionStatusCounts
+ *   GET  /pg/versions/drafts                  → getDraftVersions
  *
  *   POST /pg/audit-links                      → insertVersionAuditLink
  *
@@ -27,9 +31,10 @@
  *   GET  /pg/audit/:id                        → getAuditEntry
  *
  *   GET  /pg/pending                          → fetch pending decisions
+ *   GET  /pg/pending/count/:topic/:key        → count pending for topic:key
+ *   GET  /pg/pending/:conflictId              → getPendingDecisionById
  *   POST /pg/pending                          → insert pending decision
  *   PATCH /pg/pending/:conflictId             → update pending decision
- *   GET  /pg/pending/count/:topic/:key        → count pending for topic:key
  */
 
 import { Router } from 'express'
@@ -44,6 +49,11 @@ import {
   transitionVersionStatus,
   insertVersionAuditLink,
   getVersionsByTag,
+  getLatestDraftVersion,
+  getVersionsByStatus,
+  getVersionStatusCounts,
+  getDraftVersions,
+  getPendingDecisionById,
 } from '../shared/graph/queries.js'
 import {
   writeAuditEntry,
@@ -56,6 +66,14 @@ const router = Router()
 
 // All pg routes require a valid JWT
 router.use(verifyJwt)
+
+// All pg routes are project-scoped — X-Quorum-Project header required
+router.use((req, res, next) => {
+  if (!req.user.project) {
+    return res.status(400).json({ error: 'X-Quorum-Project header required' })
+  }
+  next()
+})
 
 // ── Helper: inject project_id into a record ─────────────────────────────────────
 
@@ -76,6 +94,30 @@ function scopedPool(pool, projectId) {
 }
 
 // ── Knowledge versions ─────────────────────────────────────────────────────────
+//
+// IMPORTANT: static-prefix routes must be registered BEFORE /versions/:topic/:key.
+// Both /versions/by-status/:status and /versions/by-tag/:tag are 3-segment paths
+// that Express would match as /:topic/:key if the wildcard route were first.
+
+// GET /pg/versions/by-status/:status — versions with a given status (?topic=)
+router.get('/versions/by-status/:status', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { status } = req.params
+  const projectId = req.user.project
+  const { topic } = req.query
+  const rows = await getVersionsByStatus(pool, status, { topic, projectId })
+  res.json(rows)
+})
+
+// GET /pg/versions/by-tag/:tag — versions with this tag (project-scoped)
+router.get('/versions/by-tag/:tag', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { tag } = req.params
+  const projectId = req.user.project
+
+  const versions = await getVersionsByTag(pool, tag, projectId)
+  res.json(versions)
+})
 
 // GET /pg/versions/:topic/:key — current ACTIVE version (project-scoped)
 router.get('/versions/:topic/:key', async (req, res) => {
@@ -120,14 +162,31 @@ router.get('/versions/:topic/:key/next-number', async (req, res) => {
   res.json({ next_version: next })
 })
 
-// GET /pg/versions/by-tag/:tag — versions with this tag (project-scoped)
-router.get('/versions/by-tag/:tag', async (req, res) => {
+// GET /pg/versions/drafts — all DRAFT versions (project-scoped, optional ?topic=)
+router.get('/versions/drafts', async (req, res) => {
   const pool = req.app.locals.pool
-  const { tag } = req.params
   const projectId = req.user.project
+  const { topic } = req.query
+  const rows = await getDraftVersions(pool, { topic, projectId })
+  res.json(rows)
+})
 
-  const versions = await getVersionsByTag(pool, tag, projectId)
-  res.json(versions)
+// GET /pg/versions/status-counts — version counts grouped by status (?topic=)
+router.get('/versions/status-counts', async (req, res) => {
+  const pool = req.app.locals.pool
+  const projectId = req.user.project
+  const { topic } = req.query
+  const counts = await getVersionStatusCounts(pool, { topic, projectId })
+  res.json(counts)
+})
+
+// GET /pg/versions/latest-draft/:topic/:key — latest DRAFT version for topic:key
+router.get('/versions/latest-draft/:topic/:key', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { topic, key } = req.params
+  const projectId = req.user.project
+  const version = await getLatestDraftVersion(pool, topic, key, projectId)
+  res.json(version)
 })
 
 // GET /pg/versions/:topic/:key/:version — specific version
@@ -189,7 +248,7 @@ router.get('/audit', async (req, res) => {
   const projectId = req.user.project
   const opts = { ...req.query, projectId }
   const entries = await getAllEntries(pool, opts)
-  res.json(entries)
+  res.json({ entries })
 })
 
 // GET /pg/audit/count
@@ -331,6 +390,16 @@ router.get('/pending/count/:topic/:key', async (req, res) => {
     [projectId, topic, key],
   )
   res.json({ count: parseInt(rows[0].cnt, 10) })
+})
+
+// GET /pg/pending/:conflictId — fetch single pending decision by conflict ID
+router.get('/pending/:conflictId', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { conflictId } = req.params
+  const projectId = req.user.project
+  const row = await getPendingDecisionById(pool, conflictId, projectId)
+  if (row && row.project_id !== projectId) return res.status(404).json(null)
+  res.json(row)
 })
 
 // ── Error handler for this router ─────────────────────────────────────────────

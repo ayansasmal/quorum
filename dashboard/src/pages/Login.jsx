@@ -5,16 +5,16 @@
  *         → browser navigates to GET /auth/github
  *         → gateway redirects to github.com/login/oauth/authorize
  *
- * Step 2: GitHub redirects back to GET /auth/callback (Nginx → gateway)
- *         → gateway exchanges code for OAuth token
- *         → gateway redirects here with #oauth=<token>
+ * Step 2: GitHub redirects to GET /oauth/callback (single registered callback)
+ *         → gateway exchanges code server-side; GitHub token never leaves gateway
+ *         → 1 project  → issues scoped Quorum JWT → redirects here with #token=<jwt>
+ *         → n projects → issues pre-auth JWT (5 min) → redirects here with #token=<jwt>
  *
- * Step 3: This component reads the OAuth token from the fragment, clears it
- *         from the URL, then calls discoverProjects(token) in AuthContext.
+ * Step 3: This component reads the Quorum JWT from the fragment, clears it
+ *         from the URL, then calls completeOAuth(jwt) in AuthContext.
  *         AuthContext handles:
- *           - 1 project  → auto-select → authenticated → App navigates to /
- *           - n projects → authPhase = 'selecting' → App navigates to /select-project
- *           - 0 projects → error shown here
+ *           - scoped JWT → authenticated → App navigates to /
+ *           - pre-auth JWT → fetches project list → 'selecting' → App navigates to /select-project
  */
 
 import { useEffect, useState } from 'react'
@@ -38,29 +38,29 @@ function GitHubIcon() {
 }
 
 export default function Login() {
-  const { authPhase, discoverProjects, error: authError, setError } = useAuth()
+  const { authPhase, completeOAuth, error: authError, setError } = useAuth()
   const navigate = useNavigate()
 
   const [discovering, setDiscovering] = useState(false)
   const [formError,   setFormError]   = useState(null)
 
-  // ── Step 2: read OAuth token from URL fragment ─────────────────────────────
+  // ── Step 2: read Quorum JWT from URL fragment ──────────────────────────────
   useEffect(() => {
     const fragment = new URLSearchParams(window.location.hash.slice(1))
-    const oauth    = fragment.get('oauth')
+    const token    = fragment.get('token')
 
     // OAuth error passed as query param (e.g. user denied on GitHub)
     const params = new URLSearchParams(window.location.search)
     const err    = params.get('error')
-    if (err) setFormError(err)
+    if (err) setFormError(decodeURIComponent(err))
 
-    if (!oauth) return
+    if (!token) return
 
-    // Re-auth popup: send token back to opener and close
+    // Re-auth popup: send Quorum JWT back to opener and close
     if (window.opener && !window.opener.closed) {
       try {
         window.opener.postMessage(
-          { type: 'QUORUM_OAUTH', oauth, project_id: fragment.get('project_id') ?? '' },
+          { type: 'QUORUM_OAUTH', token },
           window.location.origin,
         )
       } catch {
@@ -73,10 +73,10 @@ export default function Login() {
     // Clear fragment — tokens should not live in browser history
     window.history.replaceState(null, '', window.location.pathname)
 
-    // Kick off project discovery
+    // Complete the OAuth flow — AuthContext handles scoped vs. pre-auth JWT
     setFormError(null)
     setDiscovering(true)
-    discoverProjects(oauth).finally(() => setDiscovering(false))
+    completeOAuth(token).finally(() => setDiscovering(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps — run once on mount
 
   // ── Navigate once phase changes ────────────────────────────────────────────

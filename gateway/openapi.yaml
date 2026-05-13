@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quorum Gateway API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Quorum Gateway — governed engineering memory for Claude Code and AI agents.
 
@@ -83,7 +83,36 @@ components:
         content_hash:   { type: string, nullable: true }
         governance_json: { type: object }
         outcome_json:    { type: object }
-        version_impact:  { type: object }
+        version_impact:
+          type: object
+          description: >
+            Versions affected by this audit event. Items in versions_created and
+            versions_superseded are objects (written by the MCP audit pipeline via
+            buildAuditVersionImpact) or strings in "topic:key:version" form
+            (written by the dashboard review flow). Consumers must handle both shapes.
+          properties:
+            versions_created:
+              type: array
+              items:
+                oneOf:
+                  - type: string
+                    description: "topic:key:version string (dashboard review flow)"
+                  - type: object
+                    description: Version record object (MCP audit pipeline)
+                    properties:
+                      version:      { type: integer }
+                      status:       { type: string }
+                      content_hash: { type: string, nullable: true }
+                      triggered_by: { type: string, nullable: true }
+            versions_superseded:
+              type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: object
+                    properties:
+                      version:       { type: integer }
+                      status_before: { type: string }
         entry_hash:      { type: string, description: SHA256 of this entry's canonical JSON }
         previous_hash:   { type: string, nullable: true }
         chain_position:  { type: integer }
@@ -414,37 +443,6 @@ paths:
         '302':
           description: Redirect to GitHub OAuth
 
-  /auth/callback:
-    get:
-      summary: GitHub OAuth callback
-      operationId: oauthCallback
-      security: []
-      tags: [Auth]
-      description: |
-        GitHub redirects here after authorization. Issues an ES256 JWT and a refresh token.
-        In browser contexts the tokens are set as HttpOnly cookies; in MCP contexts they are
-        returned in the JSON body.
-      parameters:
-        - name: code
-          in: query
-          required: true
-          schema: { type: string }
-        - name: state
-          in: query
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: OAuth complete — JWT and refresh token issued
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenResponse' }
-        '400':
-          description: Invalid state or missing code
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-
   /auth/token:
     post:
       summary: Exchange GitHub OAuth code for JWT (MCP / programmatic flow)
@@ -524,47 +522,33 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
     get:
-      summary: List projects accessible to the current user
+      summary: "DEPRECATED — use GET /user/profile/{sub} instead"
       operationId: listProjects
+      deprecated: true
       tags: [Auth]
+      description: |
+        **Deprecated in v0.3 (returns 410 Gone).** Use `GET /user/profile/{sub}` instead.
+        The profile endpoint returns the same project list with role, base_confidence, and is_owner fields.
       responses:
-        '200':
-          description: Array of accessible projects
+        '410':
+          description: Gone — endpoint retired in v0.3
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  projects:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        project_id:   { type: string }
-                        project_name: { type: string }
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /auth/switch:
     post:
-      summary: Switch active project (issues new JWT scoped to the target project)
+      summary: "DEPRECATED — set X-Quorum-Project header instead"
       operationId: switchProject
+      deprecated: true
       tags: [Auth]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [project_id]
-              properties:
-                project_id: { type: string }
+      description: |
+        **Deprecated in v0.3 (returns 410 Gone).** Set the `X-Quorum-Project: <group_id>` header
+        on every request instead. The verify-jwt middleware resolves role and ownership per-request
+        from the Redis profile cache.
       responses:
-        '200':
-          description: New JWT scoped to the target project
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TokenResponse' }
-        '403':
-          description: No access to that project
+        '410':
+          description: Gone — endpoint retired in v0.3
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -651,6 +635,61 @@ paths:
         '200':
           description: Cache invalidated
 
+  /config/upload:
+    post:
+      summary: Onboard a new project — upload config to S3 and sync to DDB
+      operationId: uploadConfig
+      security: []
+      tags: [Config]
+      description: |
+        One-time onboarding operation. Validates the config, uploads it to S3 as
+        `<group_id>.quorum.json`, and syncs to DynamoDB. Idempotent-fail: returns
+        409 if the project already exists in S3.
+
+        Auth: `X-Quorum-Sync-Token` header OR a `principal_architect` JWT.
+        No standard Bearer JWT required for first-time onboarding (bootstrap problem).
+      parameters:
+        - name: X-Quorum-Sync-Token
+          in: header
+          required: false
+          schema: { type: string }
+          description: Sync token (QUORUM_SYNC_SECRET) — alternative to principal_architect JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuorumConfig' }
+      responses:
+        '201':
+          description: Project onboarded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project_id: { type: string }
+                  message:    { type: string }
+        '207':
+          description: Config uploaded to S3 but DDB sync failed — call POST /sync/configs to retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '400':
+          description: Config validation failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Missing auth — requires X-Quorum-Sync-Token or principal_architect JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Project already onboarded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /config/validate:
     post:
       summary: Validate a config object against the JSON Schema
@@ -672,6 +711,232 @@ paths:
                 properties:
                   valid:  { type: boolean }
                   errors: { type: array, items: { type: object } }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # v0.3 — Governance endpoints
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /user/profile/{username}:
+    get:
+      summary: Get user profile — projects, roles, and ownership flags
+      operationId: getUserProfile
+      tags: [User]
+      description: |
+        v0.3 replacement for JWT role claims and `GET /auth/projects`.
+        Returns all projects the user is a member of with their current role,
+        base_confidence, is_owner, and team fields sourced from the Redis profile cache.
+
+        Access rules:
+        - Self: always allowed
+        - Platform admin: any user
+        - Others: requester must share at least one project with the target user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+          description: GitHub username of the target user
+        - name: X-Quorum-Project
+          in: header
+          required: false
+          schema: { type: string }
+          description: Active project group_id for role resolution
+      responses:
+        '200':
+          description: User profile with project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  github_username: { type: string }
+                  is_admin:        { type: boolean }
+                  projects:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group_id:        { type: string }
+                        role:            { type: string }
+                        base_confidence: { type: number }
+                        is_owner:        { type: boolean }
+                        team:            { type: string }
+        '403':
+          description: Forbidden — no shared project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/transfer-ownership:
+    post:
+      summary: Transfer project ownership to another member
+      operationId: transferOwnership
+      tags: [Config]
+      description: |
+        Transfers the `owner` field in the project config to a new member.
+        Actor must be the current owner, or a platform admin (admin cannot transfer to themselves).
+        The action is audited and profile caches for both actors are invalidated immediately.
+      parameters:
+        - name: X-Quorum-Project
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, reason]
+              properties:
+                to:     { type: string, description: GitHub username of the new owner }
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Ownership transferred
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:      { type: boolean }
+                  project: { type: string }
+                  from:    { type: string }
+                  to:      { type: string }
+        '400':
+          description: Validation error (not a member, short reason, missing params)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not the owner or admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/update-role:
+    post:
+      summary: Update a project member's role
+      operationId: updateMemberRole
+      tags: [Config]
+      description: |
+        Updates a member's role in the S3 project config and DDB membership record.
+        Actor must be the project owner or a platform admin.
+        The affected user's profile cache is invalidated immediately.
+      parameters:
+        - name: X-Quorum-Project
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [github_username, role, reason]
+              properties:
+                github_username: { type: string }
+                role:            { type: string, description: Must be a valid role in the project config }
+                reason:          { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:              { type: boolean }
+                  project:         { type: string }
+                  github_username: { type: string }
+                  role:            { type: string }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not owner or admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/config:
+    get:
+      summary: Get platform admin list
+      operationId: getAdminConfig
+      tags: [Admin]
+      description: Returns the `configs/.quorum` admin config. Platform admin only.
+      responses:
+        '200':
+          description: Platform admin configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        github_username: { type: string }
+                        added_at:        { type: string, format: date-time }
+                        added_by:        { type: string }
+                  version:    { type: integer }
+                  updated_at: { type: string, format: date-time }
+        '403':
+          description: Not a platform admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/users:
+    post:
+      summary: Add or remove a platform admin
+      operationId: manageAdminUsers
+      tags: [Admin]
+      description: |
+        Adds or removes a GitHub user from the platform admin list in `configs/.quorum`.
+        Platform admin only. Cannot remove the last admin. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, github_username, reason]
+              properties:
+                action:          { type: string, enum: [add, remove] }
+                github_username: { type: string }
+                reason:          { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Admin list updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  action: { type: string }
+                  github_username: { type: string }
+        '400':
+          description: Validation error or last admin removal attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not a platform admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   # ────────────────────────────────────────────────────────────────────────────
   # Graphiti proxy
@@ -993,12 +1258,16 @@ paths:
           description: Filter by tool name
       responses:
         '200':
-          description: Array of audit entries ordered by chain_position ASC
+          description: Audit entries wrapped in an object (not a bare array)
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/AuditEntry' }
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
 
   /pg/audit/count:
     get:
@@ -1050,23 +1319,11 @@ paths:
         - name: topic
           in: query
           schema: { type: string }
-          description: Filter by conflict topic
-        - name: statuses
-          in: query
-          schema:
-            type: array
-            items: { type: string, enum: [pending, resolved, stale] }
-          style: form
-          explode: false
-          description: Comma-separated status filter (default "pending")
-        - name: decisionType
-          in: query
-          schema: { type: string, enum: [conflict] }
-          description: Decision type filter (default "conflict")
+          description: Filter by conflict topic (maps to conflict_topic column)
         - name: include_stale
           in: query
           schema: { type: boolean }
-          description: Include stale decisions in results
+          description: When false (default), returns only status='pending' decisions. When true, returns all statuses.
       responses:
         '200':
           description: Array of pending decisions
@@ -1476,6 +1733,413 @@ paths:
         '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
+  # ── /pg/versions — status/draft helpers (added feat/dashboard) ────────────────
+
+  /pg/versions/drafts:
+    get:
+      summary: All DRAFT versions for this project (optional ?topic= filter)
+      operationId: getDraftVersions
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of DRAFT version records
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/KnowledgeVersion' } }
+
+  /pg/versions/status-counts:
+    get:
+      summary: Version counts grouped by status (optional ?topic= filter)
+      operationId: getVersionStatusCounts
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Object mapping status → count
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: integer }
+
+  /pg/versions/by-status/{status}:
+    get:
+      summary: Versions filtered by status (optional ?topic= filter)
+      operationId: getVersionsByStatus
+      tags: [Versions]
+      parameters:
+        - name: status
+          in: path
+          required: true
+          schema: { type: string, enum: [DRAFT, ACTIVE, SUPERSEDED, DEPRECATED] }
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of version records with matching status
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/KnowledgeVersion' } }
+
+  /pg/audit/lineage/{topic}/{key}:
+    get:
+      summary: Ordered audit trail for a knowledge node (topic:key)
+      operationId: getAuditLineage
+      tags: [Audit]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit entries for this node wrapped in { entries: [...] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+
+  # ── Dashboard BFF — /api/* (added feat/dashboard) ─────────────────────────────
+  # These endpoints aggregate data for the React dashboard; they require JWT +
+  # X-Quorum-Project header. All are project-scoped.
+
+  /api/stats:
+    get:
+      summary: Aggregated dashboard metrics — domain breakdown, confidence distribution, pending queue, activity
+      operationId: getDashboardStats
+      tags: [Dashboard]
+      responses:
+        '200':
+          description: Stats object
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domains:
+                    type: array
+                    description: Per-topic breakdown of active/draft counts and avg confidence
+                    items:
+                      type: object
+                      properties:
+                        domain:          { type: string }
+                        active_count:    { type: integer }
+                        draft_count:     { type: integer }
+                        avg_confidence:  { type: number }
+                  pending:
+                    type: object
+                    description: Pending conflict queue summary
+                    properties:
+                      total:            { type: integer }
+                      avg_age_hours:    { type: number }
+                      oldest_age_hours: { type: number }
+                  activity:
+                    type: array
+                    description: Daily operation counts for the past 30 days
+                    items:
+                      type: object
+                      properties:
+                        date:            { type: string, format: date }
+                        operation_count: { type: integer }
+                  confidence:
+                    type: object
+                    description: Confidence histogram buckets (ACTIVE entries only)
+                    properties:
+                      high:   { type: integer, description: confidence > 0.7 }
+                      medium: { type: integer, description: confidence 0.4–0.7 }
+                      low:    { type: integer, description: confidence < 0.4 }
+                  lowest_confidence:
+                    type: array
+                    description: Up to 10 ACTIVE entries with lowest confidence (candidates for refresh)
+                    items:
+                      type: object
+                      properties:
+                        topic:           { type: string }
+                        key:             { type: string }
+                        confidence:      { type: number }
+                        last_accessed_at: { type: string, format: date-time, nullable: true }
+                  most_accessed:
+                    type: array
+                    description: Up to 10 ACTIVE entries with highest recall frequency
+                    items:
+                      type: object
+                      properties:
+                        topic:        { type: string }
+                        key:          { type: string }
+                        confidence:   { type: number }
+                        access_count: { type: integer }
+
+  /api/graph:
+    get:
+      summary: Knowledge graph nodes and edges for Cytoscape.js visualisation
+      operationId: getGraphData
+      tags: [Dashboard]
+      parameters:
+        - name: domain
+          in: query
+          description: Filter by topic/domain. Required when total ACTIVE node count > 500.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Graph data in Cytoscape.js element format. Includes a hub node (project or domain) and spoke edges connecting all knowledge nodes to it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    description: Cytoscape node elements. First element is always the hub node.
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          type: object
+                          properties:
+                            id:          { type: string, description: "topic:key:version or hub ID" }
+                            topic:       { type: string }
+                            key:         { type: string }
+                            entity_type: { type: string }
+                            confidence:  { type: number }
+                            author:      { type: string }
+                            summary:     { type: string }
+                            status:      { type: string }
+                            node_type:   { type: string, description: "'hub' for the central hub node, absent for knowledge nodes" }
+                  edges:
+                    type: array
+                    description: Cytoscape edge elements — SUPERSEDES (version lineage) and BELONGS_TO (spoke to hub)
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          type: object
+                          properties:
+                            id:     { type: string }
+                            source: { type: string }
+                            target: { type: string }
+                            type:   { type: string, enum: [SUPERSEDES, BELONGS_TO] }
+        '400':
+          description: Graph too large — specify ?domain= to filter
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/knowledge:
+    get:
+      summary: Knowledge browser — paginated list of active versions
+      operationId: getKnowledgeList
+      tags: [Dashboard]
+      parameters:
+        - name: domain
+          in: query
+          description: Filter by topic/domain (maps to `topic` column)
+          schema: { type: string }
+        - name: tag
+          in: query
+          description: Filter by tag (exact match, case-insensitive)
+          schema: { type: string }
+        - name: entity_type
+          in: query
+          description: Filter by entity type
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: >
+            Paginated knowledge list. Items are a subset of KnowledgeVersion:
+            topic, key, entity_type, confidence, author, tags, version, and updated_at
+            (aliased from the created_at column). Only ACTIVE entries are returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:       { type: string }
+                        key:         { type: string }
+                        entity_type: { type: string }
+                        confidence:  { type: number }
+                        author:      { type: string }
+                        tags:        { type: array, items: { type: string } }
+                        version:     { type: integer }
+                        updated_at:  { type: string, format: date-time, description: "Aliased from created_at — timestamp of this version's creation" }
+                  total:  { type: integer }
+                  page:   { type: integer }
+                  pages:  { type: integer }
+
+  /api/knowledge/{topic}/{key}:
+    get:
+      summary: Single knowledge entry — PG metadata + content resolved from summary or Graphiti fallback
+      operationId: getKnowledgeEntry
+      tags: [Dashboard]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: >
+            Flat knowledge entry object. `content` is populated from the PostgreSQL `summary` column
+            (written by every `remember()` call via buildVersionRecord). Falls back to a Graphiti
+            `search_nodes` query for entries written before the summary column was introduced.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topic, key, version, entity_type, confidence, author, author_role, tags, status, created_at]
+                properties:
+                  topic:               { type: string }
+                  key:                 { type: string }
+                  version:             { type: integer }
+                  entity_type:         { type: string }
+                  confidence:          { type: number, minimum: 0, maximum: 1 }
+                  author:              { type: string }
+                  author_role:         { type: string }
+                  tags:                { type: array, items: { type: string } }
+                  status:              { type: string, enum: [ACTIVE, DRAFT, SUPERSEDED, DEPRECATED, REJECTED] }
+                  created_at:          { type: string, format: date-time }
+                  graphiti_episode_id: { type: string, nullable: true }
+                  content:             { type: string, nullable: true, description: "The knowledge text. Null for legacy entries written before summary column was populated." }
+        '404':
+          description: No ACTIVE version exists for this topic:key in the project
+
+  /api/search:
+    get:
+      summary: Search knowledge graph (Graphiti first, PostgreSQL ILIKE fallback)
+      operationId: searchKnowledge
+      tags: [Dashboard]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: domain
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, maximum: 50 }
+      responses:
+        '200':
+          description: Search results with source indicator
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, source]
+                properties:
+                  results: { type: array, items: { type: object } }
+                  source:  { type: string, enum: [graphiti, postgres] }
+
+  /api/review/{conflictId}:
+    post:
+      summary: Approve, reject, or request changes on a pending decision
+      operationId: reviewDecision
+      tags: [Dashboard]
+      parameters:
+        - name: conflictId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, note]
+              properties:
+                action: { type: string, enum: [approve, reject, request_changes] }
+                note:   { type: string, minLength: 10, description: Mandatory review note (≥10 chars) }
+      responses:
+        '200':
+          description: Review outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, conflict_id, reviewer, note]
+                properties:
+                  status:        { type: string, enum: [approved, rejected, changes_requested] }
+                  conflict_id:   { type: string }
+                  topic:         { type: string }
+                  key:           { type: string }
+                  version:       { type: integer, nullable: true }
+                  reviewer:      { type: string }
+                  note:          { type: string }
+                  stale_warning: { type: string, nullable: true }
+        '400': { description: Invalid action or note too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Self-approval blocked or wrong project, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Conflict ID not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/bump/{topic}/{key}:
+    post:
+      summary: Confidence bump — register positive signal for a knowledge node
+      operationId: bumpConfidence
+      tags: [Dashboard]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bump applied — returns updated confidence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topic, key, bumped_by, delta_applied, confidence_before, confidence_after]
+                properties:
+                  topic:               { type: string }
+                  key:                 { type: string }
+                  project_id:          { type: string }
+                  bumped_by:           { type: string }
+                  role:                { type: string }
+                  delta_applied:       { type: number }
+                  confidence_before:   { type: number }
+                  confidence_after:    { type: number }
+                  starting_confidence: { type: number }
+                  clock_reset:         { type: boolean }
+                  next_bump_allowed:   { type: string, format: date-time }
+        '404': { description: No ACTIVE knowledge at topic:key, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Bump cooldown active, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
 tags:
   - name: Health
     description: Gateway health check
@@ -1496,6 +2160,10 @@ tags:
   - name: Confidence
     description: Confidence bump operations
   - name: Admin
-    description: Administrative operations (sync, config management)
+    description: Platform admin management (v0.3 — add/remove platform admins)
+  - name: User
+    description: User profile endpoints (v0.3 — per-request role resolution from Redis profile cache)
   - name: Governance
     description: LLM-powered governance — conflict detection, reviewer enrichment, knowledge extraction
+  - name: Dashboard
+    description: Dashboard BFF routes — aggregated data for the React UI (require X-Quorum-Project header)

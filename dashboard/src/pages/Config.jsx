@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useConfig, useValidateConfig, useSaveConfig } from '../api/config.js'
+import { useTransferOwnership, useUpdateRole } from '../api/governance.js'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const ROLES = ['engineer', 'senior_engineer', 'tech_lead', 'architect', 'principal_architect']
 
@@ -7,10 +9,26 @@ export default function Config() {
   const { data: remote, isLoading, error } = useConfig()
   const validate = useValidateConfig()
   const save     = useSaveConfig()
+  const transfer = useTransferOwnership()
+  const updateRole = useUpdateRole()
+  const { user, currentProjectData } = useAuth()
+
+  const isOwner = currentProjectData?.is_owner ?? false
+  const isAdmin = user?.is_admin ?? false
+  const canGovern = isOwner || isAdmin
 
   const [draft,       setDraft]       = useState(null)
   const [validErr,    setValidErr]    = useState(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Governance form state
+  const [transferTo,     setTransferTo]     = useState('')
+  const [transferReason, setTransferReason] = useState('')
+  const [transferMsg,    setTransferMsg]    = useState(null)
+  const [roleTarget,     setRoleTarget]     = useState('')
+  const [roleNew,        setRoleNew]        = useState('engineer')
+  const [roleReason,     setRoleReason]     = useState('')
+  const [roleMsg,        setRoleMsg]        = useState(null)
 
   // Populate draft when remote config loads
   useEffect(() => {
@@ -31,8 +49,32 @@ export default function Config() {
     return () => clearTimeout(t)
   }, [draft])
 
-  if (isLoading || !draft) return <p className="text-sm text-gray-600 py-8 text-center">Loading config…</p>
-  if (error) return <p className="text-sm text-red-400 py-4">{error.message}</p>
+  if (isLoading) return <p className="text-sm text-gray-600 py-8 text-center">Loading config…</p>
+  if (error)     return <p className="text-sm text-red-400 py-4">{error.message}</p>
+  if (!draft)    return <p className="text-sm text-gray-600 py-8 text-center">Loading config…</p>
+
+  async function handleTransfer() {
+    setTransferMsg(null)
+    try {
+      await transfer.mutateAsync({ to: transferTo, reason: transferReason })
+      setTransferMsg({ ok: true, text: `Ownership transferred to ${transferTo}.` })
+      setTransferTo('')
+      setTransferReason('')
+    } catch (err) {
+      setTransferMsg({ ok: false, text: err.message })
+    }
+  }
+
+  async function handleRoleUpdate() {
+    setRoleMsg(null)
+    try {
+      await updateRole.mutateAsync({ github_username: roleTarget, role: roleNew, reason: roleReason })
+      setRoleMsg({ ok: true, text: `Role for ${roleTarget} updated to ${roleNew}.` })
+      setRoleReason('')
+    } catch (err) {
+      setRoleMsg({ ok: false, text: err.message })
+    }
+  }
 
   async function handleSave() {
     setSaveSuccess(false)
@@ -151,6 +193,91 @@ export default function Config() {
           {save.isPending ? 'Saving…' : 'Save config'}
         </button>
       </div>
+
+      {/* Governance panels — owner or admin only */}
+      {canGovern && (
+        <>
+          {/* Role editor */}
+          <Card title="Update member role">
+            <p className="text-xs text-gray-500 mb-3">
+              Role changes are audited and invalidate the member&apos;s profile cache immediately.
+            </p>
+            <div className="grid grid-cols-12 gap-2 items-end">
+              <select
+                value={roleTarget}
+                onChange={(e) => setRoleTarget(e.target.value)}
+                className="col-span-4 input-sm"
+              >
+                <option value="">Select member…</option>
+                {(draft?.members ?? []).map((m) => (
+                  <option key={m.github_username} value={m.github_username}>
+                    {m.github_username}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={roleNew}
+                onChange={(e) => setRoleNew(e.target.value)}
+                className="col-span-3 input-sm"
+              >
+                {ROLES.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+              </select>
+              <input
+                value={roleReason}
+                onChange={(e) => setRoleReason(e.target.value)}
+                placeholder="Reason (≥ 10 chars)"
+                className="col-span-4 input-sm"
+              />
+              <button
+                disabled={!roleTarget || roleReason.length < 10 || updateRole.isPending}
+                onClick={handleRoleUpdate}
+                className="col-span-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 px-2 py-1 text-xs font-medium text-white"
+              >
+                {updateRole.isPending ? '…' : 'Apply'}
+              </button>
+            </div>
+            {roleMsg && (
+              <p className={`text-xs mt-2 ${roleMsg.ok ? 'text-green-500' : 'text-red-400'}`}>
+                {roleMsg.text}
+              </p>
+            )}
+          </Card>
+
+          {/* Transfer ownership — owner only (admin can transfer but cannot self-assign) */}
+          <Card title="Transfer ownership">
+            <p className="text-xs text-gray-500 mb-3">
+              Permanently transfers the project owner role. The action is audited and
+              takes effect immediately via cache invalidation.
+            </p>
+            <div className="grid grid-cols-12 gap-2 items-end">
+              <input
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value)}
+                placeholder="New owner username"
+                className="col-span-4 input-sm"
+              />
+              <input
+                value={transferReason}
+                onChange={(e) => setTransferReason(e.target.value)}
+                placeholder="Reason (≥ 10 chars)"
+                className="col-span-6 input-sm"
+              />
+              <button
+                disabled={!transferTo || transferReason.length < 10 || transfer.isPending}
+                onClick={handleTransfer}
+                className="col-span-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-40 px-2 py-1 text-xs font-medium text-white"
+              >
+                {transfer.isPending ? '…' : 'Transfer'}
+              </button>
+            </div>
+            {transferMsg && (
+              <p className={`text-xs mt-2 ${transferMsg.ok ? 'text-green-500' : 'text-red-400'}`}>
+                {transferMsg.text}
+              </p>
+            )}
+          </Card>
+        </>
+      )}
 
     </div>
   )

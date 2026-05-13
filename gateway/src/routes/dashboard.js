@@ -24,7 +24,7 @@ import {
   insertBump,
   updateConfidence,
 } from '../shared/graph/queries.js'
-import { searchNodes } from '../shared/graph/client.js'
+import { searchNodes, searchFacts } from '../shared/graph/client.js'
 import { writeAuditEntry } from '../shared/audit/secondary.js'
 import { enforceNoSelfApproval, enforceReasonRequired } from '../shared/governance/constitutional.js'
 
@@ -163,7 +163,7 @@ router.get('/graph', async (req, res, next) => {
 
     const result = await pool.query(
       `SELECT id, topic, key, version, entity_type, confidence, author, summary,
-              status, supersedes_version
+              status, supersedes_version, tags
        FROM knowledge_versions
        WHERE project_id = $1 AND status = 'ACTIVE' ${domainFilter}
        ORDER BY topic, key, version`,
@@ -197,20 +197,81 @@ router.get('/graph', async (req, res, next) => {
       }
     }
 
+    // Tag-based RELATES_TO edges — connect nodes that share meaningful cross-cutting tags.
+    //
+    // Two noise filters:
+    //   1. Exclude tags that appear on > 40% of nodes in the result set — these are
+    //      domain-wide labels (e.g. "openai" in an ai-generation domain) that would
+    //      create a near-fully-connected graph.
+    //   2. Require ≥ 2 qualifying shared tags — a single shared tag is often coincidental.
+    //
+    // Also exclude the domain name itself as a tag.
+    const domainTagSet = new Set(domain ? [domain] : [])
+    const tagFreq = {}
+    for (const row of rows) {
+      for (const t of (row.tags ?? [])) {
+        if (!domainTagSet.has(t)) tagFreq[t] = (tagFreq[t] ?? 0) + 1
+      }
+    }
+    const nodeCount     = rows.length
+    const maxFreq       = Math.max(1, nodeCount * 0.4)   // tags on > 40 % of nodes are noise
+    const rareTagFilter = (t) => !domainTagSet.has(t) && (tagFreq[t] ?? 0) <= maxFreq
+
+    for (let i = 0; i < rows.length; i++) {
+      const tagsA = (rows[i].tags ?? []).filter(rareTagFilter)
+      if (tagsA.length === 0) continue
+      for (let j = i + 1; j < rows.length; j++) {
+        const tagsB = (rows[j].tags ?? []).filter(rareTagFilter)
+        const shared = tagsA.filter((t) => tagsB.includes(t))
+        if (shared.length >= 2) {
+          const srcId = `${rows[i].topic}:${rows[i].key}:${rows[i].version}`
+          const tgtId = `${rows[j].topic}:${rows[j].key}:${rows[j].version}`
+          edges.push({
+            data: {
+              id:          `tag:${srcId}→${tgtId}`,
+              source:      srcId,
+              target:      tgtId,
+              type:        'RELATES_TO',
+              shared_tags: shared,
+            },
+          })
+        }
+      }
+    }
+
+    // Central hub node — project or domain depending on filter
+    const hubId    = domain ? `domain:${domain}` : `project:${projectId}`
+    const hubLabel = domain ?? projectId
+    const hubNode  = { data: { id: hubId, label: hubLabel, node_type: 'hub' } }
+
+    // Spoke edges: every knowledge node → hub
+    const spokeEdges = rows.map((r) => ({
+      data: {
+        id:     `spoke:${r.topic}:${r.key}:${r.version}`,
+        source: `${r.topic}:${r.key}:${r.version}`,
+        target: hubId,
+        type:   'BELONGS_TO',
+      },
+    }))
+
     res.json({
-      nodes: rows.map((r) => ({
-        data: {
-          id:          `${r.topic}:${r.key}:${r.version}`,
-          topic:       r.topic,
-          key:         r.key,
-          entity_type: r.entity_type,
-          confidence:  r.confidence,
-          author:      r.author,
-          summary:     r.summary || `${r.topic}:${r.key}`,
-          status:      r.status,
-        },
-      })),
-      edges,
+      nodes: [
+        hubNode,
+        ...rows.map((r) => ({
+          data: {
+            id:          `${r.topic}:${r.key}:${r.version}`,
+            topic:       r.topic,
+            key:         r.key,
+            entity_type: r.entity_type,
+            confidence:  r.confidence,
+            author:      r.author,
+            summary:     r.summary || `${r.topic}:${r.key}`,
+            status:      r.status,
+            tags:        r.tags ?? [],
+          },
+        })),
+      ],
+      edges: [...edges, ...spokeEdges],
     })
   } catch (err) {
     next(err)
@@ -282,6 +343,71 @@ router.get('/knowledge', async (req, res, next) => {
   }
 })
 
+// ── GET /api/knowledge/:topic/:key ────────────────────────────────────────────
+
+/**
+ * Full detail for a single knowledge entry: PG metadata + Graphiti content.
+ * Used by NodePanel (graph) and KnowledgeDetail (browser) when a node is clicked.
+ */
+router.get('/knowledge/:topic/:key', async (req, res, next) => {
+  const pool      = req.app.locals.pool
+  const projectId = req.user.project ?? 'default'
+  const { topic, key } = req.params
+
+  try {
+    const pgResult = await pool.query(
+      `SELECT topic, key, version, entity_type, confidence, author, author_role,
+              tags, summary, status, created_at, supersedes_version, graphiti_episode_id
+       FROM knowledge_versions
+       WHERE project_id = $1 AND topic = $2 AND key = $3 AND status = 'ACTIVE'
+       LIMIT 1`,
+      [projectId, topic, key],
+    )
+    const row = pgResult.rows[0] ?? null
+
+    if (!row) return res.status(404).json({ error: 'not_found' })
+
+    // summary is the canonical content source (populated by insertVersion going forward).
+    // For older entries where summary is empty, fall back to Graphiti node search.
+    // Two search strategies are tried because hyphens in key names are treated as NOT
+    // operators in RediSearch — "quoted terms" bypass that interpretation.
+    // group_ids are omitted intentionally (hyphenated project IDs break RediSearch);
+    // project isolation is enforced by the PostgreSQL WHERE clause above.
+    let content = row.summary || null
+    if (!content) {
+      const runSearch = async (query) => {
+        const result = await searchNodes(query, { limit: 5 }).catch(() => null)
+        const nodes  = result?.nodes ?? []
+        return nodes.find((n) => (n.name ?? '').includes(key)) ?? nodes[0] ?? null
+      }
+
+      // Strategy 1: quoted "topic:key" — treats hyphens as literals in RediSearch
+      const match = (await runSearch(`"${topic}:${key}"`))
+        // Strategy 2: quoted key alone, in case topic prefix confused the match
+        ?? (await runSearch(`"${key}"`))
+
+      content = match?.summary ?? null
+    }
+
+    res.json({
+      topic:               row.topic,
+      key:                 row.key,
+      version:             row.version,
+      entity_type:         row.entity_type,
+      confidence:          row.confidence,
+      author:              row.author,
+      author_role:         row.author_role,
+      tags:                row.tags ?? [],
+      status:              row.status,
+      created_at:          row.created_at,
+      graphiti_episode_id: row.graphiti_episode_id,
+      content,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── GET /api/search ────────────────────────────────────────────────────────────
 
 /**
@@ -305,17 +431,52 @@ router.get('/search', async (req, res, next) => {
 
     const nodes = graphitiResult?.nodes ?? graphitiResult?.results ?? []
 
+    if (nodes.length > 0) {
+      return res.json({
+        results: nodes.map((n) => ({
+          topic:       n.topic       ?? n.group_id ?? '',
+          key:         n.key         ?? n.name     ?? '',
+          entity_type: n.entity_type ?? 'unknown',
+          summary:     n.summary     ?? n.name     ?? '',
+          confidence:  n.confidence  ?? null,
+          score:       n.score       ?? n.distance ?? null,
+          author:      n.author      ?? null,
+          updated_at:  n.created_at  ?? n.updated_at ?? null,
+        })),
+        source: 'graphiti',
+      })
+    }
+
+    // Graphiti returned nothing — fall back to PostgreSQL full-text search
+    const pool = req.app.locals.pool
+    const pattern = `%${query}%`
+    const domainFilter = domain ? 'AND topic = $3' : ''
+    const params = domain ? [projectId, pattern, domain] : [projectId, pattern]
+
+    const { rows } = await pool.query(
+      `SELECT topic, key, summary, status, confidence, author, created_at
+       FROM knowledge_versions
+       WHERE project_id = $1
+         AND (summary ILIKE $2 OR key ILIKE $2 OR topic ILIKE $2)
+         AND status != 'DEPRECATED'
+         ${domainFilter}
+       ORDER BY confidence DESC, created_at DESC
+       LIMIT ${limit}`,
+      params,
+    )
+
     res.json({
-      results: nodes.map((n) => ({
-        topic:       n.topic       ?? n.group_id ?? '',
-        key:         n.key         ?? n.name     ?? '',
-        entity_type: n.entity_type ?? 'unknown',
-        summary:     n.summary     ?? n.name     ?? '',
-        confidence:  n.confidence  ?? null,
-        score:       n.score       ?? n.distance ?? null,
-        author:      n.author      ?? null,
-        updated_at:  n.created_at  ?? n.updated_at ?? null,
+      results: rows.map((r) => ({
+        topic:       r.topic,
+        key:         r.key,
+        entity_type: 'unknown',
+        summary:     r.summary ?? '',
+        confidence:  r.confidence ?? null,
+        score:       null,
+        author:      r.author ?? null,
+        updated_at:  r.created_at ?? null,
       })),
+      source: 'postgres',
     })
   } catch (err) {
     next(err)

@@ -123,6 +123,16 @@ cmd_docker() {
   header "Quorum — Docker Compose Setup"
   info "Log: $LOG_FILE"
 
+  # Tag images with the current git commit hash for traceability.
+  # APP_VERSION is read from root package.json — single source of truth for the release version.
+  # IMAGE_TAG defaults to the git short hash; falls back to APP_VERSION when git is unavailable.
+  # docker-compose.yml reads IMAGE_TAG; its own fallback is also APP_VERSION (via setup.sh export).
+  local APP_VERSION
+  APP_VERSION=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/package.json'))['version'])" 2>/dev/null || echo "latest")
+  export IMAGE_TAG
+  IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
+  info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
+
   check_node
   check_docker
 
@@ -244,6 +254,12 @@ cmd_docker_rebuild() {
   header "Quorum — Rebuild Docker Images"
   check_docker
   cd "$PROJECT_ROOT"
+
+  local APP_VERSION
+  APP_VERSION=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/package.json'))['version'])" 2>/dev/null || echo "latest")
+  export IMAGE_TAG
+  IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
+  info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
 
   EXTERNAL_LOCALSTACK=""
   check_localstack_conflict

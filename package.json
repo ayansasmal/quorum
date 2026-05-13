@@ -4,8 +4,18 @@
   "description": "Quorum monorepo — governed engineering memory for Claude Code and AI agents",
   "type": "module",
   "private": true,
-  "workspaces": ["gateway", "dashboard"],
+  "workspaces": [
+    "gateway",
+    "dashboard"
+  ],
   "scripts": {
+    "version": "node scripts/sync-versions.js && git add gateway/package.json dashboard/package.json",
+    "version:sync": "node scripts/sync-versions.js",
+    "release": "commit-and-tag-version",
+    "release:dry": "commit-and-tag-version --dry-run",
+    "release:minor": "commit-and-tag-version --release-as minor",
+    "release:major": "commit-and-tag-version --release-as major",
+    "release:patch": "commit-and-tag-version --release-as patch",
     "docker:start": "./scripts/setup.sh docker",
     "docker:rebuild": "./scripts/setup.sh docker rebuild",
     "docker:clean": "./scripts/setup.sh docker clean",
@@ -23,10 +33,15 @@
     "audit:cli": "node scripts/audit-cli.js",
     "job:decay": "node scripts/decay-confidence.js",
     "job:archive": "node scripts/archive-audit.js",
-    "job:recheck": "node scripts/recheck-conflicts.js"
+    "job:recheck": "node scripts/recheck-conflicts.js",
+    "prepare": "husky || true"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.0",
+    "@commitlint/config-conventional": "^21.0.0",
     "@vitest/coverage-v8": "4.1.2",
+    "commit-and-tag-version": "^12.7.3",
+    "husky": "^9.1.7",
     "vitest": "4.1.2"
   },
   "overrides": {

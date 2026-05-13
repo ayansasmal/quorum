@@ -6,13 +6,25 @@ import VersionTimeline from './VersionTimeline.jsx'
 import { entityBadge, fmtDate } from '../../lib/utils.js'
 
 export default function KnowledgeDetail({ row, onClose }) {
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ['knowledge-detail', row.topic, row.key],
+    queryFn:  () => apiFetch(`/api/knowledge/${encodeURIComponent(row.topic)}/${encodeURIComponent(row.key)}`),
+    enabled:  !!row,
+    staleTime: 60_000,
+  })
+
   const { data: history } = useQuery({
     queryKey: ['history', row.topic, row.key],
-    queryFn:  () => apiFetch(`/pg/versions/${encodeURIComponent(row.topic)}/${encodeURIComponent(row.key)}`),
+    queryFn:  () => apiFetch(`/pg/versions/${encodeURIComponent(row.topic)}/${encodeURIComponent(row.key)}/history`),
     enabled:  !!row,
   })
 
-  const versions = history?.versions ?? []
+  const versions = Array.isArray(history) ? history : []
+  const tags = detail?.tags ?? row.tags ?? []
+  // Use detail.content (from PG summary + Graphiti fallback), then fall back to
+  // the most recent version's summary from the already-fetched history, so entries
+  // with content stored only in history records still render without a second fetch.
+  const content = detail?.content || versions[0]?.summary || null
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -35,7 +47,7 @@ export default function KnowledgeDetail({ row, onClose }) {
         <div className="px-5 py-4 space-y-3 border-b border-gray-200 dark:border-gray-800">
           <div className="flex flex-wrap gap-2">
             <Badge className={entityBadge(row.entity_type)}>{row.entity_type}</Badge>
-            {(row.tags ?? []).map((t) => (
+            {tags.map((t) => (
               <Badge key={t} className="text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700">{t}</Badge>
             ))}
           </div>
@@ -45,6 +57,21 @@ export default function KnowledgeDetail({ row, onClose }) {
             <span>{fmtDate(row.updated_at)}</span>
           </div>
           <ConfidenceBar value={row.confidence} showLabel />
+        </div>
+
+        {/* Content */}
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-3">Knowledge</h3>
+          {isLoading ? (
+            <p className="text-xs text-gray-400 animate-pulse">Loading…</p>
+          ) : content ? (
+            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{content}</p>
+          ) : (
+            <p className="text-xs text-gray-400 italic">
+              Content not stored — this entry predates the durable summary store.
+              Re-enter it via <code className="font-mono">remember()</code> in the MCP to restore it.
+            </p>
+          )}
         </div>
 
         {/* Version history */}

@@ -171,7 +171,7 @@ export async function insertVersion(pg, record) {
       record.tags ?? [],
       record.project_id ?? process.env.QUORUM_PROJECT_ID ?? 'default',
       record.entity_type ?? 'unknown',
-      record.summary     ?? '',
+      record.content     ?? record.summary ?? '',
     ],
   )
   return result.rows[0]

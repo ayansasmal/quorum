@@ -3,12 +3,13 @@ import { apiFetch } from './client.js'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export function useConfig() {
-  const { user } = useAuth()
-  const projectId = user?.project
+  // Use selectedProject (sessionStorage-backed) rather than user?.project (JWT-derived)
+  // so the query stays enabled on refresh even if the stored user object is stale.
+  const { selectedProject } = useAuth()
   return useQuery({
-    queryKey:  ['config', projectId],
-    queryFn:   () => apiFetch(`/config/${encodeURIComponent(projectId)}`),
-    enabled:   !!projectId,
+    queryKey:  ['config', selectedProject],
+    queryFn:   () => apiFetch(`/config/${encodeURIComponent(selectedProject)}`),
+    enabled:   !!selectedProject,
     staleTime: 60_000,
   })
 }
@@ -24,9 +25,9 @@ export function useValidateConfig() {
 
 export function useSaveConfig() {
   const qc = useQueryClient()
-  const { user } = useAuth()
+  const { selectedProject } = useAuth()
   return useMutation({
-    mutationFn: (config) => apiFetch(`/config/${encodeURIComponent(user?.project)}`, {
+    mutationFn: (config) => apiFetch(`/config/${encodeURIComponent(selectedProject)}`, {
       method: 'PUT',
       body:   JSON.stringify(config),
     }),

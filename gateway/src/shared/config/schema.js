@@ -68,6 +68,12 @@ export const NotificationsSchema = z.object({
 /** Root config schema. */
 export const QuorumConfigSchema = z.object({
   /**
+   * GitHub username of the project owner.
+   * The owner can transfer ownership and update member roles.
+   * Separate from principal_architect (knowledge authority) — they may be the same person.
+   */
+  owner: z.string().min(1),
+  /**
    * Canonical identifier for this project.
    * Must be lowercase letters, numbers, and hyphens only.
    * Used as:

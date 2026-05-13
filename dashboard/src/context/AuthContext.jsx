@@ -3,27 +3,27 @@
  *
  * Auth phases:
  *   'unauthenticated' → user has no token and no pending OAuth flow
- *   'discovering'     → GitHub OAuth complete; fetching project list from gateway
- *   'selecting'       → project list loaded; user must pick one (or auto-selected)
+ *   'discovering'     → pre-auth JWT held; fetching project list from gateway
+ *   'selecting'       → project list loaded; user must pick one
  *   'authenticated'   → project-scoped JWT active; dashboard is usable
  *
  * Login flow (first time):
- *   1. User clicks "Login with GitHub" → OAuth popup → gho_ token returned
- *   2. discoverProjects(gho_token) → POST /auth/projects → project list
- *      - 1 project  → auto-select → login() → 'authenticated'
- *      - n projects → phase = 'selecting' (ProjectSelector shown)
- *   3. selectProject(slug) → login(pendingOauthToken, slug) → 'authenticated'
+ *   1. User clicks "Login with GitHub" → /auth/github → GitHub OAuth
+ *   2. Gateway callback exchanges code server-side → issues Quorum JWT directly:
+ *        1 project  → scoped JWT  → #token=<jwt> in fragment
+ *        n projects → pre-auth JWT (5 min, no project claim) → #token=<jwt> in fragment
+ *   3. Login.jsx reads #token= → calls completeOAuth(jwt)
+ *      - scoped JWT  → _applyJwt() → 'authenticated'
+ *      - pre-auth JWT → GET /auth/projects → 'discovering' → 'selecting'
+ *   4. selectProject(slug) → POST /auth/switch with pre-auth JWT → scoped JWT → 'authenticated'
  *
  * Project switching (already authenticated):
- *   switchProject() → POST /auth/switch { project_id } → new project-scoped JWT
- *   No GitHub re-auth needed — the existing JWT proves identity.
- *   The project list is reloaded from /auth/projects (requires fresh gho_ token via popup).
- *   OR if the cached project list covers the switch: just call POST /auth/switch directly.
+ *   switchProject() → 'selecting'; switchTo(slug) → POST /auth/switch with existing JWT
  *
  * Token storage:
- *   JWT           → React state + sessionStorage (survives refresh, cleared on tab close)
- *   gho_ token    → useRef only — NEVER sessionStorage, never written to disk
- *   Project list  → React state + sessionStorage (metadata only, not credentials)
+ *   Scoped JWT      → React state + sessionStorage (survives refresh, cleared on tab close)
+ *   Pre-auth JWT    → useRef only — never sessionStorage, never disk
+ *   Project list    → React state + sessionStorage (metadata only, not credentials)
  *
  * XSS note: sessionStorage is readable by JS on the same origin. The risk
  * is the same as localStorage but the blast radius is smaller (tab-scoped).
@@ -32,10 +32,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { decodeJwt } from '../lib/utils.js'
+import { registerProjectGetter } from '../api/client.js'
 
 const AuthContext       = createContext(null)
 const SESSION_KEY       = 'quorum_session'
 const PROJECTS_KEY      = 'quorum_projects'
+const PROJECT_KEY       = 'quorum_active_project'
 
 // ── Session persistence helpers ────────────────────────────────────────────────
 
@@ -91,6 +93,36 @@ function clearStoredProjects() {
   sessionStorage.removeItem(PROJECTS_KEY)
 }
 
+function readStoredProject() {
+  return sessionStorage.getItem(PROJECT_KEY) ?? null
+}
+
+function writeStoredProject(slug) {
+  try { sessionStorage.setItem(PROJECT_KEY, slug) } catch { /* quota */ }
+}
+
+function clearStoredProject() {
+  sessionStorage.removeItem(PROJECT_KEY)
+}
+
+/**
+ * Fetch the user profile from the gateway. Returns null on failure.
+ * @param {string} sub
+ * @param {string} jwt
+ * @returns {Promise<object | null>}
+ */
+async function fetchProfile(sub, jwt) {
+  try {
+    const res = await fetch(`/user/profile/${encodeURIComponent(sub)}`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
 // ── Provider ───────────────────────────────────────────────────────────────────
 
 /**
@@ -101,14 +133,13 @@ function clearStoredProjects() {
  *   token              — raw JWT string (null when not authenticated)
  *   user               — decoded JWT payload { sub, project, role, team, exp }
  *   availableProjects  — project list fetched after OAuth (empty until discovered)
- *   discoverProjects() — call with gho_ token after GitHub OAuth; handles auto-select
+ *   completeOAuth()    — call with Quorum JWT from URL fragment after GitHub OAuth
  *   selectProject()    — call with project slug to complete login from selector
- *   switchProject()    — re-discover projects and return to selector (requires re-OAuth popup)
+ *   switchProject()    — return to selector using cached project list (no re-OAuth)
  *   switchTo()         — switch to a different project using existing JWT (no re-OAuth)
- *   login()            — low-level: POST /auth/token → store JWT (used by discoverProjects)
  *   logout()           — clear all state and sessionStorage
  *   refresh()          — silently renew JWT via POST /auth/refresh
- *   completeReauth()   — called by SessionExpiredModal after OAuth popup
+ *   completeReauth()   — called by SessionExpiredModal with fresh Quorum JWT from popup
  *   error              — current auth error message
  *   reauthNeeded       — true when JWT expired and re-auth modal should show
  *
@@ -122,8 +153,15 @@ export function AuthProvider({ children }) {
   const [token,             setToken]             = useState(storedSession?.token ?? null)
   const [user,              setUser]              = useState(storedSession?.user  ?? null)
   const [availableProjects, setAvailableProjects] = useState(storedProjects ?? [])
+  const [selectedProject,   setSelectedProject]   = useState(readStoredProject)
   const [error,             setError]             = useState(null)
   const [reauthNeeded,      setReauthNeeded]      = useState(false)
+
+  // Register selectedProject with the API client so X-Quorum-Project header is sent.
+  // Called synchronously in the render body (not in useEffect) so the getter is
+  // always up-to-date before any TanStack Query fires — avoids the post-paint timing
+  // gap that would cause the first request after a page refresh to miss the header.
+  registerProjectGetter(() => selectedProject)
 
   /**
    * Current auth phase — derived from state rather than stored separately to
@@ -136,11 +174,12 @@ export function AuthProvider({ children }) {
   )
 
   /**
-   * The GitHub OAuth token (gho_...) held in memory between discoverProjects()
-   * and selectProject(). Never written to sessionStorage or disk.
+   * The pre-auth JWT held in memory between completeOAuth() and selectProject().
+   * Issued by the gateway when the user has N > 1 projects; has no project claim
+   * and a 5-minute TTL. Never written to sessionStorage or disk.
    * @type {React.MutableRefObject<string | null>}
    */
-  const pendingOauthTokenRef = useRef(null)
+  const pendingPreAuthRef = useRef(null)
 
   /** @type {React.MutableRefObject<ReturnType<typeof setTimeout>|null>} */
   const expiryTimerRef              = useRef(null)
@@ -212,16 +251,31 @@ export function AuthProvider({ children }) {
   useEffect(() => { tokenRef.current        = token       }, [token])
   useEffect(() => { reauthNeededRef.current = reauthNeeded }, [reauthNeeded])
 
-  /** Store JWT, update phase, arm expiry. Internal — used by login/selectProject/switchTo. */
-  const _applyJwt = useCallback((jwt) => {
+  /**
+   * Store JWT, update phase, arm expiry. Internal — used by completeOAuth/selectProject/switchTo/completeReauth.
+   *
+   * @param {string} jwt - ES256 JWT from the gateway
+   * @param {object} [profile] - Response body fields that supplement the JWT claims.
+   *   In v0.3 the JWT is slim (only sub + is_admin). Pass the response body here so
+   *   project/role/team/base_confidence are preserved in user state even when absent
+   *   from the token itself.
+   */
+  const _applyJwt = useCallback((jwt, profile = {}) => {
     const payload = decodeJwt(jwt)
     if (!payload) throw new Error('Invalid token received from server')
+    const user = {
+      ...payload,
+      project:         profile.project         ?? payload.project         ?? null,
+      role:            profile.role            ?? payload.role            ?? null,
+      team:            profile.team            ?? payload.team            ?? null,
+      base_confidence: profile.base_confidence ?? payload.base_confidence ?? null,
+    }
     setToken(jwt)
-    setUser(payload)
+    setUser(user)
     setAuthPhase('authenticated')
-    writeStoredSession(jwt, payload)
+    writeStoredSession(jwt, user)
     if (payload.exp) scheduleExpiry(payload.exp)
-    return payload
+    return user
   }, [scheduleExpiry])
 
   /** Clear all auth state and storage. */
@@ -229,185 +283,138 @@ export function AuthProvider({ children }) {
     setToken(null)
     setUser(null)
     setAvailableProjects([])
+    setSelectedProject(null)
     setAuthPhase('unauthenticated')
     setReauthNeeded(false)
-    pendingOauthTokenRef.current = null
+    pendingPreAuthRef.current = null
     clearStoredSession()
     clearStoredProjects()
+    clearStoredProject()
     clearTimeout(expiryTimerRef.current)
     clearTimeout(backgroundRefreshTimerRef.current)
   }, [])
 
   /**
-   * Low-level login — exchange GitHub OAuth token + project_id for a Quorum JWT.
-   * Prefer discoverProjects() + selectProject() for normal login flow.
-   * @param {string} githubToken
-   * @param {string} projectId
-   * @returns {Promise<object>} decoded JWT payload
-   */
-  const login = useCallback(async (githubToken, projectId) => {
-    setError(null)
-    const res = await fetch('/auth/token', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ github_token: githubToken, project_id: projectId }),
-    })
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.message ?? `Auth failed: ${res.status}`)
-    }
-
-    const { token: jwt } = await res.json()
-    return _applyJwt(jwt)
-  }, [_applyJwt])
-
-  /**
-   * Discover all projects the engineer belongs to using their GitHub OAuth token.
-   * The gho_ token is kept in memory (pendingOauthTokenRef) — never stored.
-   * Auto-selects if only one project; shows selector if multiple.
+   * Complete the OAuth flow after the gateway redirects to /login#token=<jwt>.
    *
-   * @param {string} githubOauthToken — gho_ token from the OAuth flow
+   * v0.3: the gateway always issues a slim JWT { sub, is_admin }. Project context
+   * is resolved by fetching GET /user/profile/{sub} rather than reading a JWT claim.
+   *   - 1 project  → auto-selects, applies JWT → 'authenticated'
+   *   - n projects → stores project list, transitions to 'selecting'
+   *
+   * @param {string} jwt — Quorum JWT from #token= URL fragment
    * @returns {Promise<void>}
    */
-  const discoverProjects = useCallback(async (githubOauthToken) => {
+  const completeOAuth = useCallback(async (jwt) => {
     setError(null)
+    const payload = decodeJwt(jwt)
+    if (!payload) {
+      setError('Invalid token received from server.')
+      return
+    }
+
+    pendingPreAuthRef.current = jwt
     setAuthPhase('discovering')
-    pendingOauthTokenRef.current = githubOauthToken
 
-    let projects
+    let userProfile
     try {
-      const res = await fetch('/auth/projects', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ github_token: githubOauthToken }),
-      })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.message ?? `Discovery failed: ${res.status}`)
-      }
-
-      const data = await res.json()
-      projects = data.projects ?? []
+      userProfile = await fetchProfile(payload.sub, jwt)
+      if (!userProfile) throw new Error('Profile fetch failed')
     } catch (err) {
       setError(err.message)
       setAuthPhase('unauthenticated')
-      pendingOauthTokenRef.current = null
+      pendingPreAuthRef.current = null
+      return
+    }
+
+    const projects = userProfile.projects ?? []
+    if (projects.length === 0) {
+      setError('No projects found. Ask a principal architect to add your GitHub username to a project config.')
+      setAuthPhase('unauthenticated')
+      pendingPreAuthRef.current = null
       return
     }
 
     setAvailableProjects(projects)
     writeStoredProjects(projects)
 
-    if (projects.length === 0) {
-      setError('No projects found. Ask a principal architect to add your GitHub username to a project config.')
-      setAuthPhase('unauthenticated')
-      pendingOauthTokenRef.current = null
-      return
-    }
-
-    // Auto-select if only one project — skip the selector entirely
     if (projects.length === 1) {
-      try {
-        await login(githubOauthToken, projects[0].slug)
-        pendingOauthTokenRef.current = null
-      } catch (err) {
-        setError(err.message)
-        setAuthPhase('unauthenticated')
-        pendingOauthTokenRef.current = null
-      }
+      // Auto-select the only project — skip selector entirely
+      const proj = projects[0]
+      setSelectedProject(proj.group_id)
+      writeStoredProject(proj.group_id)
+      _applyJwt(jwt)
+      pendingPreAuthRef.current = null
       return
     }
 
-    // Multiple projects — show the selector
     setAuthPhase('selecting')
-  }, [login])
+  }, [_applyJwt])
 
   /**
    * Complete project selection from the ProjectSelector page.
-   * Uses the pending gho_ token stored in memory from discoverProjects().
+   *
+   * v0.3: no HTTP call needed — the JWT already in pendingPreAuthRef is valid for
+   * all projects. We just record the selected project in state so the
+   * X-Quorum-Project header is sent on subsequent API calls.
    *
    * @param {string} projectSlug
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  const selectProject = useCallback(async (projectSlug) => {
-    const oauthToken = pendingOauthTokenRef.current
-    if (!oauthToken) {
+  const selectProject = useCallback((projectSlug) => {
+    const preAuthJwt = pendingPreAuthRef.current
+    if (!preAuthJwt) {
       setError('Session expired — please sign in again.')
       setAuthPhase('unauthenticated')
       return
     }
     setError(null)
-    try {
-      await login(oauthToken, projectSlug)
-      pendingOauthTokenRef.current = null
-    } catch (err) {
-      setError(err.message)
-    }
-  }, [login])
-
-  /**
-   * Switch to a different project using the existing JWT.
-   * No GitHub re-auth needed — the current JWT proves identity.
-   * The gateway verifies membership in the target project before issuing.
-   *
-   * @param {string} projectSlug
-   * @returns {Promise<void>}
-   */
-  const switchTo = useCallback(async (projectSlug) => {
-    const currentToken = tokenRef.current
-    if (!currentToken) return
-
-    setError(null)
-    const res = await fetch('/auth/switch', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
-      body:    JSON.stringify({ project_id: projectSlug }),
-    })
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.message ?? `Switch failed: ${res.status}`)
-    }
-
-    const { token: jwt } = await res.json()
-    _applyJwt(jwt)
+    setSelectedProject(projectSlug)
+    writeStoredProject(projectSlug)
+    _applyJwt(preAuthJwt, { project: projectSlug })
+    pendingPreAuthRef.current = null
   }, [_applyJwt])
 
   /**
+   * Switch to a different project using the existing JWT.
+   *
+   * v0.3: no HTTP call — setting selectedProject updates the X-Quorum-Project
+   * header sent by the API client; verify-jwt middleware resolves the new role
+   * from the Redis profile cache on the next request.
+   *
+   * @param {string} projectSlug
+   * @returns {void}
+   */
+  const switchTo = useCallback((projectSlug) => {
+    setSelectedProject(projectSlug)
+    writeStoredProject(projectSlug)
+    setAuthPhase('authenticated')
+  }, [])
+
+  /**
    * Return to the project selector without re-doing GitHub OAuth.
-   * Uses the cached project list from sessionStorage.
+   * Refreshes the project list via GET /user/profile/{sub} so the selector
+   * always shows live data (role changes, new projects) rather than the
+   * potentially-stale sessionStorage cache.
    *
-   * Intentionally keeps the current JWT in state — the token is still valid and
-   * switchTo() needs it to call POST /auth/switch. Clearing it here would route
-   * ProjectSelector into the selectProject() path which requires the original
-   * gho_ OAuth token (long gone after first login) → "session expired" error.
-   *
-   * ProtectedRoute redirects to /select-project on authPhase === 'selecting'
-   * regardless of whether a token is present.
+   * ProtectedRoute redirects to /select-project on authPhase === 'selecting'.
    */
   const switchProject = useCallback(async () => {
     setReauthNeeded(false)
     setAuthPhase('selecting')
 
-    // Refresh the project list using the current JWT so the selector always
-    // shows live data rather than the potentially-stale sessionStorage cache.
     const currentToken = tokenRef.current
-    if (!currentToken) return
+    if (!currentToken || !user?.sub) return
     try {
-      const res = await fetch('/auth/projects', {
-        headers: { Authorization: `Bearer ${currentToken}` },
-      })
-      if (res.ok) {
-        const { projects } = await res.json()
-        setAvailableProjects(projects)
-        writeStoredProjects(projects)
+      const userProfile = await fetchProfile(user.sub, currentToken)
+      if (userProfile?.projects?.length) {
+        setAvailableProjects(userProfile.projects)
+        writeStoredProjects(userProfile.projects)
       }
     } catch {
       // Non-fatal — selector will render with whatever is in state
     }
-  }, [])
+  }, [user])
 
   /**
    * Cancel a project switch and return to the current project.
@@ -423,17 +430,23 @@ export function AuthProvider({ children }) {
 
   /**
    * Complete re-authentication after session expiry (called by SessionExpiredModal).
-   * Uses the existing user's project so the engineer lands back where they were.
-   * @param {string} githubOauthToken
+   *
+   * v0.3: the popup returns a slim JWT { sub, is_admin }. The active project is
+   * preserved in selectedProject state (was set before expiry), so no /auth/switch
+   * call is needed — just apply the fresh token and the X-Quorum-Project header
+   * will resume sending the correct project on subsequent requests.
+   *
+   * @param {string} jwt — fresh Quorum JWT from the re-auth popup
    */
-  const completeReauth = useCallback(async (githubOauthToken) => {
-    if (!user?.project) {
+  const completeReauth = useCallback((jwt) => {
+    const payload = decodeJwt(jwt)
+    if (!payload) {
       setReauthNeeded(false)
-      throw new Error('No active session to re-authenticate')
+      throw new Error('Invalid token received from re-auth popup')
     }
-    await login(githubOauthToken, user.project)
+    _applyJwt(jwt)
     setReauthNeeded(false)
-  }, [user, login])
+  }, [_applyJwt])
 
   // Re-arm expiry timers after page refresh with a restored session
   useEffect(() => {
@@ -464,22 +477,26 @@ export function AuthProvider({ children }) {
   }, [])
 
   const isExpired = token ? (decodeJwt(token)?.exp ?? 0) * 1000 < Date.now() : false
-  // Guest = authenticated but role is null (not a member of the current project,
-  // or authenticated user with no project membership at all).
-  const isGuest   = user ? user.role === null : false
+  // Guest = authenticated but the current project entry has no role (not a member).
+  // v0.3: role is no longer in the JWT; derive from the availableProjects profile list.
+  const currentProjectData = availableProjects.find(p => p.group_id === selectedProject) ?? null
+  const isGuest   = token ? !currentProjectData || currentProjectData.role === null : false
 
   return (
     <AuthContext.Provider value={{
       authPhase,
       token,
       user,
+      /** Currently active project group_id (null when no project selected). */
+      selectedProject,
+      /** Profile entry for the active project — includes role, base_confidence, is_owner, team. */
+      currentProjectData,
       availableProjects,
-      discoverProjects,
+      completeOAuth,
       selectProject,
       switchProject,
       switchTo,
       cancelSwitch,
-      login,
       logout,
       refresh,
       error,

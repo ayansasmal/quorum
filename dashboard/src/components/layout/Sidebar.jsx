@@ -8,7 +8,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   BarChart2, GitBranch, Clock, BookOpen,
-  List, Settings, Activity, LogOut,
+  List, Settings, Activity, LogOut, Shield,
 } from 'lucide-react'
 import { cn }       from '../../lib/utils.js'
 import { useAuth }  from '../../context/AuthContext.jsx'
@@ -25,7 +25,7 @@ const NAV = [
 ]
 
 export default function Sidebar() {
-  const { logout, isGuest } = useAuth()
+  const { logout, isGuest, user } = useAuth()
   const { data: stats } = useStats()
   const pendingCount = stats?.pending?.total ?? 0
 
@@ -61,6 +61,24 @@ export default function Sidebar() {
             )}
           </NavLink>
         ))}
+
+        {/* Admin link — platform admins only */}
+        {user?.is_admin && (
+          <NavLink
+            to="/admin"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors focus:outline-none',
+                isActive
+                  ? 'bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-white'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200',
+              )
+            }
+          >
+            <Shield className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1">Admin</span>
+          </NavLink>
+        )}
       </nav>
 
       {/* Logout */}

@@ -3,8 +3,8 @@
  * when the engineer belongs to more than one project.
  *
  * Flow:
- *   1. AuthContext.discoverProjects() fetches the project list and sets
- *      authPhase = 'selecting'.
+ *   1. AuthContext.completeOAuth() receives the pre-auth JWT from #token=,
+ *      fetches the project list via GET /auth/projects, and sets authPhase = 'selecting'.
  *   2. App.jsx routes to /select-project when authPhase === 'selecting'.
  *   3. User clicks a card → selectProject(slug) → AuthContext issues a
  *      project-scoped JWT → authPhase = 'authenticated' → App redirects to /.
@@ -95,8 +95,10 @@ function GuestBadge() {
  * @param {{ project: object, onSelect: (slug: string) => void, loading: boolean }} props
  */
 function ProjectCard({ project, onSelect, loading }) {
-  const accent   = accentFor(project.slug)
-  const initials = project.name
+  const id       = project.group_id ?? project.slug ?? ''
+  const label    = project.name     ?? project.group_id ?? project.slug ?? '?'
+  const accent   = accentFor(id)
+  const initials = label
     .split(/[\s-_]+/)
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? '')
@@ -106,7 +108,7 @@ function ProjectCard({ project, onSelect, loading }) {
     <button
       type="button"
       disabled={loading}
-      onClick={() => onSelect(project.slug)}
+      onClick={() => onSelect(id)}
       className={`
         group relative flex flex-col overflow-hidden rounded-xl
         bg-white dark:bg-gray-900
@@ -127,7 +129,7 @@ function ProjectCard({ project, onSelect, loading }) {
       {/* Card body */}
       <div className="flex flex-col gap-2 p-4">
         <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug truncate">
-          {project.name}
+          {label}
         </p>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -299,7 +301,8 @@ export default function ProjectSelector() {
     const q = query.trim().toLowerCase()
     if (!q) return availableProjects
     return availableProjects.filter((p) => {
-      const nameMatch = p.name?.toLowerCase().includes(q)
+      const label     = p.name ?? p.group_id ?? p.slug ?? ''
+      const nameMatch = label.toLowerCase().includes(q)
       const teamMatch = p.team?.toLowerCase().includes(q)
       return nameMatch || teamMatch
     })
@@ -391,10 +394,10 @@ export default function ProjectSelector() {
         <div className={`grid ${columns} gap-4 w-full max-w-4xl`}>
           {pageProjects.map((project) => (
             <ProjectCard
-              key={project.id ?? project.slug}
+              key={project.id ?? project.group_id ?? project.slug}
               project={project}
               onSelect={handleSelect}
-              loading={loading && selectingSlug !== project.slug}
+              loading={loading && selectingSlug !== (project.group_id ?? project.slug)}
             />
           ))}
         </div>

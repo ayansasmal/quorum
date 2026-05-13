@@ -4,7 +4,7 @@
 # In production, engineers run the MCP server locally via Claude Code:
 #   claude mcp add --scope user quorum -- node <path>/dist/server.js
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 RUN apk add --no-cache curl
 

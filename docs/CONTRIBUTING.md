@@ -107,6 +107,42 @@ See TESTING.md for full specifications.
 
 ---
 
+## Commit Convention
+
+All commits must follow [Conventional Commits](https://www.conventionalcommits.org/). Husky enforces this via a `commit-msg` hook backed by commitlint.
+
+| Type | Semver effect |
+|---|---|
+| `feat:` | minor bump |
+| `fix:`, `perf:` | patch bump |
+| `BREAKING CHANGE:` footer | major bump |
+| `refactor:`, `docs:`, `chore:`, `test:`, `ci:`, `style:` | no bump |
+
+**If you use nvm**, create `~/.config/husky/init.sh` so husky can find `node` inside git hooks (husky v9 runs hooks in a restricted shell):
+
+```bash
+mkdir -p ~/.config/husky
+cat > ~/.config/husky/init.sh << 'EOF'
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+EOF
+```
+
+## Releasing
+
+Releases are cut by the repo maintainer using:
+
+```bash
+npm run release:dry   # preview — shows what would be bumped and what CHANGELOG entries
+npm run release       # auto-detect bump from commits since last tag
+npm run release:minor # force minor bump regardless of commit types
+git push --follow-tags origin main
+```
+
+`npm run release` bumps `package.json`, `gateway/package.json`, and `dashboard/package.json` together, appends `CHANGELOG.md`, and creates a git commit + tag (`v0.x.y`) in one step.
+
+---
+
 ## Submitting Changes
 
 1. Open an issue first for non-trivial changes — alignment before code

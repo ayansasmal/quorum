@@ -1,6 +1,7 @@
 {
   "$schema": "http://localhost:3001/schema/config",
   "group_id": "my-team",
+  "owner": "ayansasmal",
   "members": [
     {
       "name": "Ayan",
