@@ -15,7 +15,7 @@
 
 import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { QuorumConfigSchema } from './shared/config/schema.js'
-import { getUserProjects } from './ddb.js'
+import { getUserProjects, getUserProjectsStrict } from './ddb.js'
 import { getRedis } from './redis.js'
 
 const CONFIG_TTL  = Number(process.env.QUORUM_CONFIG_CACHE_TTL  ?? 300)
@@ -185,15 +185,7 @@ export async function loadUserProfile(username) {
   const redis    = getRedis()
   const cacheKey = `profile:${username}`
 
-  // Redis hit
-  const cached = await redis.get(cacheKey)
-  if (cached) {
-    try { return JSON.parse(cached) } catch { /* fall through */ }
-  }
-
-  // DDB cold path — quorum-user-projects is the source of truth
-  const rows = await getUserProjects(username)
-  const profile = {
+  const buildProfile = (rows) => ({
     github_username: username,
     projects: rows.map((r) => ({
       group_id:       r.project_id,
@@ -202,8 +194,30 @@ export async function loadUserProfile(username) {
       is_owner:       r.is_owner        ?? false,
       team:           r.team            ?? null,
     })),
+  })
+
+  const cached = await redis.get(cacheKey)
+
+  if (cached) {
+    // Hot path with stale-while-revalidate: try a fresh DDB read; if it fails,
+    // prefer the stale cached entry over caching an empty (and thus role-less)
+    // profile. See Gap 7.
+    try {
+      const rows    = await getUserProjectsStrict(username)
+      const profile = buildProfile(rows)
+      await redis.set(cacheKey, JSON.stringify(profile), 'EX', PROFILE_TTL)
+      return profile
+    } catch (err) {
+      console.warn(`[Gateway] loadUserProfile(${username}): DDB failed, serving stale cache: ${err.message}`)
+      try { return JSON.parse(cached) } catch { /* fall through to cold path */ }
+    }
   }
 
+  // Cold path — no cache to fall back on. getUserProjects returns [] on error
+  // and emits its own warn log; that empty result is cached only briefly via
+  // PROFILE_TTL and a subsequent successful read will overwrite it.
+  const rows    = await getUserProjects(username)
+  const profile = buildProfile(rows)
   await redis.set(cacheKey, JSON.stringify(profile), 'EX', PROFILE_TTL)
   return profile
 }

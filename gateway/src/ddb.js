@@ -47,32 +47,49 @@ function getDdb() {
 }
 
 /**
+ * Throwing variant — DDB-only query, no error swallowing. Internal use for
+ * callers (e.g. loadUserProfile) that need to distinguish "no projects" from
+ * "DDB failed". See Gap 7.
+ * @param {string} githubUsername
+ * @returns {Promise<Array<object>>}
+ */
+export async function getUserProjectsStrict(githubUsername) {
+  const result = await getDdb().send(new QueryCommand({
+    TableName: USER_PROJECTS_TABLE,
+    KeyConditionExpression: '#u = :u',
+    ExpressionAttributeNames:  { '#u': 'github_username' },
+    ExpressionAttributeValues: marshall({ ':u': githubUsername }),
+  }))
+  return (result.Items ?? []).map((raw) => {
+    const item = unmarshall(raw)
+    return {
+      project_id:      item.project_id,
+      project_name:    item.project_name      ?? null,
+      project_slug:    item.project_slug      ?? null,
+      role:            item.role              ?? null,
+      team:            item.team              ?? null,
+      base_confidence: item.base_confidence   ?? null,
+      is_owner:        item.is_owner          ?? false,
+    }
+  })
+}
+
+/**
  * List the projects a GitHub user belongs to.
+ * Forgiving variant — returns [] on DDB error (with a warn log so the failure
+ * is observable). Callers that need failure-distinguishing semantics should
+ * use {@link getUserProjectsStrict} instead.
+ *
  * @param {string} githubUsername
  * @returns {Promise<Array<{project_id, project_name, project_slug, role, team, base_confidence, is_owner}>>}
  */
 export async function getUserProjects(githubUsername) {
   try {
-    const result = await getDdb().send(new QueryCommand({
-      TableName: USER_PROJECTS_TABLE,
-      KeyConditionExpression: '#u = :u',
-      ExpressionAttributeNames:  { '#u': 'github_username' },
-      ExpressionAttributeValues: marshall({ ':u': githubUsername }),
-    }))
-    return (result.Items ?? []).map((raw) => {
-      const item = unmarshall(raw)
-      return {
-        project_id:      item.project_id,
-        project_name:    item.project_name      ?? null,
-        project_slug:    item.project_slug      ?? null,
-        role:            item.role              ?? null,
-        team:            item.team              ?? null,
-        base_confidence: item.base_confidence   ?? null,
-        is_owner:        item.is_owner          ?? false,
-      }
-    })
+    return await getUserProjectsStrict(githubUsername)
   } catch (err) {
-    console.error(`[Gateway] ddb.getUserProjects(${githubUsername}) failed: ${err.message}`)
+    // Gap 7: warn (not silent) so an outage doesn't masquerade as "user has no projects",
+    // which would downgrade every user's role to null for the full profile-cache TTL.
+    console.warn(`[Gateway] ddb.getUserProjects(${githubUsername}) failed — returning empty profile: ${err.message}`)
     return []
   }
 }
