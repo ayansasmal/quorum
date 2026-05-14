@@ -618,7 +618,7 @@ router.post('/review/:conflictId', async (req, res, next) => {
         resolution: resolutionMap[action],
         note,
         resolvedBy: reviewer,
-      })
+      }, projectId)
 
       await client.query('COMMIT')
     } catch (txErr) {

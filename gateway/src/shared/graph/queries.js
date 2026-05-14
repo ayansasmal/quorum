@@ -385,17 +385,24 @@ export async function getDraftVersions(pg, { topic, projectId = 'default' } = {}
 
 /**
  * Mark a pending decision as stale and update the current active version.
+ *
+ * The UPDATE is scoped by both `conflict_id` AND `project_id`. While UUID
+ * collision across projects is astronomically unlikely, every write path that
+ * touches a project-scoped table must include the project boundary as an
+ * explicit invariant (Gap 6).
+ *
  * @param {import('pg').Pool} pg
  * @param {string} conflictId
  * @param {string} staleWarning
  * @param {number} currentVersion
+ * @param {string} [projectId='default'] - Project scope (enforced by gateway)
  */
-export async function markPendingDecisionStale(pg, conflictId, staleWarning, currentVersion) {
+export async function markPendingDecisionStale(pg, conflictId, staleWarning, currentVersion, projectId = 'default') {
   await pg.query(
     `UPDATE pending_decisions
      SET stale_warning = $1, current_active_version = $2, status = 'stale', updated_at = NOW()
-     WHERE conflict_id = $3`,
-    [staleWarning, currentVersion, conflictId],
+     WHERE conflict_id = $3 AND project_id = $4`,
+    [staleWarning, currentVersion, conflictId, projectId],
   )
 }
 
@@ -461,18 +468,25 @@ export async function insertPendingDecision(pg, record) {
 
 /**
  * Resolve or update a pending decision (set status, note, resolution details).
+ *
+ * The UPDATE is scoped by both `conflict_id` AND `project_id`. conflict_id
+ * alone is architecturally insufficient as a project boundary invariant —
+ * every write path that touches a project-scoped table must explicitly
+ * include project_id (Gap 6).
+ *
  * @param {import('pg').Pool} pg
  * @param {string} conflictId
  * @param {{ status: string, resolution: string, note: string, resolvedBy: string, splitExistingKey?: string|null, splitIncomingKey?: string|null, mergedContent?: string|null }} updates
+ * @param {string} [projectId='default'] - Project scope (enforced by gateway)
  */
-export async function resolvePendingDecision(pg, conflictId, updates) {
+export async function resolvePendingDecision(pg, conflictId, updates, projectId = 'default') {
   if (typeof pg.updatePendingDecision === 'function') return pg.updatePendingDecision(conflictId, updates)
   await pg.query(
     `UPDATE pending_decisions
      SET status = $1, resolution = $2, resolution_note = $3, resolved_by = $4,
          resolved_at = NOW(), updated_at = NOW(),
          split_existing_key = $5, split_incoming_key = $6, merged_content = $7
-     WHERE conflict_id = $8`,
+     WHERE conflict_id = $8 AND project_id = $9`,
     [
       updates.status,
       updates.resolution,
@@ -482,6 +496,7 @@ export async function resolvePendingDecision(pg, conflictId, updates) {
       updates.splitIncomingKey ?? null,
       updates.mergedContent ?? null,
       conflictId,
+      projectId,
     ],
   )
 }
