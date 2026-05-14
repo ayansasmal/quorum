@@ -72,6 +72,18 @@ export function startInvalidationSubscriber(onInvalidate) {
     if (err) console.error(`[Redis] subscribe failed: ${err.message}`)
   })
   sub.on('message', (_channel, key) => {
+    // Evict from this instance's local cache. In multi-instance deployments,
+    // the write-path redis.del() only runs on the instance that performed the
+    // write — peers must DEL their own copy on receipt of the pub/sub message
+    // or they will serve stale data until TTL.
+    //
+    // Must use the command client (getRedis()), not the subscriber: once
+    // SUBSCRIBE is issued, the subscriber connection cannot send commands.
+    getRedis()
+      .del(key)
+      .catch((err) => {
+        console.warn(`[Redis] failed to evict key on invalidation: ${key} — ${err.message}`)
+      })
     onInvalidate(key)
   })
 }
