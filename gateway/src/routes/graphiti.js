@@ -31,9 +31,15 @@ router.post('/*path', verifyJwt, async (req, res) => {
 
   // group_id is owned by the S3 project config and carried in the JWT — callers never control it.
   // Unconditional overwrite prevents confused-deputy attacks where a caller supplies their own value.
+  //
+  // sanitizeGroupId: FalkorDB uses group_id as a database/graph name. Graphiti's internal
+  // RediSearch queries embed the database name in tag filters — hyphens are NOT operators in
+  // RediSearch, causing syntax errors for any project with a hyphenated group_id. Replace
+  // hyphens with underscores so the graph name is safe. PostgreSQL project_id is never modified.
+  const sanitizedProject = req.user.project.replace(/-/g, '_');
   const body = { ...(req.body ?? {}), params: { ...(req.body?.params ?? {}) } };
-  body.params.group_id = req.user.project;
-  if (body.params.group_ids !== undefined) body.params.group_ids = [req.user.project];
+  body.params.group_id = sanitizedProject;
+  if (body.params.group_ids !== undefined) body.params.group_ids = [sanitizedProject];
 
   // Forward MCP protocol headers from the caller to Graphiti.
   // Accept is required: Graphiti's streamable-http transport returns 406 without it.
