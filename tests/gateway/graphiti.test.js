@@ -180,7 +180,7 @@ describe('POST /graphiti/*path — group_id isolation', () => {
     })
 
     expect(status).toBe(200)
-    expect(store.capturedBody.params.group_id).toBe('test-project')
+    expect(store.capturedBody.params.group_id).toBe('test_project')
     expect(store.capturedBody.params.group_id).not.toBe('other-team')
   })
 
@@ -193,7 +193,7 @@ describe('POST /graphiti/*path — group_id isolation', () => {
     })
 
     expect(status).toBe(200)
-    expect(store.capturedBody.params.group_id).toBe('test-project')
+    expect(store.capturedBody.params.group_id).toBe('test_project')
   })
 
   it('overwrites a caller-supplied group_ids array with [JWT project claim]', async () => {
@@ -205,7 +205,7 @@ describe('POST /graphiti/*path — group_id isolation', () => {
     })
 
     expect(status).toBe(200)
-    expect(store.capturedBody.params.group_ids).toEqual(['test-project'])
+    expect(store.capturedBody.params.group_ids).toEqual(['test_project'])
   })
 
   it('does not add group_ids when the caller did not include it', async () => {
