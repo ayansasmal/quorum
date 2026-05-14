@@ -93,6 +93,50 @@ function scopedPool(pool, projectId) {
   return pool
 }
 
+// ── Keyword search (ILIKE fallback) ────────────────────────────────────────────
+//
+// GET /pg/search — keyword ILIKE fallback over knowledge_versions.summary/topic/key.
+// Used by the MCP search tool when Graphiti returns 0 results (e.g. after a
+// FalkorDB volume wipe). Scoped by req.user.project; excludes DRAFT/DEPRECATED/REJECTED.
+//
+// Must be declared before any /:topic/:key parameterised routes to prevent the
+// wildcard route from shadowing `search` as a topic name.
+/**
+ * GET /pg/search?q=<query>&domain=<topic>&limit=<n>
+ * @returns {{ results: Array<object>, total: number, source: 'postgres-ilike' }}
+ */
+router.get('/search', async (req, res) => {
+  const pool = req.app.locals.pool
+  const { q, domain, limit = 10 } = req.query
+
+  if (!q) {
+    return res.status(400).json({ error: 'missing_param', message: 'q required' })
+  }
+
+  const pattern = `%${q}%`
+  const params = [req.user.project, pattern]
+  let domainClause = ''
+  if (domain) {
+    params.push(domain)
+    domainClause = `AND topic = $${params.length}`
+  }
+  params.push(parseInt(limit, 10) || 10)
+
+  const { rows } = await pool.query(
+    `SELECT topic, key, summary, status, confidence, author, updated_at
+     FROM knowledge_versions
+     WHERE project_id = $1
+       AND (key ILIKE $2 OR topic ILIKE $2 OR summary ILIKE $2)
+       AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
+       ${domainClause}
+     ORDER BY confidence DESC, updated_at DESC
+     LIMIT $${params.length}`,
+    params,
+  )
+
+  res.json({ results: rows, total: rows.length, source: 'postgres-ilike' })
+})
+
 // ── Knowledge versions ─────────────────────────────────────────────────────────
 //
 // IMPORTANT: static-prefix routes must be registered BEFORE /versions/:topic/:key.
