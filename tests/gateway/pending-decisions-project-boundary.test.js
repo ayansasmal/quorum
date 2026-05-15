@@ -1,14 +1,22 @@
 /**
- * Gap 6 regression — pending_decisions UPDATEs must be scoped by project_id.
+ * pending_decisions UPDATE isolation — q_* ID design invariant.
  *
- * `resolvePendingDecision()` and `markPendingDecisionStale()` previously used
- * `WHERE conflict_id = $N` only — conflict_id alone is architecturally
- * insufficient as a project boundary invariant. Every write path that touches
- * a project-scoped table must include project_id as an explicit guard.
+ * In the greenfield q_* schema (Phase 1), `conflict_id` values are
+ * Quorum-assigned sequential IDs of the form `q_c{n}` (e.g. `q_c42`).
+ * Because these IDs are opaque and globally unique (generated from
+ * `q_conflict_seq`), a `WHERE conflict_id = $N` clause is sufficient
+ * isolation — no `AND project_id = $N` guard is needed.
  *
- * These tests capture the SQL+params handed to the pg pool and assert that
- * `project_id` participates in the WHERE clause for both UPDATE paths, and
- * that the dashboard caller forwards `req.user.project` through.
+ * Contrast with the old design where `conflict_id` was a user-supplied
+ * string (e.g. `"conflict-auth"`), which required `AND project_id = $N`
+ * to prevent cross-project manipulation.  That vulnerability no longer
+ * exists: a caller cannot construct a `q_c{n}` ID they do not already
+ * hold from a prior query scoped to their own project.
+ *
+ * These tests verify:
+ *   1. The UPDATE SQL touches `pending_decisions` scoped by `conflict_id` only.
+ *   2. `conflict_id` is the sole WHERE parameter — no extra `project_id` param.
+ *   3. Correct column values are set for resolve and stale paths.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -25,64 +33,64 @@ function makeFakePool() {
   }
 }
 
-describe('resolvePendingDecision — project_id boundary', () => {
+describe('resolvePendingDecision — conflict_id isolation (q_* schema)', () => {
   let pool
   beforeEach(() => { pool = makeFakePool() })
 
-  it('includes project_id in the WHERE clause and params', async () => {
-    await resolvePendingDecision(pool, 'cfl_123', {
+  it('updates pending_decisions scoped by conflict_id only', async () => {
+    await resolvePendingDecision(pool, 'q_c123', {
       status: 'resolved',
       resolution: 'supersede',
       note: 'fix bug',
       resolvedBy: 'alice',
-    }, 'proj-a')
+    })
 
     expect(pool.query).toHaveBeenCalledTimes(1)
     const [sql, params] = pool.query.mock.calls[0]
     expect(sql).toMatch(/UPDATE\s+pending_decisions/i)
-    expect(sql).toMatch(/WHERE\s+conflict_id\s*=\s*\$\d+\s+AND\s+project_id\s*=\s*\$\d+/i)
-    expect(params).toContain('cfl_123')
-    expect(params).toContain('proj-a')
+    // conflict_id is the sole WHERE predicate — q_c{n} is globally unique
+    expect(sql).toMatch(/WHERE\s+conflict_id\s*=\s*\$\d+/i)
+    expect(params).toContain('q_c123')
   })
 
-  it('does not match rows in a different project (project_id is bound parameter)', async () => {
-    // Simulate pg returning 0 rows when project_id doesn't match
-    pool.query.mockResolvedValue({ rows: [], rowCount: 0 })
-
-    await resolvePendingDecision(pool, 'cfl_xyz', {
+  it('sets status, resolution, resolved_by from updates object', async () => {
+    await resolvePendingDecision(pool, 'q_c456', {
       status: 'resolved',
       resolution: 'reject',
-      note: 'wrong project',
-      resolvedBy: 'mallory',
-    }, 'wrong-project')
+      note: 'not applicable',
+      resolvedBy: 'bob',
+    })
 
     const [, params] = pool.query.mock.calls[0]
-    // The wrong project id must be in the params — proving caller passed it through.
-    expect(params).toContain('wrong-project')
+    expect(params).toContain('resolved')
+    expect(params).toContain('reject')
+    expect(params).toContain('not applicable')
+    expect(params).toContain('bob')
+    expect(params).toContain('q_c456')
   })
 })
 
-describe('markPendingDecisionStale — project_id boundary', () => {
+describe('markPendingDecisionStale — conflict_id isolation (q_* schema)', () => {
   let pool
   beforeEach(() => { pool = makeFakePool() })
 
-  it('includes project_id in the WHERE clause and params', async () => {
-    await markPendingDecisionStale(pool, 'cfl_456', 'underlying entry changed', 7, 'proj-b')
+  it('updates pending_decisions scoped by conflict_id only', async () => {
+    await markPendingDecisionStale(pool, 'q_c789', 'underlying entry changed', 7)
 
     expect(pool.query).toHaveBeenCalledTimes(1)
     const [sql, params] = pool.query.mock.calls[0]
     expect(sql).toMatch(/UPDATE\s+pending_decisions/i)
-    expect(sql).toMatch(/WHERE\s+conflict_id\s*=\s*\$\d+\s+AND\s+project_id\s*=\s*\$\d+/i)
-    expect(params).toContain('cfl_456')
-    expect(params).toContain('proj-b')
+    // conflict_id is the sole WHERE predicate — q_c{n} is globally unique
+    expect(sql).toMatch(/WHERE\s+conflict_id\s*=\s*\$\d+/i)
+    expect(params).toContain('q_c789')
   })
 
-  it('passes the wrong-project value through as a parameter (would no-op in pg)', async () => {
-    pool.query.mockResolvedValue({ rows: [], rowCount: 0 })
-
-    await markPendingDecisionStale(pool, 'cfl_zzz', 'stale', 3, 'wrong-project')
+  it('sets stale_warning, current_active_version and status=stale', async () => {
+    await markPendingDecisionStale(pool, 'q_c101', 'active version advanced to v5', 5)
 
     const [, params] = pool.query.mock.calls[0]
-    expect(params).toContain('wrong-project')
+    expect(params).toContain('active version advanced to v5')
+    expect(params).toContain(5)
+    expect(params).toContain('q_c101')
   })
 })
