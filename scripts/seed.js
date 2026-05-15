@@ -24,6 +24,7 @@ import pg from 'pg'
 import {
   getCurrentVersion,
   getNextVersionNumber,
+  getOrCreateKey,
   insertVersion,
   transitionVersionStatus,
 } from '../gateway/src/shared/graph/queries.js'
@@ -84,11 +85,15 @@ async function clearSeedData() {
  * Write a knowledge entry to PostgreSQL with version history and audit trail.
  * Replicates core remember logic without MCP protocol overhead.
  *
+ * Uses v0.3 q_* ID resolution: getOrCreateKey → q_key_id, then composes
+ * version_id as `${q_key_id}_v${version}` before calling insertVersion.
+ *
+ * @param {string} qProjectId - resolved q_project_id (e.g. 'q_p0')
  * @param {{ topic: string, key: string, content: string, author: string,
  *            confidence?: number, reason?: string, entity_type?: string,
- *            tags?: string[], project_id?: string }} params
+ *            tags?: string[] }} params
  */
-async function remember(params) {
+async function remember(qProjectId, params) {
   const {
     topic,
     key,
@@ -98,7 +103,6 @@ async function remember(params) {
     reason = 'seed data',
     entity_type = 'Decision',
     tags = [],
-    project_id = 'default',
   } = params
 
   try {
@@ -106,12 +110,20 @@ async function remember(params) {
     const now = new Date().toISOString()
     const triggeredBy = randomUUID()
 
+    // v0.3: resolve q_key_id first, then use it for all version lookups
+    const qKeyId = await getOrCreateKey(pool, qProjectId, topic, key)
+
     const [nextVersion, active] = await Promise.all([
-      getNextVersionNumber(pool, topic, key, project_id),
-      getCurrentVersion(pool, topic, key, project_id),
+      getNextVersionNumber(pool, qKeyId),
+      getCurrentVersion(pool, qKeyId),
     ])
 
+    const versionId = `${qKeyId}_v${nextVersion}`
+
     const record = await insertVersion(pool, {
+      version_id: versionId,
+      q_key_id: qKeyId,
+      q_project_id: qProjectId,
       topic,
       key,
       version: nextVersion,
@@ -132,28 +144,33 @@ async function remember(params) {
       superseded_by_author: null,
       superseded_at: null,
       tags,
-      project_id,
       entity_type,
       summary: content.slice(0, 200),
     })
 
     if (active) {
-      await transitionVersionStatus(pool, topic, key, active.version, 'SUPERSEDED', {
-        supersededByVersion: nextVersion,
-        supersededByAuthor: author,
+      const oldVersionId = `${qKeyId}_v${active.version}`
+      await transitionVersionStatus(pool, oldVersionId, 'SUPERSEDED', {
+        version: nextVersion,
+        author,
+        at: now,
       })
     }
 
     await writeAuditEntry(pool, {
-      id: triggeredBy,
-      topic,
-      key,
-      version: nextVersion,
-      action: 'remember',
+      entry_id: triggeredBy,
+      operation: 'remember',
+      tool: 'seed',
       author,
+      author_role: 'unknown',
       content_hash: contentHash,
-      details: { reason, tags, entity_type },
-      version_id: record.id,
+      q_project_id: qProjectId,
+      version_id: record.version_id,
+      governance_json: { reason, tags, entity_type },
+      version_impact: {
+        versions_created: [record.version_id],
+        versions_superseded: active ? [`${qKeyId}_v${active.version}`] : [],
+      },
     })
 
     const status = active ? `v${active.version} → v${nextVersion}` : `v${nextVersion} (new)`
@@ -177,10 +194,13 @@ async function seed() {
     console.log('  Cleared. Re-seeding...\n')
   }
 
+  // v0.3: seed data lives under the global project (q_p0)
+  const Q_PROJECT_ID = 'q_p0'
+
   // auth:token-strategy — 3 versions to demonstrate history CLI
   console.log('auth domain...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'auth',
     key: 'token-strategy',
     content: 'Use session tokens for all services. Session tokens allow revocation and work well for our monolithic application architecture.',
@@ -190,7 +210,7 @@ async function seed() {
     tags: ['auth', 'session', 'tokens'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'auth',
     key: 'token-strategy',
     content: 'Use JWT for all services. JWTs are stateless, scalable, and work across all deployment types including serverless.',
@@ -201,7 +221,7 @@ async function seed() {
     tags: ['auth', 'jwt', 'lambda'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'auth',
     key: 'token-strategy',
     content: 'Use JWT for Lambda-based services (payment-svc, notification-svc). Use session tokens for ECS-based internal services (auth-svc, admin-svc) where revocation is needed. The split follows deployment type, not service domain.',
@@ -212,7 +232,7 @@ async function seed() {
     tags: ['auth', 'jwt', 'session', 'lambda', 'ecs', 'adr-042'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'auth',
     key: 'delegation-flow',
     content: 'Internal service-to-service auth uses mTLS with certificates issued by our internal CA. External-facing APIs use OAuth 2.0 client credentials. Never use API keys for service-to-service — they cannot be rotated without downtime.',
@@ -222,7 +242,7 @@ async function seed() {
     tags: ['auth', 'mtls', 'oauth', 'service-to-service'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'auth',
     key: 'rate-limiting',
     content: 'Rate limiting is applied at the API gateway level, not per service. Limits: 100 req/s per authenticated user, 10 req/s for unauthenticated. Use sliding window algorithm. Exceeded limits return 429 with Retry-After header.',
@@ -234,7 +254,7 @@ async function seed() {
 
   console.log('api domain...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'api',
     key: 'error-standards',
     content: 'All API errors return JSON with shape: { error: { code: string, message: string, request_id: string } }. HTTP status codes follow RFC 7807. Never expose internal stack traces. Log errors server-side with request_id for correlation.',
@@ -244,7 +264,7 @@ async function seed() {
     tags: ['api', 'errors', 'rfc-7807'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'api',
     key: 'versioning',
     content: 'API versioning uses URL path prefix: /v1/, /v2/. Minor version changes (new optional fields) are backwards compatible and do not increment major version. Deprecation notice period is minimum 6 months. Breaking changes require new major version.',
@@ -254,7 +274,7 @@ async function seed() {
     tags: ['api', 'versioning', 'deprecation'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'api',
     key: 'pagination',
     content: 'Use cursor-based pagination for all list endpoints. Response includes: { data: [], next_cursor: string | null, has_more: boolean }. Cursor is opaque — clients must not parse it. Max page size is 100. Default page size is 20.',
@@ -266,7 +286,7 @@ async function seed() {
 
   console.log('db domain...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'db',
     key: 'connection-pooling',
     content: 'PostgreSQL connection pool size: 10 connections per service instance. Pool per service, not per request. Use pg.Pool with idleTimeoutMillis: 30000. Never exceed 100 total connections across all instances — database max_connections is 200 with 100 reserved for admin.',
@@ -276,7 +296,7 @@ async function seed() {
     tags: ['db', 'postgresql', 'connection-pool'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'db',
     key: 'migration-strategy',
     content: 'Database migrations run automatically on service startup using node-pg-migrate. Migrations are append-only in development. Production migrations require: (1) backwards-compatible schema change, (2) code deploy, (3) cleanup migration if needed. Never DROP COLUMN in same release as code change.',
@@ -286,7 +306,7 @@ async function seed() {
     tags: ['db', 'migrations', 'postgresql'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'db',
     key: 'naming-conventions',
     content: 'Table names: snake_case plural (users, api_keys, audit_logs). Column names: snake_case. Primary keys: id (serial or uuid). Foreign keys: <table_singular>_id. Timestamps: created_at, updated_at (timestamptz). Boolean columns: is_ or has_ prefix.',
@@ -298,7 +318,7 @@ async function seed() {
 
   console.log('infra domain...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'infra',
     key: 'secrets-management',
     content: 'Secrets are stored in AWS Secrets Manager. Never in environment variables committed to git. Never in .env files in production. Services retrieve secrets on startup via SDK — not via env injection. Secret rotation is automated via Lambda rotators. Rotation period: 90 days for API keys, 30 days for DB passwords.',
@@ -308,7 +328,7 @@ async function seed() {
     tags: ['infra', 'secrets', 'aws', 'security'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'infra',
     key: 'retry-strategy',
     content: 'Use exponential backoff with jitter for all external service calls. Base delay: 1s. Max delay: 30s. Max retries: 3. Jitter: ±20%. Do not retry on 4xx (client errors). Always retry on 5xx and connection timeouts. Implement circuit breaker at 50% failure rate over 1 minute window.',
@@ -320,7 +340,7 @@ async function seed() {
 
   console.log('testing domain...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'testing',
     key: 'unit-strategy',
     content: 'Unit test pure business logic — calculations, transformations, validations. Do not unit test framework wiring, trivial getters/setters, or code that only makes sense as integration. Coverage target: 80% on business logic files. Use Vitest. Mock at service boundaries, not inside services.',
@@ -330,7 +350,7 @@ async function seed() {
     tags: ['testing', 'unit', 'vitest', 'coverage'],
   })
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'testing',
     key: 'integration-scope',
     content: 'Integration tests run against real PostgreSQL and real Redis (via docker-compose in CI). Never mock the database — we burned a release when mocked tests passed but prod migration failed. API tests use real HTTP client against running server. External services (Stripe, AWS) are stubbed at the HTTP level only.',
@@ -344,7 +364,7 @@ async function seed() {
   // db:connection-pooling says pool size 10; this says 50 for batch services.
   console.log('\nAdding deliberate contradiction (conflict detection demo)...')
 
-  await remember({
+  await remember(Q_PROJECT_ID, {
     topic: 'db',
     key: 'connection-pooling',
     content: 'For high-concurrency batch processing services, use connection pool size of 50. Standard pool size of 10 is a bottleneck under load.',
