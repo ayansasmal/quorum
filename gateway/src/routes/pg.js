@@ -85,12 +85,19 @@ router.use((req, res, next) => {
 // it on req.user.qProjectId. All subsequent handlers use the q_* id directly.
 router.use(async (req, res, next) => {
   const pool = req.app.locals.pool
+  const header = req.user.project
   try {
-    const qProjectId = await getProjectByGroupId(pool, req.user.project)
+    // Fast path: header already carries a q_project_id (post-Phase-3 MCP clients)
+    if (header && /^q_p\d+$/.test(header)) {
+      req.user.qProjectId = header
+      return next()
+    }
+    // Slow path: header is a group_id slug — resolve via DB (pre-Phase-3 clients)
+    const qProjectId = await getProjectByGroupId(pool, header)
     if (!qProjectId) {
       return res.status(404).json({
         error: 'project_not_found',
-        message: `Project '${req.user.project}' not registered`,
+        message: `Project '${header}' not registered`,
       })
     }
     req.user.qProjectId = qProjectId

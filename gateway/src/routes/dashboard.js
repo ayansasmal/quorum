@@ -44,12 +44,15 @@ const router = Router()
  */
 async function resolveQProjectId(req, res) {
   const pool = req.app.locals.pool
-  const groupId = req.user.project ?? 'default'
-  const qProjectId = await getProjectByGroupId(pool, groupId)
+  const header = req.user.project ?? 'default'
+  // Fast path: header is already a q_project_id (post-Phase-3 MCP clients)
+  if (header && /^q_p\d+$/.test(header)) return header
+  // Slow path: header is a group_id slug → DB lookup
+  const qProjectId = await getProjectByGroupId(pool, header)
   if (!qProjectId) {
     res.status(404).json({
       error: 'project_not_found',
-      message: `Project '${groupId}' not registered`,
+      message: `Project '${header}' not registered`,
     })
     return null
   }

@@ -25,6 +25,7 @@ import { QuorumConfigSchema }            from '../shared/config/schema.js'
 import { getS3, syncOneProject }         from './sync.js'
 import { updateMemberRecord }            from '../ddb.js'
 import { writeGovernanceAudit }          from '../shared/audit/governance.js'
+import { createProject, getProjectByGroupId } from '../shared/graph/queries.js'
 
 const router = Router()
 
@@ -109,10 +110,12 @@ router.post('/upload', async (req, res) => {
   // Idempotency check — reject if the project is already onboarded in S3
   try {
     await getS3().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    const qProjId = await getProjectByGroupId(req.app.locals.pool, groupId).catch(() => null)
     return res.status(409).json({
-      error:      'already_onboarded',
-      message:    `Project '${groupId}' is already onboarded. Use POST /sync/configs to refresh an existing project config.`,
-      project_id: groupId,
+      error:        'already_onboarded',
+      message:      `Project '${groupId}' is already onboarded. Use POST /sync/configs to refresh an existing project config.`,
+      project_id:   groupId,
+      q_project_id: qProjId,
     })
   } catch (err) {
     // 404 / NoSuchKey → project does not exist yet; proceed
@@ -147,9 +150,29 @@ router.post('/upload', async (req, res) => {
     })
   }
 
+  // Register project in PostgreSQL (q_projects) — allocates q_project_id if new.
+  const pool = req.app.locals.pool
+  let qProjectId = null
+  try {
+    qProjectId = await getProjectByGroupId(pool, groupId)
+    if (!qProjectId) {
+      qProjectId = await createProject(
+        pool,
+        groupId,
+        config.owner,
+        config.members ?? [],
+        { domains: config.domains },
+        { displayName: config.project ?? null, createdBy: req.user?.sub ?? 'system' },
+      )
+    }
+  } catch (err) {
+    console.error(`[Gateway:config] q_projects register failed for ${groupId}: ${err.message}`)
+  }
+
   res.status(201).json({
-    project_id: groupId,
-    message:    `Project '${groupId}' onboarded successfully.`,
+    project_id:   groupId,
+    q_project_id: qProjectId,
+    message:      `Project '${groupId}' onboarded successfully.`,
   })
 })
 
