@@ -15,6 +15,7 @@
  *   GET  /pg/versions/:topic/:key/next-number → getNextVersionNumber
  *   GET  /pg/versions/:topic/:key/:version    → getSpecificVersion
  *   POST /pg/versions                         → insertVersion
+ *   POST /pg/versions/supersede               → atomic insert + transition (Gap 3)
  *   PATCH /pg/versions/:topic/:key/:version   → transitionVersionStatus
  *   GET  /pg/versions/by-tag/:tag             → getVersionsByTag
  *   GET  /pg/versions/latest-draft/:topic/:key → getLatestDraftVersion
@@ -241,6 +242,119 @@ router.get('/versions/:topic/:key/:version', async (req, res) => {
 
   const v = await getSpecificVersion(pool, topic, key, parseInt(version, 10), projectId)
   res.json(v)
+})
+
+// POST /pg/versions/supersede — atomic insert + transition (Gap 3)
+//
+// Runs in a single PostgreSQL transaction:
+//   1. INSERT the new version row (same columns as POST /pg/versions)
+//   2. UPDATE the old row → status='SUPERSEDED', forward_link set, ACTIVE-guarded
+// The ACTIVE guard on the UPDATE means a concurrent writer that already
+// superseded the row leaves rows_updated=0, which callers can detect without
+// erroring. Eliminates the race window where two ACTIVE rows could coexist for
+// the same topic:key between two separate HTTP calls.
+//
+// Must be registered before /versions to avoid the wildcard /:topic/:key route
+// shadowing the literal `supersede` segment.
+router.post('/versions/supersede', async (req, res) => {
+  const pool = req.app.locals.pool
+  const projectId = req.user.project
+  const {
+    new_version: newVersion,
+    supersedes_version: supersedesVersion,
+    supersedes_reason: supersedesReason,
+    forward_link: forwardLink,
+  } = req.body ?? {}
+
+  if (!newVersion || typeof newVersion !== 'object') {
+    return res.status(400).json({ error: 'new_version_required', message: 'new_version object required' })
+  }
+  if (supersedesVersion === undefined || supersedesVersion === null) {
+    return res.status(400).json({ error: 'supersedes_version_required', message: 'supersedes_version required' })
+  }
+  if (!projectId) {
+    return res.status(400).json({ error: 'project_required', message: 'X-Quorum-Project header required' })
+  }
+
+  const topic = newVersion.topic
+  const key = newVersion.key
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    // INSERT matches the columns and order in src/shared/graph/queries.js#insertVersion
+    await client.query(
+      `INSERT INTO knowledge_versions (
+        topic, key, version, status, content_hash, author, author_role,
+        confidence, starting_confidence,
+        created_at, created_by_audit, triggered_by, conflict_id,
+        graphiti_episode_id,
+        supersedes_version, supersedes_reason,
+        superseded_by_version, superseded_by_author, superseded_at,
+        tags, project_id,
+        entity_type, summary
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+      [
+        newVersion.topic,
+        newVersion.key,
+        newVersion.version,
+        newVersion.status,
+        newVersion.content_hash,
+        newVersion.author,
+        newVersion.author_role ?? 'unknown',
+        newVersion.confidence ?? 0.7,
+        newVersion.starting_confidence ?? newVersion.confidence ?? 0.7,
+        newVersion.created_at,
+        newVersion.created_by_audit,
+        newVersion.triggered_by,
+        newVersion.conflict_id ?? null,
+        newVersion.graphiti_episode_id ?? null,
+        newVersion.supersedes_version ?? null,
+        newVersion.supersedes_reason ?? null,
+        newVersion.superseded_by_version ?? null,
+        newVersion.superseded_by_author ?? null,
+        newVersion.superseded_at ?? null,
+        newVersion.tags ?? [],
+        projectId,
+        newVersion.entity_type ?? 'unknown',
+        newVersion.content ?? newVersion.summary ?? '',
+      ],
+    )
+
+    // UPDATE old row with ACTIVE guard — concurrent supersession lands rows_updated=0
+    const upd = await client.query(
+      `UPDATE knowledge_versions
+       SET status = $1,
+           superseded_by_version = $2,
+           superseded_by_author = $3,
+           superseded_at = NOW()
+       WHERE topic = $4 AND key = $5 AND version = $6 AND project_id = $7 AND status = $8`,
+      [
+        'SUPERSEDED',
+        forwardLink?.supersededByVersion ?? null,
+        forwardLink?.supersededByAuthor ?? null,
+        topic,
+        key,
+        supersedesVersion,
+        projectId,
+        'ACTIVE',
+      ],
+    )
+
+    await client.query('COMMIT')
+
+    res.json({
+      inserted: true,
+      superseded_version: supersedesVersion,
+      rows_updated: upd.rowCount,
+    })
+  } catch (err) {
+    try { await client.query('ROLLBACK') } catch { /* swallow rollback failure */ }
+    throw err
+  } finally {
+    client.release()
+  }
 })
 
 // POST /pg/versions — insert new version (project_id injected from JWT)
