@@ -63,8 +63,9 @@ export async function writeAuditEntry(pg, entry) {
       `INSERT INTO audit_log (
         entry_id, operation, tool, timestamp, author, author_role,
         session_id, content_hash, governance_json, outcome_json,
-        version_impact, entry_hash, previous_hash, chain_position, project_id
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        version_impact, entry_hash, previous_hash, chain_position,
+        q_project_id, version_id
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         completeEntry.entry_id,
         completeEntry.operation,
@@ -80,7 +81,8 @@ export async function writeAuditEntry(pg, entry) {
         completeEntry.entry_hash,
         completeEntry.previous_hash,
         completeEntry.chain_position,
-        completeEntry.project_id ?? 'default',
+        completeEntry.q_project_id ?? null,
+        completeEntry.version_id ?? null,
       ],
     )
 
@@ -110,7 +112,7 @@ export async function getAuditEntry(pg, entryId) {
  * Retrieve all audit entries ordered by chain_position.
  * Used for chain verification and compliance export.
  * @param {import('pg').Pool} pg
- * @param {{ from?: string, to?: string, tool?: string, author?: string, topic?: string, limit?: number, projectId?: string }} [options]
+ * @param {{ from?: string, to?: string, tool?: string, author?: string, topic?: string, limit?: number, qProjectId?: string }} [options]
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
 export async function getAllEntries(pg, options = {}) {
@@ -119,9 +121,9 @@ export async function getAllEntries(pg, options = {}) {
   const params = []
   const conditions = []
 
-  if (options.projectId) {
-    params.push(options.projectId)
-    conditions.push(`project_id = $${params.length}`)
+  if (options.qProjectId) {
+    params.push(options.qProjectId)
+    conditions.push(`q_project_id = $${params.length}`)
   }
   if (options.from) {
     params.push(options.from)
@@ -163,15 +165,15 @@ export async function getAllEntries(pg, options = {}) {
 /**
  * Count total audit entries. Used for startup sync verification.
  * @param {import('pg').Pool} pg
- * @param {string} [projectId] - If provided, count only entries for this project
+ * @param {string} [qProjectId] - If provided, count only entries for this project
  * @returns {Promise<number>}
  */
-export async function countEntries(pg, projectId) {
+export async function countEntries(pg, qProjectId) {
   if (typeof pg.countEntries === 'function') return pg.countEntries()
-  if (projectId) {
+  if (qProjectId) {
     const result = await pg.query(
-      'SELECT COUNT(*)::int AS count FROM audit_log WHERE project_id = $1',
-      [projectId],
+      'SELECT COUNT(*)::int AS count FROM audit_log WHERE q_project_id = $1',
+      [qProjectId],
     )
     return result.rows[0].count
   }
