@@ -23,18 +23,10 @@ import { randomUUID } from 'crypto'
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
 
-/**
- * Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before passing them to
- * FalkorDB/RediSearch. Escaping hyphens as \- would fail that validation.
- * Group ID sanitization (hyphen → underscore) is handled by the gateway proxy in
- * routes/graphiti.js before forwarding to Graphiti — not here.
- * Callers that need search isolation should omit group_ids and rely on PostgreSQL.
- *
- * @deprecated group_ids are omitted from Graphiti search calls; kept for reference
- */
-function escapeGroupIds(ids) {
-  return ids
-}
+// NOTE: group_ids are omitted from Graphiti search calls.
+// Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch;
+// hyphen → underscore sanitization is handled by the gateway proxy (routes/graphiti.js).
+// Project isolation is enforced at the PostgreSQL layer via q_project_id.
 
 /**
  * Dedicated Graphiti group ID for audit episodes.
