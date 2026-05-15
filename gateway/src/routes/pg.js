@@ -455,18 +455,23 @@ router.get('/pending', async (req, res) => {
   const qProjectId = req.user.qProjectId
   const { topic, include_stale } = req.query
 
-  let query = `SELECT pd.* FROM pending_decisions pd`
+  // Always JOIN q_keys so we can expose conflict_topic/conflict_key on every
+  // pending decision row — the MCP pending.js tool reads these for staleness
+  // checks. pending_decisions has no topic/key columns of its own.
+  let query = `SELECT pd.*, qk.topic AS conflict_topic, qk.key AS conflict_key
+               FROM pending_decisions pd
+               JOIN q_keys qk ON pd.q_key_id = qk.q_key_id`
   const params = [qProjectId]
   const conditions = [`pd.q_project_id = $1`]
 
-  if (!include_stale) {
+  if (include_stale) {
+    params.push(['pending', 'stale'])
+  } else {
     params.push(['pending'])
-    conditions.push(`pd.status = ANY($${params.length})`)
   }
+  conditions.push(`pd.status = ANY($${params.length})`)
 
   if (topic) {
-    // pending_decisions has no topic column — join q_keys
-    query += ` JOIN q_keys qk ON pd.q_key_id = qk.q_key_id`
     params.push(topic)
     conditions.push(`qk.topic = $${params.length}`)
   }

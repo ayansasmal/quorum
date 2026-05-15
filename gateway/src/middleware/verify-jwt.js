@@ -16,6 +16,31 @@ import { getKeys } from '../keys.js'
 import { loadUserProfile } from '../config-cache.js'
 
 /**
+ * Resolve a q_project_id (e.g. 'q_p1') to its human-readable group_id by
+ * querying q_projects. Post-Phase-3 MCP clients send q_p{n} in the
+ * X-Quorum-Project header, but profile entries are keyed by group_id, so we
+ * must translate before doing the profile lookup.
+ *
+ * Returns null if the project doesn't exist or pool is unavailable.
+ *
+ * @param {import('pg').Pool | undefined} pool
+ * @param {string} qProjectId
+ * @returns {Promise<string | null>}
+ */
+async function resolveGroupId(pool, qProjectId) {
+  if (!pool) return null
+  try {
+    const { rows } = await pool.query(
+      `SELECT group_id FROM q_projects WHERE q_project_id = $1 LIMIT 1`,
+      [qProjectId],
+    )
+    return rows[0]?.group_id ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Express middleware that verifies the Bearer JWT and enriches req.user
  * with profile data from the cache.
  *
@@ -47,9 +72,24 @@ export async function verifyJwt(req, res, next) {
 
     // Load profile from Redis/DDB — always succeeds (returns empty projects array on miss)
     const profile  = await loadUserProfile(sub)
-    const entry    = project
-      ? profile.projects.find((p) => p.group_id === project) ?? null
-      : null
+
+    // Profile entries are keyed by group_id (the human-readable slug). Post-
+    // Phase-3 MCP clients send q_p{n} in X-Quorum-Project, so we resolve
+    // q_project_id → group_id via the DB before doing the find. We also
+    // accept a direct group_id match in case a profile ever carries the
+    // q_project_id alongside group_id.
+    let entry = null
+    if (project) {
+      const isQProjectId = /^q_p\d+$/.test(project)
+      if (isQProjectId) {
+        const groupId = await resolveGroupId(req.app?.locals?.pool, project)
+        entry = profile.projects.find((p) =>
+          p.q_project_id === project || (groupId && p.group_id === groupId),
+        ) ?? null
+      } else {
+        entry = profile.projects.find((p) => p.group_id === project) ?? null
+      }
+    }
 
     /** @type {{ sub: string, is_admin: boolean, project: string | null, role: string | null, base_confidence: number, is_owner: boolean }} */
     req.user = {

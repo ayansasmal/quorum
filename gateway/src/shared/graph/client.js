@@ -386,12 +386,15 @@ export async function getEpisodes(groupId = GROUP_ID) {
  * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
  */
 export async function deleteEpisodeSoft(episodeId, meta, groupId = GROUP_ID) {
+  // NOTE: do NOT pass uuid to add_memory. In Graphiti 0.29+, providing uuid
+  // triggers the "retrieve existing episode" path which raises
+  // NodeNotFoundError when the episode doesn't exist in FalkorDB
+  // (e.g. after a volume wipe). Matches quorum-mcp/src/graph/client.js.
   return callGraphiti('add_memory', {
     name:               `${meta.key}:deprecated`,
     episode_body:       `Knowledge deprecated by ${meta.author}. Reason: ${meta.reason}. Deprecated episode: ${episodeId}`,
     group_id:           groupId,
     source_description: 'quorum:deprecation',
-    uuid:               randomUUID(),
   })
 }
 
