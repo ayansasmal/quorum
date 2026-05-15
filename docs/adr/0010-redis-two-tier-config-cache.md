@@ -82,22 +82,25 @@ a dedicated connection for pub/sub).
 When a config or profile is mutated:
 
 ```javascript
-// In config-cache.js
+// In config-cache.js — publishes the raw cache key string, not a typed envelope
 async function invalidateProject(groupId) {
-  await redis.del(`config:${groupId}`)
-  await redis.publish('quorum:invalidate', JSON.stringify({ type: 'config', key: groupId }))
+  const cacheKey = `config:${groupId}`
+  await redis.del(cacheKey)
+  await redis.publish('quorum:invalidate', cacheKey)  // raw string, e.g. "config:platform-team"
 }
 
 async function invalidateProfile(username) {
-  await redis.del(`profile:${username}`)
-  await redis.publish('quorum:invalidate', JSON.stringify({ type: 'profile', key: username }))
+  const cacheKey = `profile:${username}`
+  await redis.del(cacheKey)
+  await redis.publish('quorum:invalidate', cacheKey)  // raw string, e.g. "profile:alice"
 }
 ```
 
-Each subscribed instance drops its local Redis key on receipt. This is not
-strictly necessary (Redis is already the shared cache — del on one instance
-affects all), but the channel payload allows future optimisation: in-process
-LRU cache per-instance that can be selectively invalidated without a Redis round-trip.
+Each subscribed instance receives the raw cache key and can use it directly for
+`redis.del()`. The payload is a plain string (not a typed JSON envelope) — the
+subscriber in `redis.js` treats the message as the key to drop directly. This is
+sufficient because all cache keys are self-describing by prefix (`config:`, `profile:`,
+`admin:`).
 
 ### `ioredis` singleton pattern
 
@@ -170,7 +173,10 @@ redis:
   registered, not lazily
 - Every config mutation route (`/config/update-role`, `/config/transfer-ownership`,
   `POST /sync/configs`) MUST call the appropriate `invalidate*()` function
-- `REDIS_URL` must be set in all deployment environments; gateway must refuse to
-  start if Redis is unreachable (fail-fast, not silent degradation)
+- `REDIS_URL` must be set in all deployment environments. The current implementation
+  uses `lazyConnect: false` with `enableOfflineQueue: true` and `maxRetriesPerRequest: 3`
+  in `redis.js` — connection errors are logged but the gateway continues to start.
+  This is intentional for resilience: the fallback to S3/DDB remains active while
+  Redis reconnects. A future hardening step may add a startup health-check gate.
 - The DynamoDB `quorum-configs` table must not be removed until all deployments
   have migrated to the Redis path and a data migration has confirmed no active reads

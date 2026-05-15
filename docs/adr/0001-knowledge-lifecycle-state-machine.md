@@ -44,8 +44,10 @@ DRAFT ──approve──► ACTIVE ──supersede──► SUPERSEDED
 | ACTIVE | SUPERSEDED | `remember()` with conflicting content on an existing key |
 | ACTIVE | DEPRECATED | `forget()` |
 
-All other transitions are illegal and rejected at the database layer via the
-`LEGAL_TRANSITIONS` map in `gateway/src/shared/graph/queries.js`.
+All other transitions are illegal and rejected at the application layer via the
+`LEGAL_TRANSITIONS` map in `gateway/src/shared/graph/queries.js` —
+specifically in the `transitionVersionStatus` function which validates the
+`(currentStatus → newStatus)` pair before issuing any SQL.
 
 **Versioning is append-only.** Every change creates a new version row; no existing
 row is ever mutated (except the `status` field via `transitionVersionStatus`, which

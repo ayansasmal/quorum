@@ -28,6 +28,28 @@ security:
   - BearerAuth: []
 
 components:
+  parameters:
+    XQuorumProject:
+      name: X-Quorum-Project
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Active project scope as a `group_id` slug (e.g. `platform-team`) or `q_p{n}`
+        surrogate key (e.g. `q_p1`). Required on all project-scoped routes; optional
+        on routes that operate across all projects the caller belongs to (e.g.
+        `GET /user/profile/:username`). Decouples identity (JWT `sub`) from project
+        context so the same token works across multiple projects.
+
+    XQuorumProjectRequired:
+      name: X-Quorum-Project
+      in: header
+      required: true
+      schema: { type: string }
+      description: |
+        Active project scope as a `group_id` slug (e.g. `platform-team`) or `q_p{n}`
+        surrogate key (e.g. `q_p1`). Required — all mutations are project-scoped.
+
   securitySchemes:
     BearerAuth:
       type: http
@@ -736,11 +758,7 @@ paths:
           required: true
           schema: { type: string }
           description: GitHub username of the target user
-        - name: X-Quorum-Project
-          in: header
-          required: false
-          schema: { type: string }
-          description: Active project group_id for role resolution
+        - $ref: '#/components/parameters/XQuorumProject'
       responses:
         '200':
           description: User profile with project memberships
@@ -782,10 +800,7 @@ paths:
         Actor must be the current owner, or a platform admin (admin cannot transfer to themselves).
         The action is audited and profile caches for both actors are invalidated immediately.
       parameters:
-        - name: X-Quorum-Project
-          in: header
-          required: true
-          schema: { type: string }
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
       requestBody:
         required: true
         content:
@@ -829,10 +844,7 @@ paths:
         Actor must be the project owner or a platform admin.
         The affected user's profile cache is invalidated immediately.
       parameters:
-        - name: X-Quorum-Project
-          in: header
-          required: true
-          schema: { type: string }
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
       requestBody:
         required: true
         content:

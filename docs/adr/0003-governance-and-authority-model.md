@@ -59,19 +59,21 @@ Role-based `base_confidence` defaults (configurable per project in `quorum.json`
 | `senior_engineer` | 0.80 |
 | `engineer` | 0.70 |
 | `junior_engineer` | 0.60 |
-| `agent` (claude) | 0.65 |
+| `agent` (claude) | 0.70 |
 
 ### Confidence decay
 
 ACTIVE versions older than 7 days with `confidence > 0.10` decay on a scheduled
-cadence (`scripts/decay.js`). The decay formula applies a multiplicative factor
+cadence (`scripts/decay-confidence.js`). The decay formula applies a multiplicative factor
 per elapsed period. `starting_confidence` acts as a ceiling — endorsements can
 restore confidence toward the starting value but not beyond it.
 
 ### Confidence endorsement (bump)
 
-Any project member can endorse an ACTIVE entry via `POST /api/bump/:topic/:key`
-(or the MCP confidence bump tool). Rules:
+Any project member can endorse an ACTIVE entry via `POST /bump/:topic/:key`
+(or the MCP confidence bump tool). Note: the dashboard BFF also exposes this
+at `/api/bump/:topic/:key` as a convenience proxy — MCP and direct clients
+use the `/bump` route directly. Rules:
 - 7-day cooldown per (author, entry) pair — one endorsement per week maximum
 - The delta applied is role-weighted (`principal_architect` bump = larger delta)
 - Confidence is capped at `starting_confidence`
@@ -124,7 +126,7 @@ adjust confidence floors (reserved for v0.4 self-evolving graph).
 
 **Negative:**
 - Confidence values require calibration — teams must decide what `0.85` means in their context
-- Decay requires a scheduled job (`scripts/decay.js`) to be running
+- Decay requires a scheduled job (`scripts/decay-confidence.js`) to be running
 - Conflict detection adds latency to `remember()` calls (Graphiti semantic similarity + LLM analysis)
 - False positives in conflict detection create noise in the pending queue
 

@@ -111,6 +111,6 @@ For local dev, LocalStack provides S3 + DynamoDB at `http://localhost:4566`. Use
 ## Security
 
 - JWT algorithm: ES256 (ECDSA P-256) — never accept HS256
-- `verify-jwt.js` attaches `req.user = { sub, project, role, team, method, base_confidence }`
+- `verify-jwt.js` attaches `req.user = { sub, is_admin, project, role, base_confidence, is_owner }` (v0.3 slim JWT — `team` and `method` are not present; role/base_confidence/is_owner resolved from Redis profile cache per-request)
 - `principal_architect` role required for config writes and sync endpoint
 - Rate limiting applied to all routes

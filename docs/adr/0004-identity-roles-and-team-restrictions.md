@@ -75,6 +75,14 @@ in the MCP tool layer (`src/tools/review.js: enforceReviewerTeam()`).
 
 When `required_reviewer_teams` is empty or absent, any team may review.
 
+> **v0.3 gap:** `enforceReviewerTeam()` reads `identity.team`, but in v0.3 the
+> slim JWT carries no team claim. Team is resolved from the profile cache
+> server-side and returned in the token response body, but the MCP's
+> `getIdentity()` previously returned `team: null` always — making team
+> restrictions silently unenforced from all MCP `review()` calls. This is fixed
+> in v0.3.1 by storing the profile (including team) from the token response and
+> surfacing it through `getIdentity()`. See ADR-0009.
+
 ### Project membership
 
 Project membership is managed in `quorum.json` under the `members` array. Each

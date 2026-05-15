@@ -343,7 +343,13 @@ export function AuthProvider({ children }) {
       const proj = projects[0]
       setSelectedProject(proj.group_id)
       writeStoredProject(proj.group_id)
-      _applyJwt(jwt)
+      // pass profile — role/team not in slim JWT payload
+      _applyJwt(jwt, {
+        project:         proj.group_id,
+        role:            proj.role            ?? null,
+        team:            proj.team            ?? null,
+        base_confidence: proj.base_confidence ?? null,
+      })
       pendingPreAuthRef.current = null
       return
     }
@@ -444,9 +450,15 @@ export function AuthProvider({ children }) {
       setReauthNeeded(false)
       throw new Error('Invalid token received from re-auth popup')
     }
-    _applyJwt(jwt)
+    // pass profile — role/team not in slim JWT payload; preserve from pre-expiry user state
+    _applyJwt(jwt, {
+      project:         user?.project         ?? null,
+      role:            user?.role            ?? null,
+      team:            user?.team            ?? null,
+      base_confidence: user?.base_confidence ?? null,
+    })
     setReauthNeeded(false)
-  }, [_applyJwt])
+  }, [_applyJwt, user])
 
   // Re-arm expiry timers after page refresh with a restored session
   useEffect(() => {

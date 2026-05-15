@@ -30,26 +30,27 @@ or temporal reasoning capability (PostgreSQL-only).
 
 **Every write operation runs a two-phase audit pipeline:**
 
-### Phase 1 — Pre-audit (PostgreSQL)
+### Phase 1 — Intent audit (PostgreSQL)
 
 Before the knowledge mutation occurs, an audit entry is written to `audit_log` with
-`phase: 'pre'`. This records the intent of the operation before it executes.
+`operation: 'INTENT'`. This records the intent of the operation before it executes.
 
 ### Phase 2 — Knowledge mutation (PostgreSQL)
 
 The version row is written to `knowledge_versions`. The new version record captures
-`created_by_audit` — the `audit_id` of the pre-audit entry. This creates the first
+`created_by_audit` — the `audit_id` of the INTENT entry. This creates the first
 direction of the bidirectional link.
 
-### Phase 3 — Post-audit (PostgreSQL)
+### Phase 3 — Outcome audit (PostgreSQL)
 
-After the mutation, a `phase: 'post'` audit entry is written with `version_id` set
-to the newly created version record. This completes the bidirectional link:
+After the mutation, an `operation: 'OUTCOME'` audit entry is written with `version_id`
+set to the newly created version record. If the write fails, `operation: 'FAILED_OUTCOME'`
+is written instead. This completes the bidirectional link:
 
 ```
-audit_log (pre)  ←──────── knowledge_versions.created_by_audit
-                              ↑
-audit_log (post) ───────────── version_id
+audit_log (INTENT)  ←──────── knowledge_versions.created_by_audit
+                                 ↑
+audit_log (OUTCOME) ─────────── version_id
 ```
 
 ### Phase 4 — Graphiti episode (fire-and-forget)
@@ -62,18 +63,18 @@ retried via the `/pending` recovery path.
 ### SHA256 tamper-evident chain
 
 Each `audit_log` row carries:
-- `prev_hash` — SHA256 of the previous row's content
-- `row_hash` — SHA256 of this row's content (including `prev_hash`)
+- `previous_hash` — SHA256 of the previous row's content (null for the first row)
+- `entry_hash` — SHA256 of this row's content (including `previous_hash`)
 
 This forms a linked hash chain. Any modification to a past audit row breaks every
 subsequent hash in the chain. The `audit-cli.js verify` command walks the chain and
 reports the first broken link.
 
 ```javascript
-// Chain construction (gateway/src/shared/audit/secondary.js)
+// Chain construction (gateway/src/shared/audit/chain.js)
 const prev = await getLatestAuditEntry(pool, projectId)
-const prevHash = prev?.row_hash ?? GENESIS_HASH
-const rowHash = sha256(`${prevHash}|${JSON.stringify(entryContent)}`)
+const previousHash = prev?.entry_hash ?? null   // null for genesis row
+const entryHash = sha256(`${previousHash}|${JSON.stringify(entryContent)}`)
 ```
 
 ### `version_audit_links` join table

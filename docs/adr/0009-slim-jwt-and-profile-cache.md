@@ -133,7 +133,10 @@ on every subsequent request.
 **Positive:**
 - Role changes take effect immediately (Redis TTL = 5 min, forced invalidation on
   `update-role` makes it instant in practice)
-- Same token works across all projects — no re-issuance needed when switching context
+- Same token works across all projects — switching context requires only changing the
+  `X-Quorum-Project` header, not a new token. Note: `POST /auth/token` still requires
+  `project_id` at issuance for membership validation and to populate the response body's
+  role/team fields; the token payload itself carries no project binding.
 - JWT schema is stable: adding a new profile attribute (e.g. `is_owner`) requires
   only a profile cache schema change, not a token re-issuance
 - Atlassian MCP OAuth 2.1 alignment: identity separated from resource context

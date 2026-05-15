@@ -43,11 +43,19 @@ This applies to: `knowledge_versions`, `q_keys`, `pending_decisions`,
 `groupId` is the project's `group_id`. Graphiti enforces episode-level isolation
 at the FalkorDB query layer.
 
-**HTTP layer:** The gateway enforces isolation via the `X-Quorum-Project` header:
+**HTTP layer:** The gateway enforces isolation via two parallel mechanisms:
+
+Primary — `X-Quorum-Project` header (standard MCP and dashboard path):
 1. Client sends `X-Quorum-Project: <group_id>` with every request
 2. `verify-jwt.js` resolves this to `req.user.project`
 3. The pg.js middleware resolves `group_id → q_project_id` and attaches it as `req.user.qProjectId`
 4. Every route uses `req.user.qProjectId` — never a caller-provided project ID
+
+Secondary — `X-Quorum-Token` header (used by the bump endpoint's internal call path):
+- `middleware/project.js` reads `X-Quorum-Token` and resolves a project from its
+  embedded identity. This is a separate session token mechanism used by the
+  confidence bump flow. Routes that use this path receive `req.project` instead
+  of `req.user.project`. Both mechanisms enforce the same `q_project_id` scoping.
 
 **Config layer:** Project config is stored in S3 at `<group_id>.quorum.json` (flat
 bucket, no subdirectories). Redis caches it at `config:<group_id>`.
