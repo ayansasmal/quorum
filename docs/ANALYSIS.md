@@ -14,8 +14,9 @@
 4. [Dual-Store Architecture](#4-dual-store-architecture)
 5. [Caching Layers](#5-caching-layers)
 6. [Constitutional Enforcement Points](#6-constitutional-enforcement-points)
-7. [Known Gaps & Latent Issues](#7-known-gaps--latent-issues)
+7. [Gap Register (all resolved)](#7-known-gaps--latent-issues)
 8. [Essential Files Reference](#8-essential-files-reference)
+9. [Shipped Backlog](#9-shipped-backlog)
 
 ---
 
@@ -518,9 +519,57 @@ they only hold one if it was returned by a prior query scoped to their own proje
 | `gateway/src/routes/auth.js` | PAT-based JWT issuance, refresh, project discovery |
 | `gateway/src/middleware/verify-jwt.js` | Two-step JWT verification + profile cache enrichment |
 | `gateway/src/config-cache.js` | Redis → S3/DDB read-through cache for config, profile, admin |
-| `gateway/src/ddb.js` | DDB membership table, syncProjectMembers, getUserProjects (silent failure — Gap #7) |
-| `gateway/src/redis.js` | Dual ioredis connections, pub/sub invalidation subscriber (Gap #8) |
+| `gateway/src/ddb.js` | DDB membership table, syncProjectMembers, getUserProjects (warn logged on error — Gap #7 fixed) |
+| `gateway/src/redis.js` | Dual ioredis connections, pub/sub invalidation subscriber with active DEL (Gap #8 fixed) |
 | `gateway/src/shared/graph/queries.js` | All PostgreSQL query functions — source of truth for SQL layer |
 | `gateway/src/shared/audit/secondary.js` | Transactional audit write with SHA256 chain, append-only enforcement |
 | `gateway/src/shared/governance/constitutional.js` | All 5 constitutional rules as throwing functions |
 | `gateway/src/shared/graph/client.js` | Gateway-side Graphiti client (vendored copy of MCP version) |
+
+---
+
+## 9. Shipped Backlog
+
+> Formerly `docs/BACKLOG.md`. All items resolved. Kept as historical record.
+
+### Board (all ✅ Done)
+
+| ID | Title | Priority | Notes |
+|----|-------|----------|-------|
+| BL-01 | `group_id` isolation bypass in Graphiti proxy | P1 | Conditional guard → unconditional overwrite |
+| BL-02 | Remove `mcp/` from engram + ops audit CLI | P2 | `mcp/` deleted; `scripts/audit-cli.js` created; tests migrated to quorum-mcp |
+| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | Added before `/audit/:id` in `gateway/src/routes/pg.js` |
+| BL-05 | Pin Graphiti git SHA in Dockerfile | P3 | `ARG GRAPHITI_SHA` + `git checkout`. Pinned to `c427615` (2026-05-07) |
+| BL-10 | `DEPLOYMENT.md` — component security model | Docs | Full rewrite: two-party arch, OAuth 2.1 flow, engineer onboarding, secrets, multi-team isolation |
+| BL-11 | Gateway LLM governance endpoints | P1 | `routes/governance.js` + `llm.js`. JWT-authenticated. OPENAI_API_KEY gateway-only |
+| BL-12 | OAuth 2.1 Authorization Server in gateway | P2 | RFC8414 discovery, RFC7591 dynamic client reg, PKCE S256, GitHub IdP, ES256 JWT |
+| BL-13 | SDLC Hooks + Skill Integration | P2 | 5 hook scripts + `hooks.js` + SKILL.md. 13 unit tests passing |
+
+### Deferred to v1.0
+
+| Item | Reason |
+|------|--------|
+| Reflect Activity dashboard panel | Build after `reflect()` usage data exists |
+| Helm CronJob for decay | Use external k8s CronJob calling `scripts/decay-confidence.js` |
+| PENDING_CONFLICT_CHECK dashboard badge | Deferred to v1.0 |
+| GitHub Action for PR ingest | Dropped — SKILL.md + hooks already capture PR knowledge via reflect() |
+| Notifications (Slack, webhook) | Skipped — explicit product decision |
+| LLM accuracy CI gate | Needs real usage data for golden dataset |
+| Hosted docs site | After core features stable |
+| Public case study | After at least one team uses in production |
+
+### Changelog
+
+| Date | Item | Commit |
+|------|------|--------|
+| 2026-05-15 | Gaps 1-8 resolved; q_* schema rewrite (Phase 1-3) | `769ae23`–`c48f8d2` |
+| 2026-05-07 | BL-13 ✅ Done: 5 hooks, hooks.js, SKILL.md, 13 tests | feat/sdlc-hooks |
+| 2026-05-08 | BL-11 ✅ Done: governance endpoints + llm.js | feat/dashboard |
+| 2026-05-07 | BL-03 dropped: platform team deploys centrally; engineers connect from Claude Code | — |
+| 2026-05-08 | BL-07/BL-08/BL-04/BL-06/BL-09 dropped (see prior BACKLOG.md for rationale) | — |
+| 2026-05-08 | BL-05 ✅ Done: Graphiti SHA pinned `c427615` | feat/dashboard |
+| 2026-05-08 | BL-10 ✅ Done: DEPLOYMENT.md rewritten | feat/dashboard |
+| 2026-05-06 | quorum-mcp BL-10 ✅ Done: full OAuth round-trip live | f37f560 |
+| 2026-05-04 | BL-01 ✅ Done: unconditional overwrite in graphiti.js | — |
+| 2026-05-03 | Per-package CLAUDE.md, OpenAPI spec, duck-type guards, npm org | `95e2cae` |
+| 2026-05-03 | Monorepo restructure — mcp/, gateway/, dashboard/ | `bb451db` |
