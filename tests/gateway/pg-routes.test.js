@@ -26,6 +26,8 @@ vi.mock('../../gateway/src/middleware/verify-jwt.js', () => ({
 }))
 
 vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
+  getProjectByGroupId:    vi.fn().mockResolvedValue('q_p1'),
+  getOrCreateKey:         vi.fn().mockResolvedValue('q_k1'),
   getCurrentVersion:      vi.fn(),
   getVersionHistory:      vi.fn(),
   getVersionAtDate:       vi.fn(),
@@ -40,10 +42,7 @@ vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
   getVersionStatusCounts: vi.fn(),
   getDraftVersions:       vi.fn(),
   getPendingDecisionById: vi.fn(),
-  getLastBump:            vi.fn(),
-  insertBump:             vi.fn(),
-  updateConfidence:       vi.fn(),
-  getCurrentVersion:      vi.fn(),
+  countPendingForKey:     vi.fn(),
   resolvePendingDecision: vi.fn(),
 }))
 
@@ -159,14 +158,14 @@ describe('GET /pg/versions/drafts', () => {
     expect(body.every((r) => r.status === 'DRAFT')).toBe(true)
   })
 
-  it('calls getDraftVersions with the correct projectId from JWT', async () => {
+  it('calls getDraftVersions with the resolved q_project_id', async () => {
     getDraftVersions.mockResolvedValue([])
 
     await get('/pg/versions/drafts')
 
     expect(getDraftVersions).toHaveBeenCalledWith(
       fakePool,
-      expect.objectContaining({ projectId: 'test-project' }),
+      expect.objectContaining({ qProjectId: 'q_p1' }),
     )
   })
 })
@@ -185,7 +184,7 @@ describe('GET /pg/versions/by-status/:status', () => {
     expect(body[0].status).toBe('ACTIVE')
   })
 
-  it('calls getVersionsByStatus with the status param and correct projectId', async () => {
+  it('calls getVersionsByStatus with the status param and resolved q_project_id', async () => {
     getVersionsByStatus.mockResolvedValue([])
 
     await get('/pg/versions/by-status/SUPERSEDED')
@@ -193,7 +192,8 @@ describe('GET /pg/versions/by-status/:status', () => {
     expect(getVersionsByStatus).toHaveBeenCalledWith(
       fakePool,
       'SUPERSEDED',
-      expect.objectContaining({ projectId: 'test-project' }),
+      'q_p1',
+      undefined,
     )
   })
 })

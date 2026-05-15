@@ -34,6 +34,8 @@ vi.mock('../../gateway/src/middleware/verify-jwt.js', () => ({
 }))
 
 vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
+  getProjectByGroupId:    vi.fn().mockResolvedValue('q_p1'),
+  getOrCreateKey:         vi.fn().mockResolvedValue('q_k1'),
   getCurrentVersion:      vi.fn().mockResolvedValue(null),
   getVersionHistory:      vi.fn(),
   getVersionAtDate:       vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
   getVersionStatusCounts: vi.fn(),
   getDraftVersions:       vi.fn(),
   getPendingDecisionById: vi.fn(),
+  countPendingForKey:     vi.fn(),
 }))
 
 vi.mock('../../gateway/src/shared/audit/secondary.js', () => ({
@@ -120,9 +123,9 @@ describe('GET /pg/search', () => {
     expect(body.source).toBe('postgres-ilike')
     expect(body.results[0].topic).toBe('auth')
 
-    // SQL was called with project_id ($1) and the ILIKE pattern ($2)
+    // SQL was called with q_project_id ($1) and the ILIKE pattern ($2)
     const callArgs = fakePool.query.mock.calls[0]
-    expect(callArgs[1][0]).toBe('test-project')
+    expect(callArgs[1][0]).toBe('q_p1')
     expect(callArgs[1][1]).toBe('%auth%')
   })
 
@@ -133,8 +136,8 @@ describe('GET /pg/search', () => {
 
     const [sql, params] = fakePool.query.mock.calls[0]
     expect(sql).toMatch(/AND topic = \$3/)
-    // params: [project_id, pattern, domain, limit]
-    expect(params).toEqual(['test-project', '%auth%', 'api', 10])
+    // params: [q_project_id, pattern, domain, limit]
+    expect(params).toEqual(['q_p1', '%auth%', 'api', 10])
   })
 
   it('respects the limit param', async () => {

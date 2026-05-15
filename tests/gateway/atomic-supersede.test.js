@@ -25,16 +25,19 @@ vi.mock('../../gateway/src/middleware/verify-jwt.js', () => ({
   },
 }))
 
-// The route uses shared queries for some helpers but supersede route uses
-// pool.connect()/client.query directly — mock queries to be safe.
+// The supersede route delegates the INSERT and status transition to
+// insertVersion() and transitionVersionStatus() inside a single transaction.
+// Mock both so the test can assert on their calls.
 vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
+  getProjectByGroupId:    vi.fn().mockResolvedValue('q_p1'),
+  getOrCreateKey:         vi.fn().mockResolvedValue('q_k1'),
   getCurrentVersion:      vi.fn(),
   getVersionHistory:      vi.fn(),
   getVersionAtDate:       vi.fn(),
   getNextVersionNumber:   vi.fn(),
   getSpecificVersion:     vi.fn(),
-  insertVersion:          vi.fn(),
-  transitionVersionStatus: vi.fn(),
+  insertVersion:          vi.fn().mockResolvedValue({ version_id: 'q_k1_v2' }),
+  transitionVersionStatus: vi.fn().mockResolvedValue({ version_id: 'q_k1_v1', status: 'SUPERSEDED' }),
   insertVersionAuditLink: vi.fn(),
   getVersionsByTag:       vi.fn(),
   getLatestDraftVersion:  vi.fn(),
@@ -42,6 +45,7 @@ vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
   getVersionStatusCounts: vi.fn(),
   getDraftVersions:       vi.fn(),
   getPendingDecisionById: vi.fn(),
+  countPendingForKey:     vi.fn(),
   resolvePendingDecision: vi.fn(),
 }))
 
@@ -54,6 +58,10 @@ vi.mock('../../gateway/src/shared/audit/secondary.js', () => ({
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
+import {
+  insertVersion,
+  transitionVersionStatus,
+} from '../../gateway/src/shared/graph/queries.js'
 import pgRoutes from '../../gateway/src/routes/pg.js'
 
 // ── Test server ────────────────────────────────────────────────────────────────
@@ -160,14 +168,14 @@ const validNewVersion = {
 }
 
 describe('POST /pg/versions/supersede — atomic supersession', () => {
-  it('runs INSERT and UPDATE in a single transaction (happy path)', async () => {
+  it('runs insertVersion and transitionVersionStatus in a single transaction (happy path)', async () => {
     currentPool = makePool((_sql, _params) => ({ rowCount: 1, rows: [] }))
 
     const { status, body } = await postJson('/pg/versions/supersede', {
       new_version: validNewVersion,
       supersedes_version: 1,
       supersedes_reason: 'switching to JWT',
-      forward_link: { supersededByVersion: 2, supersededByAuthor: 'alice' },
+      forward_link: { version: 2, author: 'alice' },
     })
 
     expect(status).toBe(200)
@@ -178,48 +186,49 @@ describe('POST /pg/versions/supersede — atomic supersession', () => {
     })
 
     const calls = currentPool._client.query.mock.calls.map((c) => c[0])
-    // Transaction wrapping
+    // Transaction wrapping is still done on the client
     expect(calls[0]).toMatch(/BEGIN/i)
     expect(calls[calls.length - 1]).toMatch(/COMMIT/i)
 
-    // INSERT present
-    const insertCall = currentPool._client.query.mock.calls.find((c) => /INSERT INTO knowledge_versions/i.test(c[0]))
-    expect(insertCall).toBeDefined()
+    // insertVersion called with the client (not pool) and the new q_* identifiers
+    expect(insertVersion).toHaveBeenCalledWith(
+      currentPool._client,
+      expect.objectContaining({
+        version_id:   'q_k1_v2',
+        q_key_id:     'q_k1',
+        q_project_id: 'q_p1',
+        version:      2,
+      }),
+    )
 
-    // UPDATE to SUPERSEDED present
-    const updateCall = currentPool._client.query.mock.calls.find((c) => /UPDATE knowledge_versions/i.test(c[0]))
-    expect(updateCall).toBeDefined()
-    const updateParams = updateCall[1]
-    expect(updateParams).toContain('SUPERSEDED')
-    expect(updateParams).toContain('ACTIVE')         // guard on old row
-    expect(updateParams).toContain('test-project')   // project_id scoping
-    expect(updateParams).toContain(1)                // supersedes_version
+    // transitionVersionStatus called with the old version_id and SUPERSEDED
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      currentPool._client,
+      'q_k1_v1',
+      'SUPERSEDED',
+      expect.objectContaining({ version: 2, author: 'alice' }),
+    )
 
     // Client released
     expect(currentPool._client.release).toHaveBeenCalled()
   })
 
-  it('returns 200 with rows_updated:0 when old row is already superseded', async () => {
-    // First call (BEGIN), second (INSERT), third (UPDATE with rowCount 0), fourth (COMMIT)
-    let callIdx = 0
-    currentPool = makePool((sql) => {
-      callIdx += 1
-      if (/UPDATE knowledge_versions/i.test(sql)) return { rowCount: 0, rows: [] }
-      return { rowCount: 1, rows: [] }
-    })
+  it('returns 200 with rows_updated:0 when transitionVersionStatus reports no row updated', async () => {
+    // Simulate concurrent supersession — old row already gone from ACTIVE
+    transitionVersionStatus.mockResolvedValueOnce(null)
+    currentPool = makePool(() => ({ rowCount: 1, rows: [] }))
 
     const { status, body } = await postJson('/pg/versions/supersede', {
       new_version: validNewVersion,
       supersedes_version: 1,
       supersedes_reason: 'switching to JWT',
-      forward_link: { supersededByVersion: 2, supersededByAuthor: 'alice' },
+      forward_link: { version: 2, author: 'alice' },
     })
 
     expect(status).toBe(200)
     expect(body.inserted).toBe(true)
     expect(body.rows_updated).toBe(0)
     expect(body.superseded_version).toBe(1)
-    expect(callIdx).toBeGreaterThan(0)
   })
 
   it('returns 400 when new_version is missing', async () => {

@@ -25,9 +25,11 @@ import { verifyJwt } from '../middleware/verify-jwt.js'
 import { projectMiddleware } from '../middleware/project.js'
 import { Errors } from '../errors.js'
 import {
-  getCurrentVersion,
-  getLastBump,
-  insertBump,
+  getProjectByGroupId,
+  getOrCreateKey,
+  getVersionForBump,
+  getBumpLog,
+  recordBump,
   updateConfidence,
 } from '../shared/graph/queries.js'
 
@@ -59,14 +61,22 @@ router.post('/:topic/:key', verifyJwt, projectMiddleware, async (req, res, next)
   const pool        = req.app.locals.pool
 
   try {
+    // Resolve group_id → q_project_id, then (topic, key) → q_key_id
+    const qProjectId = await getProjectByGroupId(pool, projectId)
+    if (!qProjectId) {
+      return next(Errors.notFound(`Project '${projectId}' not registered`))
+    }
+    const qKeyId = await getOrCreateKey(pool, qProjectId, topic, key)
+
     // Load the current ACTIVE version
-    const existing = await getCurrentVersion(pool, topic, key, projectId)
+    const existing = await getVersionForBump(pool, qKeyId)
     if (!existing) {
       return next(Errors.notFound(`No ACTIVE knowledge at ${topic}:${key} in this project`))
     }
 
     // Cooldown check — 7 days per author
-    const lastBump = await getLastBump(pool, caller, topic, key, projectId)
+    const bumpLogs = await getBumpLog(pool, { qKeyId, author: caller, limit: 1 })
+    const lastBump = bumpLogs[0] ?? null
     if (lastBump) {
       const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
       if (elapsed < COOLDOWN_MS) {
@@ -86,8 +96,8 @@ router.post('/:topic/:key', verifyJwt, projectMiddleware, async (req, res, next)
 
     // Write bump_log + update confidence + reset last_accessed_at
     await Promise.all([
-      insertBump(pool, { author: caller, topic, key, projectId, role: callerRole, deltaApplied: delta }),
-      updateConfidence(pool, existing.id, newConfidence),
+      recordBump(pool, { qKeyId, author: caller, role: callerRole, delta }),
+      updateConfidence(pool, existing.version_id, newConfidence),
     ])
 
     res.json({
