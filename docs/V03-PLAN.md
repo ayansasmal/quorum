@@ -1,5 +1,9 @@
 # Quorum v0.3 — Architecture Plan
 
+> ✅ **SHIPPED** — v0.3 implementation complete as of 2026-05-15. This document is a historical
+> design record. For current system state see [ANALYSIS.md](ANALYSIS.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+> and the gateway/MCP `CLAUDE.md` files.
+
 > Decisions finalised in design session: 2026-05-09.
 > Covers: JWT redesign, Redis cache, governance model (owner + admin), user profile API.
 >

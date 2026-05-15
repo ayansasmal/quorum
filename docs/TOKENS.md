@@ -35,34 +35,7 @@ JWT=$(curl -s -X POST http://localhost:3001/auth/token \
 
 ---
 
-## Option 3 — Mint directly inside the container (no GitHub needed)
-
-Useful when GitHub is unreachable or you need a token for a specific sub/role without OAuth.
-
-```bash
-docker compose exec gateway node --input-type=module <<'EOF'
-import { loadKeys, getKeys } from '/app/gateway/src/keys.js'
-import { SignJWT }            from 'jose'
-await loadKeys()
-const { privateKey, kid } = getKeys()
-const token = await new SignJWT({ sub: 'your-github-username', is_admin: false })
-  .setProtectedHeader({ alg: 'ES256', kid })
-  .setIssuer('quorum-gateway')
-  .setIssuedAt()
-  .setExpirationTime('4h')
-  .sign(privateKey)
-console.log(token)
-EOF
-```
-
-**Warning:** This generates a new ephemeral key pair in the Node.js process — different from
-the running gateway's key pair. The resulting JWT **will not be accepted** by the live gateway.
-
-To get a token signed by the running gateway's key, use the `/auth/token` HTTP endpoint (Options 1/2).
-
----
-
-## Option 4 — Refresh an existing token
+## Option 3 — Refresh an existing token
 
 If you already have a valid (non-expired) JWT, you can renew it:
 
@@ -76,7 +49,7 @@ the same `sub` and `is_admin` from the existing token. No GitHub call required.
 
 ---
 
-## Option 5 — Use the test-endpoints script (auto-obtains JWT)
+## Option 4 — Use the test-endpoints script (auto-obtains JWT)
 
 ```bash
 QUORUM_GITHUB_TOKEN=$(gh auth token) node scripts/test-endpoints.js
@@ -112,7 +85,7 @@ When `QUORUM_JWT_PRIVATE_KEY` is not set, the gateway generates a fresh ES256 ke
 Any token signed by a previous key pair fails verification.
 
 This is intentional for security (no accidental key reuse) but inconvenient for dev.
-Use persistent keys (Option 5 above) or the nginx `resolver` workaround for the dashboard.
+Use persistent keys (see "Persistent JWT keys" section above) or the nginx `resolver` workaround for the dashboard.
 
 ---
 

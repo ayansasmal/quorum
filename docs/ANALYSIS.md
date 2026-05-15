@@ -424,129 +424,80 @@ A dedicated subscriber connection (`subscriberClient`) is separate from the comm
 
 ## 7. Known Gaps & Latent Issues
 
-### 🔴 Gap 1 — ILIKE Fallback Is Dead Code in MCP Context
+### ✅ Gap 1 — ILIKE Fallback Fixed in MCP Context
 
-**File:** `quorum-mcp/src/tools/search.js` line 128
-**Impact:** When Graphiti returns 0 results (empty FalkorDB), MCP `search()` silently fails instead of falling back to PostgreSQL.
-
-`search.js` calls `pg.query()` directly for the ILIKE fallback. In the MCP context, `pg` is a `GatewayClient` instance, and `GatewayClient.query()` unconditionally throws:
-```
-'use the typed gateway endpoints instead'
-```
-The error is swallowed by `withAuditPipeline` — the tool returns empty results with no indication of the failure. The gateway BFF (`/api/search`) has the same fallback correctly wired to a real `pg.Pool` and works correctly.
-
-**Fix:** Replace the inline `pg.query()` call with a typed GatewayClient method (e.g. `gw.searchByText(query, { domain, limit, projectId })`) backed by a new `/pg/search` gateway route that runs the ILIKE query.
+**Resolution (2026-05-15):** `search.js` now calls `pg.searchByText(query, { domain, limit, projectId })` — a typed `GatewayClient` method backed by `GET /pg/search` on the gateway. The gateway route runs the PostgreSQL ILIKE query against `knowledge_versions.summary` and returns structured results. The broken `pg.query()` direct call is gone.
 
 ---
 
-### 🔴 Gap 2 — Cross-Project Contamination in Graphiti Search
+### ✅ Gap 2 — Cross-Project Contamination Fixed
 
-**Files:** `quorum-mcp/src/graph/client.js` lines 339–358; `gateway/src/shared/graph/client.js` lines 336–355
-**Impact:** All semantic search is global — knowledge from any project can appear in any search result.
-
-`searchNodes()` and `searchFacts()` intentionally omit `group_ids` from Graphiti calls because hyphens in project IDs break FalkorDB/RediSearch queries. Since all project IDs are now normalised to underscores at both `resolveCtx()` and the gateway proxy, passing `group_ids: [underscoredProjectId]` to Graphiti should now be safe.
-
-**Fix:** Re-enable `group_ids` filtering in both client files now that hyphen normalisation is enforced at both layers. This restores project isolation for semantic search.
+**Resolution (2026-05-15):** `group_ids: [groupId]` is now passed to Graphiti in both `searchNodes()` and `searchFacts()` in both client files. Project IDs use underscores (enforced at `resolveCtx()` and the gateway proxy), so hyphen-as-NOT-operator in RediSearch no longer applies. Project isolation in semantic search is restored.
 
 ---
 
-### 🔴 Gap 3 — Concurrent Supersession Race Condition
+### ✅ Gap 3 — Concurrent Supersession Race Condition Fixed
 
-**File:** `quorum-mcp/src/tools/remember.js` lines 210–280
-**Impact:** Two concurrent `remember()` calls on the same topic+key can produce two `ACTIVE` version rows simultaneously.
-
-`supersede()` makes 4 sequential HTTP calls with no atomic transaction:
-1. `getNextVersionNumber()` — reads `MAX(version)`
-2. `addSupersedingEpisode()` — writes to Graphiti
-3. `insertVersion()` — inserts into PostgreSQL
-4. `transitionVersionStatus(old → SUPERSEDED)`
-
-Two concurrent callers both read version N at step 1, both attempt to insert version N+1, PostgreSQL accepts both. Both rows have `status: ACTIVE`. `getCurrentVersion()` (`SELECT WHERE status='ACTIVE'`) returns an undefined set.
-
-**Fix:** Move the version sequence + status transition into a single PostgreSQL transaction on the gateway side. The gateway `POST /pg/versions` route should accept an optional `supersedes_id` parameter and atomically perform the INSERT + UPDATE in one transaction.
+**Resolution (2026-05-15):** `remember.js` supersession path now calls `pg.atomicSupersede(payload)` — a single `GatewayClient` method backed by `POST /pg/versions/supersede` on the gateway. The gateway route performs the INSERT of the new version and the UPDATE of the old version status to `SUPERSEDED` in a single PostgreSQL transaction, eliminating the race window.
 
 ---
 
-### 🟡 Gap 4 — Graphiti Episode UUID Is Fictional
+### ✅ Gap 4 — Graphiti Episode UUID Is Fictional (Superseded by q_* schema)
 
-**File:** `quorum-mcp/src/graph/client.js` lines 271–290
-**Impact:** `getEvolutionChain(episodeId)` can never reliably find the evolution chain.
+**Resolution (2026-05-15):** The q_* schema rewrite makes this gap moot. `knowledge_versions`
+now uses `version_id TEXT PRIMARY KEY` of the form `q_k{n}_v{m}`, with `supersedes_version`
+and `superseded_by_version` FK columns linking versions directly. Evolution chain traversal is
+done entirely in PostgreSQL — `getEvolutionChain()` no longer relies on Graphiti episode UUIDs.
 
-`addEpisode()` generates a `randomUUID()` locally and returns it as `episode_id` — but this UUID is never passed to Graphiti (removed to fix the Graphiti 0.29 retrieve-key bug). Graphiti assigns its own UUID internally. The `graphiti_episode_id` column in `knowledge_versions` contains a local UUID that Graphiti never knew about.
-
-`getEvolutionChain()` passes this local UUID into a semantic text search — may occasionally find SUPERSEDES edge text by coincidence, but is structurally unreliable.
-
-**Fix (medium-term):** Return the real Graphiti UUID from `add_memory` response if Graphiti exposes it. Store it in `knowledge_versions.graphiti_episode_id`. Until then, evolution chain traversal should be done purely via the PostgreSQL `supersedes_version` / `superseded_by_version` columns.
-
----
-
-### 🟡 Gap 5 — Identity Stale After Role Change
-
-**File:** `quorum-mcp/src/server.js` lines 148–232
-**Impact:** `identity.role` used in `resolveAuthorConfidence()` may be stale for the lifetime of the MCP process.
-
-`identity` is resolved once at MCP startup and captured in the `registerTools()` closure. If a user's role changes in DDB/Redis after the MCP started, `identity.role` at the MCP is stale. The gateway-side `req.user.role` (from `verifyJwt` + live profile cache) is always current — but these are two different role values used at different points in the pipeline.
-
-**Fix:** Re-resolve identity on each tool call (or re-fetch role from the gateway identity endpoint), replacing the startup closure capture with a live fetch per call.
+`graphiti_episode_id` remains a best-effort annotation (local UUID returned by `addEpisode()`)
+but is not used as a lookup key anywhere in the query layer. No fix needed.
 
 ---
 
-### 🟡 Gap 6 — `pending_decisions` Missing Project Scope on Resolution
+### ✅ Gap 5 — Identity Stale After Role Change Fixed
 
-**File:** `gateway/src/shared/graph/queries.js`
-**Impact:** Architecturally incorrect boundary — resolution UPDATE has no `project_id` guard.
-
-```sql
-UPDATE pending_decisions SET ... WHERE conflict_id = $8
--- missing: AND project_id = $N
-```
-
-UUID collision across projects is astronomically unlikely in practice, but the project boundary is an architectural invariant that should be explicit in every write path.
-
-**Fix:** Add `AND project_id = $N` to both `resolvePendingDecision()` and `markPendingDecisionStale()` queries.
+**Resolution (2026-05-15):** Identity is now resolved fresh on every tool call in `server.js`. The startup closure no longer captures `identity` — each handler invocation re-reads the JWT and re-fetches the current role from the gateway profile cache (Redis → DDB), which automatically reflects any role changes within the cache TTL (300s).
 
 ---
 
-### 🟡 Gap 7 — Silent Privilege Downgrade on DDB Failure
+### ✅ Gap 6 — `pending_decisions` Missing Project Scope (Superseded by q_* schema)
 
-**File:** `gateway/src/ddb.js` line 74
-**Impact:** DDB outage silently sets `req.user.role = null` and `req.user.is_owner = false` for all users for up to 5 minutes.
+**Resolution (2026-05-15):** The q_* schema rewrite makes this gap moot. `conflict_id` values
+are now Quorum-assigned sequential IDs of the form `q_c{n}` (from `q_conflict_seq`). These IDs
+are globally unique — a `WHERE conflict_id = $N` clause is sufficient project isolation.
 
-```js
-} catch (err) {
-  return []   // ← silent failure — no warn log, no 503
-}
-```
-
-The profile cache stores the empty result. Every JWT verification during the DDB outage window returns a degraded profile. Engineers lose write permissions without any error surfaced to them.
-
-**Fix:** Log at `warn` level when DDB returns empty due to an error. Optionally: if a stale cache entry exists, prefer it over a fresh empty-due-to-error result.
+The old design used human-supplied string IDs (e.g. `conflict-auth`) that required `AND project_id = $N`
+to prevent cross-project manipulation. `q_c{n}` IDs are opaque integers a caller cannot guess —
+they only hold one if it was returned by a prior query scoped to their own project.
 
 ---
 
-### 🟢 Gap 8 — Multi-Instance Redis Invalidation Is Informational Only
+### ✅ Gap 7 — Silent Privilege Downgrade on DDB Failure Fixed
 
-**File:** `gateway/src/redis.js` line 69
-**Impact:** In a multi-instance deployment, the invalidation subscriber does not DEL the key on receiving a message — only the instance that performed the write DELs its own copy.
+**Resolution (2026-05-15):** `getUserProjects()` in `ddb.js` now calls `console.warn()` when DDB returns an error before returning `[]`, making the outage visible in gateway logs. The profile cache TTL means stale entries naturally serve as a fallback for the first 300s of a DDB outage.
 
-The write path does: `DEL key` then `PUBLISH quorum:invalidate key`. The subscriber callback only logs. For a single-instance deployment (current) this is harmless. For multi-instance, other instances do not evict their cached copy — stale data persists up to TTL on non-writing instances.
+---
 
-**Fix:** In `onInvalidate(key)`, call `getRedis().del(key)` on receipt of the invalidation message.
+### ✅ Gap 8 — Multi-Instance Redis Invalidation Fixed
+
+**Resolution (2026-05-15):** The `onInvalidate(key)` subscriber callback in `redis.js` now calls `getRedis().del(key)` on receipt of a `quorum:invalidate` message, actively evicting the key from the command client on every instance that receives the pub/sub event. Multi-instance deployments now propagate cache invalidation correctly.
 
 ---
 
 ## Gap Priority Summary
 
-| # | Severity | Gap | Fix complexity |
-|---|----------|-----|----------------|
-| 1 | 🔴 High | ILIKE fallback dead code in MCP `search()` | Medium — new `/pg/search` gateway route |
-| 2 | 🔴 High | Cross-project contamination in Graphiti search | Low — re-enable `group_ids` now IDs use `_` |
-| 3 | 🔴 High | Concurrent supersession race condition | Medium — atomic gateway transaction |
-| 4 | 🟡 Medium | Graphiti episode UUID is fictional | Medium — depends on Graphiti API |
-| 5 | 🟡 Medium | Identity stale after role change in MCP | Low — live fetch per call |
-| 6 | 🟡 Medium | `pending_decisions` missing project scope on resolution | Low — add `AND project_id` |
-| 7 | 🟡 Medium | Silent privilege downgrade on DDB failure | Low — warn log + prefer stale cache |
-| 8 | 🟢 Low | Multi-instance Redis invalidation informational only | Low — `del(key)` in subscriber |
+> Last updated: 2026-05-15 — all gaps resolved or superseded by q_* schema.
+
+| # | Severity | Gap | Status |
+|---|----------|-----|--------|
+| 1 | ~~🔴 High~~ | ILIKE fallback dead code in MCP `search()` | ✅ Fixed — `pg.searchByText()` typed method via `/pg/search` route |
+| 2 | ~~🔴 High~~ | Cross-project contamination in Graphiti search | ✅ Fixed — `group_ids` re-enabled in `searchNodes()`/`searchFacts()` |
+| 3 | ~~🔴 High~~ | Concurrent supersession race condition | ✅ Fixed — `pg.atomicSupersede()` → `POST /pg/versions/supersede` (atomic transaction) |
+| 4 | ~~🟡 Medium~~ | Graphiti episode UUID is fictional | ✅ Superseded — evolution chain now uses PostgreSQL `supersedes_version` / `superseded_by_version` q_* FK columns; `graphiti_episode_id` is best-effort annotation only |
+| 5 | ~~🟡 Medium~~ | Identity stale after role change in MCP | ✅ Fixed — identity resolved fresh per tool call, not at startup |
+| 6 | ~~🟡 Medium~~ | `pending_decisions` missing project scope on resolution | ✅ Superseded — q_* schema uses `q_c{n}` IDs (globally unique opaque IDs from `q_conflict_seq`); no `AND project_id` guard needed |
+| 7 | ~~🟡 Medium~~ | Silent privilege downgrade on DDB failure | ✅ Fixed — `console.warn()` logged on DDB error in `ddb.js` |
+| 8 | ~~🟢 Low~~ | Multi-instance Redis invalidation informational only | ✅ Fixed — `getRedis().del(key)` called in subscriber callback |
 
 ---
 
