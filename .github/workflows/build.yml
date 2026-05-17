@@ -2,8 +2,8 @@
 ## Quorum CI — Build and Push Docker Images
 ##
 ## Builds two images on push to prod branch:
-##   ghcr.io/{repo}:*           ← Quorum MCP server (src/server.js)
-##   ghcr.io/{repo}-gateway:*   ← Quorum Gateway (src/gateway/server.js)
+##   ghcr.io/{repo}:*           <- Quorum MCP server (installed from npm)
+##   ghcr.io/{repo}-gateway:*   <- Quorum Gateway (gateway/src/server.js)
 ##
 ## Both images are built in parallel and share the Buildx cache.
 ##
@@ -54,7 +54,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          dockerfile: Dockerfile
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -96,7 +96,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          dockerfile: Dockerfile.gateway
+          file: Dockerfile.gateway
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -3,8 +3,8 @@
  *
  * The Quorum Gateway is the only component that holds raw infrastructure
  * credentials (PostgreSQL, S3, Graphiti URL). Engineers only need:
- *   - QUORUM_GATEWAY_URL  — where this server lives
- *   - QUORUM_GITHUB_TOKEN — their personal GitHub token
+ *   - QUORUM_GATEWAY_URL  — where this server lives (MCP server reads this)
+ * Auth is GitHub OAuth 2.0 via GET /auth/github; no personal tokens required.
  *
  * Startup sequence:
  *   1. Load ES256 key pair (from env vars, or generate ephemeral in dev)
@@ -13,18 +13,18 @@
  *   4. Start HTTP server
  *
  * API surface:
- *   GET  /auth/github                   — initiate GitHub OAuth flow
- *   GET  /auth/callback                 — GitHub OAuth callback → redirect dashboard with token
- *   POST /auth/token                    — GitHub OAuth/PAT token + project_id → signed ES256 JWT
+ *   GET  /auth/github                   — initiate GitHub OAuth flow (dashboard)
+ *   POST /auth/token                    — PAT token + project_id → signed ES256 JWT (CI fallback)
  *   POST /auth/refresh                  — renew JWT without re-auth (Bearer JWT → new JWT)
  *   GET  /.well-known/jwks.json         — public key for local JWT verification
  *   GET  /.well-known/oauth-authorization-server — RFC8414 OAuth metadata (MCP auth)
  *   POST /oauth/register                — RFC7591 dynamic client registration
  *   GET  /oauth/authorize               — start PKCE S256 flow → GitHub
- *   GET  /oauth/callback                — GitHub callback → issue auth code
+ *   GET  /oauth/callback                — single GitHub OAuth callback (dashboard JWT + MCP auth code)
  *   POST /oauth/token                   — exchange auth code + PKCE verifier → JWT
  *   POST /graphiti/*                    — JWT-authenticated Graphiti proxy
  *   GET|POST|PATCH /pg/*                — JWT-authenticated PostgreSQL REST API
+ *   POST /config/upload                 — onboard new project: upload config to S3 + sync to DDB (once per project)
  *   GET  /config/:projectId             — project config from S3
  *   POST /config/validate               — validate config JSON (no auth)
  *   GET  /projects                      — list projects the user is a member of
@@ -37,6 +37,9 @@
  *   POST /api/bump/:topic/:key          — dashboard: confidence bump (JWT auth)
  *   POST /sync/configs                  — trigger full S3→DDB sync (sync token or principal_architect JWT)
  *   GET  /schema/config                 — quorum.config.schema.json for editor validation (no auth)
+ *   POST /governance/detect-conflict    — LLM contradiction check between two knowledge nodes (JWT auth)
+ *   POST /governance/enrich             — LLM reviewer brief for a confirmed conflict (JWT auth)
+ *   POST /governance/extract            — LLM knowledge extraction from a task summary (JWT auth)
  *   GET  /health                        — health check
  */
 
@@ -56,6 +59,11 @@ import bumpRoutes      from './routes/bump.js'
 import dashboardRoutes from './routes/dashboard.js'
 import syncRoutes, { syncAllConfigs } from './routes/sync.js'
 import schemaRoutes from './routes/schema.js'
+import governanceRoutes from './routes/governance.js'
+import userRoutes  from './routes/user.js'
+import adminRoutes from './routes/admin.js'
+import { loadAdminConfig } from './config-cache.js'
+import { startInvalidationSubscriber } from './redis.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
 import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
 
@@ -92,7 +100,7 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',                              oauthRoutes)  // GET /auth/github, GET /auth/callback
+app.use('/auth',                              oauthRoutes)  // GET /auth/github (initiates OAuth flow)
 app.use('/auth',                              authRoutes)   // POST /auth/token
 app.get('/.well-known/oauth-authorization-server', metadataHandler)  // RFC8414 MCP OAuth metadata
 app.use('/oauth',                             mcpOauthRouter)  // MCP OAuth 2.1 Authorization Server
@@ -108,6 +116,12 @@ app.use('/api',      verifyJwt, engineerLimit, projectLimit, dashboardRoutes) //
 app.use('/sync',                              syncRoutes)
 // Schema endpoint — public, no auth (editor validation + autocomplete)
 app.use('/schema',                            schemaRoutes)
+// Governance LLM endpoints — JWT auth (MCP GatewayClient sends Bearer token)
+app.use('/governance',                        governanceRoutes)
+// User profile — v0.3 replacement for GET /auth/projects (verifyJwt inside route)
+app.use('/user',     engineerLimit, userRoutes)
+// Platform admin management — verifyJwt + admin guard inside route handlers
+app.use('/admin',    engineerLimit, adminRoutes)
 
 // ── Health endpoint ────────────────────────────────────────────────────────────
 
@@ -155,7 +169,7 @@ app.get('/health', async (_req, res) => {
     }
   }
 
-  const [pg, graphiti, falkordb, s3] = await Promise.all([
+  const [pg, graphiti, falkordb, redis, s3] = await Promise.all([
     probe('postgresql', () => pool.query('SELECT 1')),
 
     probe('graphiti', async () => {
@@ -166,6 +180,11 @@ app.get('/health', async (_req, res) => {
     probe('falkordb', async () => {
       const ok = await tcpReachable(FALKORDB_HOST, FALKORDB_PORT)
       if (!ok) throw new Error(`TCP connect failed (${FALKORDB_HOST}:${FALKORDB_PORT})`)
+    }),
+
+    probe('redis', async () => {
+      const { getRedis } = await import('./redis.js')
+      await getRedis().ping()
     }),
 
     probe('s3', async () => {
@@ -182,7 +201,7 @@ app.get('/health', async (_req, res) => {
     }),
   ])
 
-  const allOk  = pg.ok && graphiti.ok && falkordb.ok && s3.ok
+  const allOk  = pg.ok && graphiti.ok && falkordb.ok && s3.ok && redis.ok
   const status = allOk ? 'healthy' : 'degraded'
 
   /** @param {{ ok: boolean, error?: string }} result */
@@ -197,12 +216,14 @@ app.get('/health', async (_req, res) => {
       postgresql: componentStatus(pg),
       graphiti:   componentStatus(graphiti),
       falkordb:   componentStatus(falkordb),
+      redis:      componentStatus(redis),
       s3:         componentStatus(s3),
     },
     config: {
       s3_bucket:    S3_BUCKET,
       s3_endpoint:  S3_ENDPOINT ?? 'aws (real)',
       graphiti_url: GRAPHITI_URL,
+      redis_url:    process.env.REDIS_URL ?? 'redis://redis:6379',
     },
     timestamp: new Date().toISOString(),
   })
@@ -242,7 +263,25 @@ async function startup() {
     process.exit(1)
   }
 
-  // 3. Sync S3 configs → DynamoDB (non-fatal — warms the cache on restart)
+  // 3. Load platform admin config into Redis (non-fatal — not yet seeded on first deploy)
+  try {
+    const adminConfig = await loadAdminConfig()
+    if (adminConfig) {
+      console.error(`[Gateway] ✓ Admin config loaded (${adminConfig.admins?.length ?? 0} admin(s))`)
+    } else {
+      console.error('[Gateway] ⚠ Admin config not yet seeded — run setup.sh to initialise')
+    }
+  } catch (err) {
+    console.error(`[Gateway] Admin config load failed (non-fatal): ${err.message}`)
+  }
+
+  // 4. Start Redis pub/sub invalidation subscriber
+  startInvalidationSubscriber((key) => {
+    console.error(`[Gateway] Cache invalidated: ${key}`)
+  })
+  console.error('[Gateway] ✓ Redis invalidation subscriber started')
+
+  // 5. Sync S3 configs → DynamoDB membership (non-fatal — warms cache on restart)
   try {
     const { synced, failed, duration_ms } = await syncAllConfigs()
     console.error(`[Gateway] ✓ DDB sync — ${synced} synced, ${failed.length} failed (${duration_ms}ms)`)
@@ -251,7 +290,7 @@ async function startup() {
     console.error(`[Gateway] DDB sync failed (non-fatal): ${err.message}`)
   }
 
-  // 4. Start HTTP server
+  // 6. Start HTTP server
   app.listen(PORT, () => {
     console.error(`[Gateway] ✓ Listening on port ${PORT}`)
     console.error(`[Gateway] JWKS: http://localhost:${PORT}/.well-known/jwks.json`)

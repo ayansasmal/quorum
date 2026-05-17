@@ -1,0 +1,33 @@
+{
+  "header": "# Changelog\n\nAll notable changes to Quorum are documented here.\nVersions follow [Semantic Versioning](https://semver.org/) and commits follow [Conventional Commits](https://www.conventionalcommits.org/).\n",
+
+  "packageFiles": [
+    { "filename": "package.json", "type": "json" }
+  ],
+  "bumpFiles": [
+    { "filename": "package.json",           "type": "json" },
+    { "filename": "gateway/package.json",   "type": "json" },
+    { "filename": "dashboard/package.json", "type": "json" }
+  ],
+
+  "types": [
+    { "type": "feat",     "section": "Features" },
+    { "type": "fix",      "section": "Bug Fixes" },
+    { "type": "perf",     "section": "Performance" },
+    { "type": "refactor", "section": "Refactoring" },
+    { "type": "docs",     "section": "Documentation", "hidden": false },
+    { "type": "chore",    "section": "Maintenance",   "hidden": false },
+    { "type": "ci",       "hidden": true },
+    { "type": "test",     "hidden": true },
+    { "type": "style",    "hidden": true },
+    { "type": "revert",   "section": "Reverts" }
+  ],
+
+  "skip": {
+    "changelog": false
+  },
+
+  "commitAll": true,
+  "sign": false,
+  "releaseCommitMessageFormat": "chore(release): {{currentTag}}"
+}

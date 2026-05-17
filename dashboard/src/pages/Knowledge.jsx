@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Search } from 'lucide-react'
 import { useKnowledge, useSearch } from '../api/knowledge.js'
+import { useStats } from '../api/stats.js'
 import KnowledgeDetail from '../components/knowledge/KnowledgeDetail.jsx'
 import ConfidenceBar from '../components/stats/ConfidenceBar.jsx'
 import { entityBadge, fmtDate } from '../lib/utils.js'
@@ -15,6 +16,9 @@ export default function Knowledge() {
   const [selected,    setSelected]    = useState(null)
 
   const isSearching = query.trim().length >= 2
+
+  const { data: statsData } = useStats()
+  const domainOptions = (statsData?.domains ?? []).map((d) => d.domain)
 
   const browseResult = useKnowledge({ domain, entity_type: entityType, page, limit: 20 })
   const searchResult = useSearch(isSearching ? query : '', domain)
@@ -46,7 +50,7 @@ export default function Knowledge() {
           className="rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-600 dark:text-gray-300"
         >
           <option value="">All domains</option>
-          {['auth', 'api', 'db', 'infra', 'testing'].map((d) => (
+          {domainOptions.map((d) => (
             <option key={d} value={d}>{d}</option>
           ))}
         </select>

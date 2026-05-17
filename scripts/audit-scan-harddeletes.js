@@ -2,27 +2,25 @@
 /**
  * Quorum Static Analysis — Graphiti Delete Method Scanner
  *
- * Scans src/ for direct calls to Graphiti delete/purge methods.
+ * Scans gateway/src/ for direct calls to Graphiti delete/purge methods.
  * Constitutional Rule 1 (no hard deletes) is enforced by blocking these methods
- * in src/graph/client.js. This scanner ensures no code bypasses that block
- * by calling the Graphiti HTTP API directly with a delete tool name.
+ * in shared/graph/client.js. This scanner ensures no code bypasses that block.
  *
  * Exit 0 — no violations found
- * Exit 1 — violations found (blocks CI)
+ * Exit 1 — violations found
  *
  * Patterns detected:
  *   1. Blocked method names used as string literals in fetch/HTTP calls
- *      (outside src/graph/client.js where BLOCKED_METHODS is defined)
+ *      (outside shared/graph/client.js where BLOCKED_METHODS is defined)
  *   2. DELETE FROM / DROP TABLE SQL in non-test, non-migration source files
- *   3. deleteEntry / updateEntry called from outside audit/secondary.js
+ *   3. deleteEntry / updateEntry called from outside shared/audit/secondary.js
  */
 
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 
-const ROOT = resolve(import.meta.dirname, '..')
-const MCP_SRC      = join(ROOT, 'mcp', 'src')
-const GATEWAY_SRC  = join(ROOT, 'gateway', 'src')
+const ROOT        = resolve(import.meta.dirname, '..')
+const GATEWAY_SRC = join(ROOT, 'gateway', 'src')
 
 const BLOCKED_GRAPHITI_METHODS = [
   'delete_episode',
@@ -65,25 +63,18 @@ async function findMatches(filePath, pattern) {
 
 async function main() {
   console.log('Quorum Graphiti Delete Scanner\n' + '─'.repeat(50))
-  const allFiles = [
-    ...(await collectFiles(MCP_SRC)),
-    ...(await collectFiles(GATEWAY_SRC)),
-  ]
+  const allFiles = await collectFiles(GATEWAY_SRC)
 
   let violations = 0
 
   // 1. Blocked Graphiti method names in string literals outside client.js + tests
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    // client.js defines BLOCKED_METHODS — allowed to reference them
-    if (rel === 'mcp/src/graph/client.js') continue
-    // constitutional.js defines and enforces the rules — allowed to name the blocked methods
-    if (rel === 'mcp/src/governance/constitutional.js') continue
-    // Tests verify the block is in place — they reference the method names too
+    if (rel === 'gateway/src/shared/graph/client.js') continue
+    if (rel === 'gateway/src/shared/governance/constitutional.js') continue
     if (rel.startsWith('tests/')) continue
 
     for (const method of BLOCKED_GRAPHITI_METHODS) {
-      // Match the method name used as a string value (in fetch body or tool: param)
       const pattern = new RegExp(`['"\`]${method}['"\`]`, 'g')
       const hits = await findMatches(f, pattern)
       for (const h of hits) {
@@ -93,13 +84,11 @@ async function main() {
     }
   }
 
-  // 2. Raw SQL DELETE / DROP in tool and audit source files (not migrations, not tests)
+  // 2. Raw SQL DELETE / DROP in gateway source (not scripts or tests)
   const sqlDeletePattern = /\b(?:DELETE\s+FROM|DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE\s+TABLE)\b/i
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    // Allow in secondary.js — the unconditional-throw functions reference these conceptually
-    // Allow in tests and scripts
-    if (rel.startsWith('tests/') || rel.startsWith('scripts/') || rel === 'mcp/src/audit/secondary.js') continue
+    if (rel.startsWith('tests/') || rel.startsWith('scripts/') || rel === 'gateway/src/shared/audit/secondary.js') continue
     const hits = await findMatches(f, sqlDeletePattern)
     for (const h of hits) {
       console.error(`[SQL_DELETE] ${rel}:${h.line}:${h.col}  "${h.text}"  (all deletes are unconstitutional — use status transitions instead)`)
@@ -107,11 +96,10 @@ async function main() {
     }
   }
 
-  // 3. deleteEntry / updateEntry called from outside audit/secondary.js
+  // 3. deleteEntry / updateEntry called from outside shared/audit/secondary.js
   for (const f of allFiles) {
     const rel = relative(ROOT, f)
-    // secondary.js defines these as unconditional-throws; constitutional.js tests that they throw
-    if (rel === 'mcp/src/audit/secondary.js' || rel === 'mcp/src/governance/constitutional.js') continue
+    if (rel === 'gateway/src/shared/audit/secondary.js' || rel === 'gateway/src/shared/governance/constitutional.js') continue
     if (rel.startsWith('tests/')) continue
     const hits = await findMatches(f, /(?:deleteEntry|updateEntry)\s*\(/)
     for (const h of hits) {

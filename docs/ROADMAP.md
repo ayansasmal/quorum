@@ -185,7 +185,33 @@ Success criteria:
 
 ---
 
-## v0.3 — Self-Evolving
+## v0.3 — Identity, Cache, and Governance Foundation ✅ Shipped
+**Goal: Slim identity model, Redis cache, ownership governance**
+
+```
+✅ Slim JWT — { sub, is_admin } only; role + project from header + profile endpoint
+✅ X-Quorum-Project header — identity (who you are) decoupled from project scope (what you access)
+✅ Redis two-tier cache — config:{group_id}, profile:{sub}, admin:platform; pub/sub invalidation
+✅ GET /user/profile/:username — Redis → DDB, role + projects + base_confidence
+✅ Ownership governance — POST /config/transfer-ownership, POST /config/update-role
+✅ Admin management — GET /admin/config, POST /admin/users; configs/.quorum platform config
+✅ Dashboard governance panels — Ownership, Role Editor, Admin; guarded by is_owner / is_admin
+✅ summary column as durable content store — survives FalkorDB/volume wipes
+✅ group_ids removed from Graphiti search calls — RediSearch hyphen bug workaround
+✅ PostgreSQL ILIKE fallback in GET /api/search — resilience when Graphiti empty
+✅ POST /api/bump/:topic/:key — confidence endorsement with 7-day cooldown, role-weighted delta
+✅ TDD gates for verify-jwt, slim JWT shape, X-Quorum-Project header threading
+```
+
+Success criteria met:
+→ Any gateway replica resolves the same profile in < 1s (Redis hit)
+→ Role change reflects in next request without restart
+→ Ownership transfer auditable with full lineage
+→ Content always retrievable via PostgreSQL even when FalkorDB is wiped
+
+---
+
+## v0.4 — Self-Evolving
 **Goal: The graph grows without manual effort**
 
 ```
@@ -234,7 +260,7 @@ Success criteria:
 
 ---
 
-## v0.4 — Multi-Team and Scale
+## v0.5 — Multi-Team and Scale
 **Goal: Org-wide, not just one team**
 
 ```
@@ -359,6 +385,20 @@ Success criteria:
 ## Future Vision
 
 ```
+HTTP/SSE MCP Transport (post-v1.0)
+  → Migrate quorum-mcp from stdio to HTTP/SSE (StreamableHTTPServerTransport)
+  → Gateway hosts /mcp endpoint — quorum-mcp becomes a thin local proxy on :8000
+  → Claude Code shows △ needs authentication natively (HTTP 401 at transport layer)
+  → authenticate() tool removed — Claude Code handles PKCE browser flow automatically
+  → Local proxy buffers writes to .quorum-offline.log when gateway unreachable
+  → On reconnect: proxy replays buffered writes with full conflict detection
+  → Engineers register http://localhost:8000/mcp — never the remote gateway URL directly
+  → Gateway can be hosted centrally; engineers point proxy at it via .quorum file
+  → Full design: docs/V03-PLAN.md § 5 (HTTP MCP Migration) and § 6 (Offline Mode)
+
+```
+
+```
 Bidirectional Confluence Sync
   → Ingest and export in both directions
   → Webhook real-time sync, supersede detection across Confluence edits
@@ -393,7 +433,8 @@ Autonomous Delivery
 ```
 v0.1 → Constitutional suite (100% coverage, CI guard, 20+ LLM cases)
 v0.2 → Governance suite (adversarial, 50+ cases, CI accuracy thresholds)
-v0.3 → LLM accuracy (100+ cases, regression tests, production feedback loop)
+v0.3 → TDD gates for verify-jwt, slim JWT, X-Quorum-Project header (shipped ✅)
+v0.4 → LLM accuracy (100+ cases, regression tests, production feedback loop)
 v1.0 → Full (200+ cases, load/chaos testing, external security audit)
 ```
 

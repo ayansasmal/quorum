@@ -1,5 +1,9 @@
 # Quorum Dashboard — Implementation Plan
 
+> ✅ **SHIPPED** — Dashboard implementation complete. All panels live: Stats, Graph, Pending
+> Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status, Admin Panel.
+> This document is a historical implementation record.
+
 > Created: 2026-04-21
 > Wave 4 of the implementation plan (see project memory: `project_implementation_plan.md`)
 > Design reference: `FRONTEND.md` — read that first for UI decisions, architecture, and API schemas

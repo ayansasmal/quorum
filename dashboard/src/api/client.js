@@ -25,13 +25,22 @@ let _getToken = () => null
 let _logout = () => {}
 /** @type {(() => Promise<string>) | null} */
 let _refresh = null
+/** @type {(() => string | null) | null} */
+let _getProject = null
 
 /** @param {() => string | null} fn */
-export function registerTokenGetter(fn)  { _getToken = fn }
+export function registerTokenGetter(fn)   { _getToken = fn }
 /** @param {() => void} fn */
-export function registerLogout(fn)       { _logout = fn }
+export function registerLogout(fn)        { _logout = fn }
 /** @param {() => Promise<string>} fn */
-export function registerRefresher(fn)    { _refresh = fn }
+export function registerRefresher(fn)     { _refresh = fn }
+/**
+ * Register a function that returns the currently active project ID.
+ * apiFetch injects this as X-Quorum-Project on every request (v0.3: project
+ * context travels via header, not JWT claim).
+ * @param {() => string | null} fn
+ */
+export function registerProjectGetter(fn) { _getProject = fn }
 
 // ── Token validation ───────────────────────────────────────────────────────────
 
@@ -110,11 +119,13 @@ export async function apiFetch(path, options = {}) {
   }
 
   // ── Make the request ───────────────────────────────────────────────────────
+  const activeProject = _getProject?.()
   const makeRequest = (jwt) => fetch(path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+      ...(jwt            ? { Authorization: `Bearer ${jwt}` }         : {}),
+      ...(activeProject  ? { 'X-Quorum-Project': activeProject }      : {}),
       ...options.headers,
     },
   })

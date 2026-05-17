@@ -24,7 +24,8 @@ import express from 'express'
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock('../../gateway/src/config-cache.js', () => ({
-  loadProjectConfig: vi.fn(),
+  loadProjectConfig:  vi.fn(),
+  isPlatformAdmin:    vi.fn().mockResolvedValue(false),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
@@ -107,8 +108,9 @@ function post(path, body) {
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const PROJECT_CONFIG = {
-  project:    'test-project',
-  group_id:   'test-project',
+  project:  'test-project',
+  group_id: 'test-project',
+  owner:    'alice',
   members: [
     { github_username: 'alice', role: 'engineer', team: 'platform', base_confidence: 0.7 },
   ],
@@ -199,5 +201,71 @@ describe('POST /auth/token', () => {
 
     expect(status).toBe(404)
     expect(body.error).toBe('project_not_found')
+  })
+})
+
+// ── v0.3 TDD Gates — will FAIL against v0.2, PASS once Wave 1.5 is implemented ──
+
+describe('POST /auth/token — v0.3 slim JWT (Wave 1.5)', () => {
+  it('JWT payload contains only sub, is_admin, jti, exp, iat — no project/role/team', async () => {
+    mockGitHub({ ok: true, login: 'alice' })
+    loadProjectConfig.mockResolvedValue(PROJECT_CONFIG)
+
+    const { status, body } = await post('/auth/token', {
+      github_token: 'ghp_valid',
+      project_id:   'test-project',
+    })
+
+    expect(status).toBe(200)
+    expect(body.token).toBeTruthy()
+
+    // Decode JWT payload without verification
+    const rawPayload = JSON.parse(
+      Buffer.from(body.token.split('.')[1], 'base64').toString(),
+    )
+
+    // Slim JWT: must carry identity claims only
+    expect(rawPayload.sub).toBe('alice')
+    expect(rawPayload.is_admin).toBeDefined()
+
+    // Rich claims must NOT be in the token — they belong in the response body only
+    expect(rawPayload.project).toBeUndefined()
+    expect(rawPayload.role).toBeUndefined()
+    expect(rawPayload.team).toBeUndefined()
+    expect(rawPayload.base_confidence).toBeUndefined()
+
+    // Response body may still carry them for backward compatibility
+    expect(body.project).toBe('test-project')
+    expect(body.role).toBe('engineer')
+  })
+})
+
+describe('GET /auth/projects — retired in v0.3 (Wave 1.5)', () => {
+  it('returns 410 Gone with a redirect message', async () => {
+    const res = await new Promise((resolve, reject) => {
+      http.get(
+        { hostname: '127.0.0.1', port, path: '/auth/projects' },
+        (r) => {
+          let raw = ''
+          r.on('data', (c) => { raw += c })
+          r.on('end', () => {
+            try { resolve({ status: r.statusCode, body: JSON.parse(raw) }) }
+            catch { resolve({ status: r.statusCode, body: raw }) }
+          })
+        },
+      ).on('error', reject)
+    })
+
+    expect(res.status).toBe(410)
+    expect(res.body.error).toBe('endpoint_retired')
+  })
+})
+
+describe('POST /auth/switch — retired in v0.3 (Wave 1.5)', () => {
+  it('returns 410 Gone with a redirect message', async () => {
+    const { status, body } = await post('/auth/switch', { project_id: 'some-project' })
+
+    expect(status).toBe(410)
+    expect(body.error).toBe('endpoint_retired')
   })
 })

@@ -123,6 +123,16 @@ cmd_docker() {
   header "Quorum — Docker Compose Setup"
   info "Log: $LOG_FILE"
 
+  # Tag images with the current git commit hash for traceability.
+  # APP_VERSION is read from root package.json — single source of truth for the release version.
+  # IMAGE_TAG defaults to the git short hash; falls back to APP_VERSION when git is unavailable.
+  # docker-compose.yml reads IMAGE_TAG; its own fallback is also APP_VERSION (via setup.sh export).
+  local APP_VERSION
+  APP_VERSION=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/package.json'))['version'])" 2>/dev/null || echo "latest")
+  export IMAGE_TAG
+  IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
+  info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
+
   check_node
   check_docker
 
@@ -221,12 +231,12 @@ cmd_docker() {
 
   header "Setup complete"
   echo ""
-  echo "  Add Quorum to Claude Code:"
-  echo "    claude mcp add quorum -- node $(pwd)/mcp/dist/server.js"
+  echo "  Add Quorum to Claude Code (install quorum-mcp first):"
+  echo "    npm install -g @as-quorum/mcp"
+  echo "    quorum install   # or: npm run setup in quorum-mcp"
   echo ""
   echo "  Verify:"
-  echo "    node cli.js audit verify"
-  echo "    node cli.js history auth:token-strategy"
+  echo "    node scripts/audit-cli.js stats"
   echo ""
   echo "  Dashboard:  http://localhost:3002"
   echo "  Gateway:    http://localhost:3001/health"
@@ -235,14 +245,21 @@ cmd_docker() {
 }
 
 # ── docker rebuild ────────────────────────────────────────────────────────────
-# Rebuild all custom images (gateway, graphiti, quorum, dashboard) from scratch,
+# Rebuild all custom images (gateway, graphiti, dashboard) from scratch,
 # then restart the stack. Skips LocalStack — existing data is preserved.
 # Use after Dockerfile or source code changes that don't hot-reload.
+# The quorum MCP service is opt-in (profile: mcp) and excluded from default builds.
 
 cmd_docker_rebuild() {
   header "Quorum — Rebuild Docker Images"
   check_docker
   cd "$PROJECT_ROOT"
+
+  local APP_VERSION
+  APP_VERSION=$(python3 -c "import json; print(json.load(open('$PROJECT_ROOT/package.json'))['version'])" 2>/dev/null || echo "latest")
+  export IMAGE_TAG
+  IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
+  info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
 
   EXTERNAL_LOCALSTACK=""
   check_localstack_conflict
@@ -251,7 +268,7 @@ cmd_docker_rebuild() {
   docker compose down --remove-orphans 2>/dev/null || true
 
   info "Rebuilding images without cache..."
-  docker compose build --no-cache --parallel gateway quorum-dashboard quorum graphiti
+  docker compose build --no-cache --parallel gateway quorum-dashboard graphiti
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."

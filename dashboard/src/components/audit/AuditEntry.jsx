@@ -10,6 +10,16 @@ const TOOL_COLOR = {
   bump:       'text-teal-400',
 }
 
+/** Format a versions_created/superseded item — handles both string and object shapes. */
+function fmtVersionItem(item) {
+  if (typeof item === 'string') return item
+  if (item && typeof item === 'object') {
+    const parts = [item.version != null ? `v${item.version}` : null, item.status ?? null]
+    return parts.filter(Boolean).join(' ')
+  }
+  return String(item)
+}
+
 export default function AuditEntry({ entry }) {
   const toolColor = TOOL_COLOR[entry.tool] ?? 'text-gray-400'
   const impact    = entry.version_impact ?? {}
@@ -44,12 +54,12 @@ export default function AuditEntry({ entry }) {
         {/* Version impact */}
         {impact.versions_created?.length > 0 && (
           <p className="text-[10px] text-green-600">
-            Created: {impact.versions_created.join(', ')}
+            Created: {impact.versions_created.map(fmtVersionItem).join(', ')}
           </p>
         )}
         {impact.versions_superseded?.length > 0 && (
           <p className="text-[10px] text-gray-600">
-            Superseded: {impact.versions_superseded.join(', ')}
+            Superseded: {impact.versions_superseded.map(fmtVersionItem).join(', ')}
           </p>
         )}
       </div>

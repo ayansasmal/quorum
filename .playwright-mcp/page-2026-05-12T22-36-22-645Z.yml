@@ -1,0 +1,12 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - heading "Quorum" [level=1] [ref=e6]
+    - paragraph [ref=e7]: Persistent engineering memory
+  - link "Login with GitHub" [ref=e8] [cursor=pointer]:
+    - /url: /auth/github
+    - img [ref=e9]
+    - text: Login with GitHub
+  - paragraph [ref=e11]:
+    - text: Requires a GitHub account. Only
+    - code [ref=e12]: read:user
+    - text: scope is requested.

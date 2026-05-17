@@ -12,6 +12,97 @@ Constitutional and governance tests live in the `quorum-mcp` repo since they tes
 
 ---
 
+## Gateway Test Suite Snapshot (v0.3)
+
+| Metric | Value |
+|--------|-------|
+| Test files | 31 |
+| Passing tests | 476 |
+| Line coverage | **86%** (threshold 75%) |
+| Branch coverage | **77%** (threshold 75%) |
+| Function coverage | **88%** (threshold 75%) |
+| Coverage provider | v8 (via `npm test -- --coverage`) |
+| CI runner | GitHub Actions, Node 22 |
+
+### Files excluded from coverage
+
+Defined in `vitest.config.js`. Each is excluded because it is integration-only — exercising it requires a live process, AWS endpoint, OAuth browser dance, or external LLM. Unit-level mocks add noise without raising real assurance.
+
+| File | Reason for exclusion |
+|------|----------------------|
+| `gateway/src/server.js` | Express bootstrap / entry point — not unit-testable |
+| `gateway/src/middleware/rate-limit.js` | Thin `express-rate-limit` wrapper |
+| `gateway/src/routes/dashboard.js` | Aggregated BFF endpoints — integration territory |
+| `gateway/src/routes/mcp-oauth.js` | Full OAuth 2.1 / PKCE dance — integration territory |
+| `gateway/src/routes/oauth.js` | Browser-redirect OAuth callback — integration territory |
+| `gateway/src/shared/config/migrations.js` | DB schema migrations — exercised by setup, not units |
+| `gateway/src/llm.js` | OpenAI API wrapper — integration territory |
+| `gateway/src/ddb.js` | DynamoDB AWS client — integration territory |
+
+### Real HTTP server test pattern
+
+Gateway route tests do **not** rely on `supertest` against the Express app object. They stand up the real Express stack on an ephemeral port and exercise it over real TCP:
+
+```javascript
+// tests/gateway/<route>.test.js
+import express from 'express'
+import http from 'node:http'
+import { vi } from 'vitest'
+
+let server, baseUrl
+
+beforeAll(async () => {
+  const app = express()
+  app.use(express.json())
+  app.use('/pg', pgRoutes)            // real route module
+
+  server = http.createServer(app)
+  await new Promise(r => server.listen(0, r))     // port 0 → OS picks free port
+  baseUrl = `http://127.0.0.1:${server.address().port}`
+
+  // Only stub *outbound* fetch (to Graphiti, OpenAI, GitHub, etc).
+  // The inbound request from the test client uses real fetch against the server.
+  vi.stubGlobal('fetch', async (url, init) => {
+    if (String(url).startsWith('http://graphiti')) return new Response(...)
+    return originalFetch(url, init)
+  })
+})
+
+afterAll(() => server.close())
+
+test('POST /pg/versions inserts a new version', async () => {
+  const res = await fetch(`${baseUrl}/pg/versions`, { method: 'POST', ... })
+  expect(res.status).toBe(201)
+})
+```
+
+This catches real middleware ordering, header parsing, body limits, and error-handler bugs that an in-process `app(req, res)` style would miss. The cost is one extra TCP listener per suite — negligible at 31 files.
+
+### Running
+
+```bash
+npm test                       # vitest run (476 tests)
+npm test -- --coverage         # full v8 coverage report (text + json + html)
+npm run test:gateway           # alias for the same target
+```
+
+Coverage HTML report lands in `coverage/index.html`.
+
+### v0.3 TDD Gates — Test File Inventory
+
+Added as Phase 1 pre-merge gates to define the expected v0.3 behaviour before implementation:
+
+| File | Repo | What it covers |
+|------|------|---------------|
+| `tests/gateway/verify-jwt.test.js` | engram | Async two-step middleware: no `project` JWT claim → `X-Quorum-Project` header; `is_admin` flag; `loadUserProfile()` called with correct `sub`; expired JWT → 401 |
+| `tests/gateway/auth.test.js` (additions) | engram | `POST /auth/token` JWT payload contains only `{ sub, is_admin, jti, exp, iat }` — no `project`, `role`, `team`; `GET /auth/projects` → 410; `POST /auth/switch` → 410 |
+| `tests/gateway/pg-routes.test.js` (additions) | engram | `GET /pg/audit` returns `{ entries: [...] }` shape; `GET /pg/versions/drafts` filters to DRAFT only; `GET /pg/audit/lineage/:topic/:key` returns chain |
+| `quorum-mcp/tests/gateway-client.test.js` | quorum-mcp | `_request()` sends `X-Quorum-Project` header when `ctx.projectId` set; omits header when null; all 12 tool handlers pass `projectId` to `_request()` |
+| `quorum-mcp/tests/tools/remember.test.js` (addition) | quorum-mcp | `insertVersion` receives `summary = content` — content survives FalkorDB wipes via PostgreSQL `summary` column |
+| `quorum-mcp/tests/tools/set-agent-context.test.js` | quorum-mcp | `set_agent_context` validation (kebab-case, length, leading digit), happy path, `session_id` format (`sess_` + 8 hex), `author_type` always `'agent'`, Gate 3 blocks write tools until context set |
+
+---
+
 ## Testing Philosophy
 
 Quorum has three fundamentally different kinds of code, each requiring a different testing approach:
@@ -715,50 +806,34 @@ onEngineerFlagsLLMDecision(decision) {
 
 ## CI Pipeline
 
+The engram repo has two workflows. Constitutional, governance, and tool tests live in the `quorum-mcp` repo CI — those test MCP server code.
+
+**`test.yml`** — runs on push/PR to `main`/`prod`:
+
 ```yaml
-# .github/workflows/tests.yml
-
 jobs:
-  constitutional-tests:
-    name: Layer 1 — Constitutional Tests (blocking, never skip)
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:constitutional
-      - run: npm run coverage:constitutional  # must be 100%
-      - run: npm run audit:constitutional-bypass  # scans for bypass patterns
-
-  governance-tests:
-    name: Layer 2 — Governance Logic Tests
-    needs: constitutional-tests
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:governance
-
-  llm-tests:
-    name: Layer 3 — LLM Accuracy Tests
-    needs: governance-tests
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:llm:golden-dataset
-      - run: npm run test:llm:adversarial
-
-  meta-tests:
-    name: Meta — Test Suite Integrity
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm run test:meta
-
-  # Ensures constitutional tests were never skipped
-  constitutional-guard:
-    name: Guard — Constitutional tests must not be skipped
-    needs: constitutional-tests
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail if constitutional tests were skipped
-        if: needs.constitutional-tests.result == 'skipped'
-        run: exit 1
+  gateway-tests:     # blocking — npm run test:gateway (tests/gateway/)
+  audit-scan:        # informational — npm run audit:scan-bypasses + audit:scan-harddeletes
+  coverage:          # full coverage report — needs gateway-tests
 ```
+
+**`test-gateway.yml`** — runs on push/PR to `feat/**`, `fix/**` that touches `gateway/**`:
+
+```yaml
+jobs:
+  gateway-tests:     # npm run test:gateway
+  gateway-build:     # Docker image build check (no push) — validates Dockerfile.gateway
+```
+
+**`build.yml`** — runs on push to `prod` only:
+
+```yaml
+jobs:
+  build-mcp:         # builds ghcr.io/{repo}:* from Dockerfile
+  build-gateway:     # builds ghcr.io/{repo}-gateway:* from Dockerfile.gateway
+```
+
+Constitutional and governance tests run in the **`quorum-mcp` repo CI**, not here.
 
 ---
 

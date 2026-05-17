@@ -15,20 +15,49 @@
 
 import { Router } from 'express'
 import {
+  getProjectByGroupId,
+  getOrCreateKey,
   getPendingDecisionById,
   getLatestDraftVersion,
   transitionVersionStatus,
   resolvePendingDecision,
   getCurrentVersion,
-  getLastBump,
-  insertBump,
+  getVersionForBump,
+  getBumpLog,
+  recordBump,
   updateConfidence,
-} from '@as-quorum/mcp/graph/queries'
-import { searchNodes } from '@as-quorum/mcp/graph/client'
-import { writeAuditEntry } from '@as-quorum/mcp/audit/secondary'
-import { enforceNoSelfApproval, enforceReasonRequired } from '@as-quorum/mcp/governance/constitutional'
+} from '../shared/graph/queries.js'
+import { searchNodes, searchFacts } from '../shared/graph/client.js'
+import { writeAuditEntry } from '../shared/audit/secondary.js'
+import { enforceNoSelfApproval, enforceReasonRequired } from '../shared/governance/constitutional.js'
 
 const router = Router()
+
+/**
+ * Resolve req.user.project (group_id) → q_project_id, sending a 404 if the
+ * project is not registered. Returns the q_project_id string on success, or
+ * `null` if the response has already been ended (caller should return).
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @returns {Promise<string | null>}
+ */
+async function resolveQProjectId(req, res) {
+  const pool = req.app.locals.pool
+  const header = req.user.project ?? 'default'
+  // Fast path: header is already a q_project_id (post-Phase-3 MCP clients)
+  if (header && /^q_p\d+$/.test(header)) return header
+  // Slow path: header is a group_id slug → DB lookup
+  const qProjectId = await getProjectByGroupId(pool, header)
+  if (!qProjectId) {
+    res.status(404).json({
+      error: 'project_not_found',
+      message: `Project '${header}' not registered`,
+    })
+    return null
+  }
+  return qProjectId
+}
 
 const BUMP_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 const BUMP_BASE_DELTA  = 0.05
@@ -48,9 +77,11 @@ const BUMP_ROLE_WEIGHT = {
  */
 router.get('/stats', async (req, res, next) => {
   const pool      = req.app.locals.pool
-  const projectId = req.user.project ?? 'default'
 
   try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
     const [statsResult, activityResult] = await Promise.all([
       pool.query(
         `WITH domain_stats AS (
@@ -59,7 +90,7 @@ router.get('/stats', async (req, res, next) => {
                   COUNT(*) FILTER (WHERE status = 'DRAFT')::int   AS draft_count,
                   ROUND(AVG(confidence) FILTER (WHERE status = 'ACTIVE')::numeric, 3)::float AS avg_confidence
            FROM knowledge_versions
-           WHERE project_id = $1
+           WHERE q_project_id = $1
            GROUP BY topic
          ),
          pending_stats AS (
@@ -68,7 +99,7 @@ router.get('/stats', async (req, res, next) => {
              ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600)::numeric, 1)::float AS avg_age_hours,
              ROUND(MAX(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600)::numeric, 1)::float AS oldest_age_hours
            FROM pending_decisions
-           WHERE project_id = $1 AND status = 'pending'
+           WHERE q_project_id = $1 AND status = 'pending'
          ),
          confidence_buckets AS (
            SELECT
@@ -76,23 +107,23 @@ router.get('/stats', async (req, res, next) => {
              COUNT(*) FILTER (WHERE confidence BETWEEN 0.4 AND 0.7)::int AS medium,
              COUNT(*) FILTER (WHERE confidence < 0.4)::int  AS low
            FROM knowledge_versions
-           WHERE project_id = $1 AND status = 'ACTIVE'
+           WHERE q_project_id = $1 AND status = 'ACTIVE'
          ),
          lowest_conf AS (
            SELECT topic, key, confidence, last_accessed_at
            FROM knowledge_versions
-           WHERE project_id = $1 AND status = 'ACTIVE'
+           WHERE q_project_id = $1 AND status = 'ACTIVE'
            ORDER BY confidence ASC
            LIMIT 10
          ),
          most_accessed AS (
            SELECT topic, key, confidence,
                   (SELECT COUNT(*)::int FROM audit_log
-                   WHERE project_id = $1 AND tool = 'recall'
+                   WHERE q_project_id = $1 AND tool = 'recall'
                    AND governance_json->>'topic' = knowledge_versions.topic
                    AND governance_json->>'key'   = knowledge_versions.key) AS access_count
            FROM knowledge_versions
-           WHERE project_id = $1 AND status = 'ACTIVE'
+           WHERE q_project_id = $1 AND status = 'ACTIVE'
            ORDER BY access_count DESC
            LIMIT 10
          )
@@ -102,15 +133,15 @@ router.get('/stats', async (req, res, next) => {
            (SELECT row_to_json(c) FROM confidence_buckets c)  AS confidence,
            (SELECT json_agg(l) FROM lowest_conf l)            AS lowest_confidence,
            (SELECT json_agg(m) FROM most_accessed m)          AS most_accessed`,
-        [projectId],
+        [qProjectId],
       ),
       pool.query(
         `SELECT DATE(timestamp)::text AS date, COUNT(*)::int AS operation_count
          FROM audit_log
-         WHERE project_id = $1 AND timestamp > NOW() - INTERVAL '30 days'
+         WHERE q_project_id = $1 AND timestamp > NOW() - INTERVAL '30 days'
          GROUP BY DATE(timestamp)
          ORDER BY date ASC`,
-        [projectId],
+        [qProjectId],
       ),
     ])
 
@@ -139,16 +170,18 @@ router.get('/stats', async (req, res, next) => {
  */
 router.get('/graph', async (req, res, next) => {
   const pool      = req.app.locals.pool
-  const projectId = req.user.project ?? 'default'
   const domain    = req.query.domain  // optional domain (= topic) filter
 
   try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
     // Guard: require domain filter if graph would be too large
     if (!domain) {
       const countResult = await pool.query(
         `SELECT COUNT(*)::int AS cnt FROM knowledge_versions
-         WHERE project_id = $1 AND status = 'ACTIVE'`,
-        [projectId],
+         WHERE q_project_id = $1 AND status = 'ACTIVE'`,
+        [qProjectId],
       )
       if (countResult.rows[0].cnt > 500) {
         return res.status(400).json({
@@ -158,14 +191,14 @@ router.get('/graph', async (req, res, next) => {
       }
     }
 
-    const params = domain ? [projectId, domain] : [projectId]
+    const params = domain ? [qProjectId, domain] : [qProjectId]
     const domainFilter = domain ? 'AND topic = $2' : ''
 
     const result = await pool.query(
-      `SELECT id, topic, key, version, entity_type, confidence, author, summary,
-              status, supersedes_version
+      `SELECT version_id, topic, key, version, entity_type, confidence, author, summary,
+              status, supersedes_version, tags
        FROM knowledge_versions
-       WHERE project_id = $1 AND status = 'ACTIVE' ${domainFilter}
+       WHERE q_project_id = $1 AND status = 'ACTIVE' ${domainFilter}
        ORDER BY topic, key, version`,
       params,
     )
@@ -197,20 +230,81 @@ router.get('/graph', async (req, res, next) => {
       }
     }
 
+    // Tag-based RELATES_TO edges — connect nodes that share meaningful cross-cutting tags.
+    //
+    // Two noise filters:
+    //   1. Exclude tags that appear on > 40% of nodes in the result set — these are
+    //      domain-wide labels (e.g. "openai" in an ai-generation domain) that would
+    //      create a near-fully-connected graph.
+    //   2. Require ≥ 2 qualifying shared tags — a single shared tag is often coincidental.
+    //
+    // Also exclude the domain name itself as a tag.
+    const domainTagSet = new Set(domain ? [domain] : [])
+    const tagFreq = {}
+    for (const row of rows) {
+      for (const t of (row.tags ?? [])) {
+        if (!domainTagSet.has(t)) tagFreq[t] = (tagFreq[t] ?? 0) + 1
+      }
+    }
+    const nodeCount     = rows.length
+    const maxFreq       = Math.max(1, nodeCount * 0.4)   // tags on > 40 % of nodes are noise
+    const rareTagFilter = (t) => !domainTagSet.has(t) && (tagFreq[t] ?? 0) <= maxFreq
+
+    for (let i = 0; i < rows.length; i++) {
+      const tagsA = (rows[i].tags ?? []).filter(rareTagFilter)
+      if (tagsA.length === 0) continue
+      for (let j = i + 1; j < rows.length; j++) {
+        const tagsB = (rows[j].tags ?? []).filter(rareTagFilter)
+        const shared = tagsA.filter((t) => tagsB.includes(t))
+        if (shared.length >= 2) {
+          const srcId = `${rows[i].topic}:${rows[i].key}:${rows[i].version}`
+          const tgtId = `${rows[j].topic}:${rows[j].key}:${rows[j].version}`
+          edges.push({
+            data: {
+              id:          `tag:${srcId}→${tgtId}`,
+              source:      srcId,
+              target:      tgtId,
+              type:        'RELATES_TO',
+              shared_tags: shared,
+            },
+          })
+        }
+      }
+    }
+
+    // Central hub node — project or domain depending on filter
+    const hubId    = domain ? `domain:${domain}` : `project:${qProjectId}`
+    const hubLabel = domain ?? req.user.project ?? qProjectId
+    const hubNode  = { data: { id: hubId, label: hubLabel, node_type: 'hub' } }
+
+    // Spoke edges: every knowledge node → hub
+    const spokeEdges = rows.map((r) => ({
+      data: {
+        id:     `spoke:${r.topic}:${r.key}:${r.version}`,
+        source: `${r.topic}:${r.key}:${r.version}`,
+        target: hubId,
+        type:   'BELONGS_TO',
+      },
+    }))
+
     res.json({
-      nodes: rows.map((r) => ({
-        data: {
-          id:          `${r.topic}:${r.key}:${r.version}`,
-          topic:       r.topic,
-          key:         r.key,
-          entity_type: r.entity_type,
-          confidence:  r.confidence,
-          author:      r.author,
-          summary:     r.summary || `${r.topic}:${r.key}`,
-          status:      r.status,
-        },
-      })),
-      edges,
+      nodes: [
+        hubNode,
+        ...rows.map((r) => ({
+          data: {
+            id:          `${r.topic}:${r.key}:${r.version}`,
+            topic:       r.topic,
+            key:         r.key,
+            entity_type: r.entity_type,
+            confidence:  r.confidence,
+            author:      r.author,
+            summary:     r.summary || `${r.topic}:${r.key}`,
+            status:      r.status,
+            tags:        r.tags ?? [],
+          },
+        })),
+      ],
+      edges: [...edges, ...spokeEdges],
     })
   } catch (err) {
     next(err)
@@ -226,7 +320,6 @@ router.get('/graph', async (req, res, next) => {
  */
 router.get('/knowledge', async (req, res, next) => {
   const pool      = req.app.locals.pool
-  const projectId = req.user.project ?? 'default'
 
   const domain      = req.query.domain
   const tag         = req.query.tag
@@ -236,8 +329,11 @@ router.get('/knowledge', async (req, res, next) => {
   const offset      = (page - 1) * limit
 
   try {
-    const conditions = ['project_id = $1', "status = 'ACTIVE'"]
-    const params     = [projectId]
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const conditions = ['q_project_id = $1', "status = 'ACTIVE'"]
+    const params     = [qProjectId]
     let   idx        = 2
 
     if (domain) {
@@ -282,13 +378,80 @@ router.get('/knowledge', async (req, res, next) => {
   }
 })
 
+// ── GET /api/knowledge/:topic/:key ────────────────────────────────────────────
+
+/**
+ * Full detail for a single knowledge entry: PG metadata + Graphiti content.
+ * Used by NodePanel (graph) and KnowledgeDetail (browser) when a node is clicked.
+ */
+router.get('/knowledge/:topic/:key', async (req, res, next) => {
+  const pool      = req.app.locals.pool
+  const { topic, key } = req.params
+
+  try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const pgResult = await pool.query(
+      `SELECT topic, key, version, entity_type, confidence, author, author_role,
+              tags, summary, status, created_at, supersedes_version, graphiti_episode_id
+       FROM knowledge_versions
+       WHERE q_project_id = $1 AND topic = $2 AND key = $3 AND status = 'ACTIVE'
+       LIMIT 1`,
+      [qProjectId, topic, key],
+    )
+    const row = pgResult.rows[0] ?? null
+
+    if (!row) return res.status(404).json({ error: 'not_found' })
+
+    // summary is the canonical content source (populated by insertVersion going forward).
+    // For older entries where summary is empty, fall back to Graphiti node search.
+    // Two search strategies are tried because hyphens in key names are treated as NOT
+    // operators in RediSearch — "quoted terms" bypass that interpretation.
+    // group_ids are omitted intentionally (hyphenated project IDs break RediSearch);
+    // project isolation is enforced by the PostgreSQL WHERE clause above.
+    let content = row.summary || null
+    if (!content) {
+      const runSearch = async (query) => {
+        const result = await searchNodes(query, { limit: 5 }).catch(() => null)
+        const nodes  = result?.nodes ?? []
+        return nodes.find((n) => (n.name ?? '').includes(key)) ?? nodes[0] ?? null
+      }
+
+      // Strategy 1: quoted "topic:key" — treats hyphens as literals in RediSearch
+      const match = (await runSearch(`"${topic}:${key}"`))
+        // Strategy 2: quoted key alone, in case topic prefix confused the match
+        ?? (await runSearch(`"${key}"`))
+
+      content = match?.summary ?? null
+    }
+
+    res.json({
+      topic:               row.topic,
+      key:                 row.key,
+      version:             row.version,
+      entity_type:         row.entity_type,
+      confidence:          row.confidence,
+      author:              row.author,
+      author_role:         row.author_role,
+      tags:                row.tags ?? [],
+      status:              row.status,
+      created_at:          row.created_at,
+      graphiti_episode_id: row.graphiti_episode_id,
+      content,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── GET /api/search ────────────────────────────────────────────────────────────
 
 /**
  * Semantic search via Graphiti. Maps Graphiti node results to dashboard format.
  */
 router.get('/search', async (req, res, next) => {
-  const projectId = req.user.project ?? 'default'
+  const groupId   = req.user.project ?? 'default'
   const query     = req.query.q
   const domain    = req.query.domain
   const limit     = Math.min(50, Math.max(1, parseInt(req.query.limit ?? '10', 10)))
@@ -298,24 +461,64 @@ router.get('/search', async (req, res, next) => {
   }
 
   try {
+    // Graphiti groupId is the human-readable group_id (matches FalkorDB partitioning).
+    // The Postgres fallback below uses the resolved q_project_id.
     const graphitiResult = await searchNodes(
       domain ? `[${domain}] ${query}` : query,
-      { groupId: projectId, limit },
+      { groupId, limit },
     )
 
     const nodes = graphitiResult?.nodes ?? graphitiResult?.results ?? []
 
+    if (nodes.length > 0) {
+      return res.json({
+        results: nodes.map((n) => ({
+          topic:       n.topic       ?? n.group_id ?? '',
+          key:         n.key         ?? n.name     ?? '',
+          entity_type: n.entity_type ?? 'unknown',
+          summary:     n.summary     ?? n.name     ?? '',
+          confidence:  n.confidence  ?? null,
+          score:       n.score       ?? n.distance ?? null,
+          author:      n.author      ?? null,
+          updated_at:  n.created_at  ?? n.updated_at ?? null,
+        })),
+        source: 'graphiti',
+      })
+    }
+
+    // Graphiti returned nothing — fall back to PostgreSQL full-text search
+    const pool = req.app.locals.pool
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const pattern = `%${query}%`
+    const domainFilter = domain ? 'AND topic = $3' : ''
+    const params = domain ? [qProjectId, pattern, domain] : [qProjectId, pattern]
+
+    const { rows } = await pool.query(
+      `SELECT topic, key, summary, status, confidence, author, created_at
+       FROM knowledge_versions
+       WHERE q_project_id = $1
+         AND (summary ILIKE $2 OR key ILIKE $2 OR topic ILIKE $2)
+         AND status != 'DEPRECATED'
+         ${domainFilter}
+       ORDER BY confidence DESC, created_at DESC
+       LIMIT ${limit}`,
+      params,
+    )
+
     res.json({
-      results: nodes.map((n) => ({
-        topic:       n.topic       ?? n.group_id ?? '',
-        key:         n.key         ?? n.name     ?? '',
-        entity_type: n.entity_type ?? 'unknown',
-        summary:     n.summary     ?? n.name     ?? '',
-        confidence:  n.confidence  ?? null,
-        score:       n.score       ?? n.distance ?? null,
-        author:      n.author      ?? null,
-        updated_at:  n.created_at  ?? n.updated_at ?? null,
+      results: rows.map((r) => ({
+        topic:       r.topic,
+        key:         r.key,
+        entity_type: 'unknown',
+        summary:     r.summary ?? '',
+        confidence:  r.confidence ?? null,
+        score:       null,
+        author:      r.author ?? null,
+        updated_at:  r.created_at ?? null,
       })),
+      source: 'postgres',
     })
   } catch (err) {
     next(err)
@@ -336,7 +539,6 @@ router.get('/search', async (req, res, next) => {
  */
 router.post('/review/:conflictId', async (req, res, next) => {
   const pool       = req.app.locals.pool
-  const projectId  = req.user.project ?? 'default'
   const reviewer   = req.user.sub
   const reviewerRole = req.user.role ?? 'engineer'
   const { conflictId } = req.params
@@ -355,18 +557,30 @@ router.post('/review/:conflictId', async (req, res, next) => {
   }
 
   try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
     const decision = await getPendingDecisionById(pool, conflictId)
     if (!decision) {
       return res.status(404).json({ error: 'not_found', message: `No pending decision with id ${conflictId}` })
     }
 
-    // Scope check
-    if (decision.project_id !== projectId) {
+    // Scope check — conflict_id is globally unique but cross-project access is forbidden
+    if (decision.q_project_id !== qProjectId) {
       return res.status(403).json({ error: 'forbidden', message: 'Decision belongs to a different project' })
     }
 
+    // pending_decisions no longer carries (conflict_topic, conflict_key) — fetch
+    // them from q_keys via the decision's q_key_id.
+    const keyRow = await pool.query(
+      `SELECT topic, key FROM q_keys WHERE q_key_id = $1 LIMIT 1`,
+      [decision.q_key_id],
+    )
+    const conflictTopic = keyRow.rows[0]?.topic ?? null
+    const conflictKey   = keyRow.rows[0]?.key   ?? null
+
     // Get the DRAFT version to check authorship
-    const draftVersion = await getLatestDraftVersion(pool, decision.conflict_topic, decision.conflict_key, projectId)
+    const draftVersion = await getLatestDraftVersion(pool, decision.q_key_id)
 
     // Constitutional Rule 4: no self-approval
     if (draftVersion?.author) {
@@ -378,7 +592,7 @@ router.post('/review/:conflictId', async (req, res, next) => {
     }
 
     // Staleness detection: has the ACTIVE version advanced since this decision was raised?
-    const currentActive = await getCurrentVersion(pool, decision.conflict_topic, decision.conflict_key, projectId)
+    const currentActive = await getCurrentVersion(pool, decision.q_key_id)
     const staleWarning = (
       currentActive &&
       decision.active_version_at_creation != null &&
@@ -406,9 +620,9 @@ router.post('/review/:conflictId', async (req, res, next) => {
         tool:         'review',
         author:       reviewer,
         author_role:  reviewerRole,
-        project_id:   projectId,
+        q_project_id: qProjectId,
         governance_json: { action, note, conflict_id: conflictId },
-        outcome_json:    { status: 'changes_requested', topic: decision.conflict_topic, key: decision.conflict_key },
+        outcome_json:    { status: 'changes_requested', topic: conflictTopic, key: conflictKey },
         version_impact:  { versions_created: [], versions_superseded: [] },
       })
       return res.json({
@@ -425,31 +639,19 @@ router.post('/review/:conflictId', async (req, res, next) => {
     try {
       await client.query('BEGIN')
 
-      if (action === 'approve' && draftVersion) {
-        const forwardLink = {
-          superseded_by_version: draftVersion.version,
-          superseded_by_author:  reviewer,
-          superseded_at:         new Date().toISOString(),
+      if (draftVersion) {
+        const draftVersionId = `${decision.q_key_id}_v${draftVersion.version}`
+
+        if (action === 'approve') {
+          const forwardLink = {
+            version: draftVersion.version,
+            author:  reviewer,
+            at:      new Date().toISOString(),
+          }
+          await transitionVersionStatus(client, draftVersionId, 'ACTIVE', forwardLink)
+        } else if (action === 'reject') {
+          await transitionVersionStatus(client, draftVersionId, 'REJECTED', null)
         }
-        await transitionVersionStatus(
-          client,
-          decision.conflict_topic,
-          decision.conflict_key,
-          draftVersion.version,
-          'ACTIVE',
-          forwardLink,
-          projectId,
-        )
-      } else if (action === 'reject' && draftVersion) {
-        await transitionVersionStatus(
-          client,
-          decision.conflict_topic,
-          decision.conflict_key,
-          draftVersion.version,
-          'REJECTED',
-          null,
-          projectId,
-        )
       }
 
       await resolvePendingDecision(client, conflictId, {
@@ -472,25 +674,25 @@ router.post('/review/:conflictId', async (req, res, next) => {
       tool:         'review',
       author:       reviewer,
       author_role:  reviewerRole,
-      project_id:   projectId,
+      q_project_id: qProjectId,
       governance_json: { action, note, conflict_id: conflictId },
       outcome_json: {
         status:  action === 'approve' ? 'approved' : 'rejected',
-        topic:   decision.conflict_topic,
-        key:     decision.conflict_key,
+        topic:   conflictTopic,
+        key:     conflictKey,
         version: draftVersion?.version ?? null,
       },
       version_impact: {
-        versions_created:    action === 'approve' ? [`${decision.conflict_topic}:${decision.conflict_key}:${draftVersion?.version}`] : [],
-        versions_superseded: action === 'approve' && currentActive ? [`${decision.conflict_topic}:${decision.conflict_key}:${currentActive.version}`] : [],
+        versions_created:    action === 'approve' && draftVersion ? [`${decision.q_key_id}_v${draftVersion.version}`] : [],
+        versions_superseded: action === 'approve' && currentActive ? [`${decision.q_key_id}_v${currentActive.version}`] : [],
       },
     })
 
     res.json({
       status:      action === 'approve' ? 'approved' : 'rejected',
       conflict_id: conflictId,
-      topic:       decision.conflict_topic,
-      key:         decision.conflict_key,
+      topic:       conflictTopic,
+      key:         conflictKey,
       version:     draftVersion?.version ?? null,
       reviewer,
       note,
@@ -509,18 +711,23 @@ router.post('/review/:conflictId', async (req, res, next) => {
  */
 router.post('/bump/:topic/:key', async (req, res, next) => {
   const pool       = req.app.locals.pool
-  const projectId  = req.user.project ?? 'default'
+  const groupId    = req.user.project ?? 'default'
   const caller     = req.user.sub
   const callerRole = req.user.role ?? 'engineer'
   const { topic, key } = req.params
 
   try {
-    const existing = await getCurrentVersion(pool, topic, key, projectId)
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+    const qKeyId = await getOrCreateKey(pool, qProjectId, topic, key)
+
+    const existing = await getVersionForBump(pool, qKeyId)
     if (!existing) {
       return res.status(404).json({ error: 'not_found', message: `No ACTIVE knowledge at ${topic}:${key}` })
     }
 
-    const lastBump = await getLastBump(pool, caller, topic, key, projectId)
+    const bumpLogs = await getBumpLog(pool, { qKeyId, author: caller, limit: 1 })
+    const lastBump = bumpLogs[0] ?? null
     if (lastBump) {
       const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
       if (elapsed < BUMP_COOLDOWN_MS) {
@@ -540,14 +747,14 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
     const newConf      = Math.min(startingConf, currentConf + delta)
 
     await Promise.all([
-      insertBump(pool, { author: caller, topic, key, projectId, role: callerRole, deltaApplied: delta }),
-      updateConfidence(pool, existing.id, newConf),
+      recordBump(pool, { qKeyId, author: caller, role: callerRole, delta }),
+      updateConfidence(pool, existing.version_id, newConf),
     ])
 
     res.json({
       topic,
       key,
-      project_id:          projectId,
+      project_id:          groupId,
       bumped_by:           caller,
       role:                callerRole,
       delta_applied:       parseFloat(delta.toFixed(4)),

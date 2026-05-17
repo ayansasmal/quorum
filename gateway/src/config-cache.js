@@ -1,22 +1,26 @@
 /**
- * Quorum Gateway — S3 config cache.
+ * Quorum Gateway — S3 config cache and user profile cache.
  *
- * The gateway is the only component with S3 access. It loads project configs
- * from S3, validates them, and serves them to authenticated clients via
- * GET /config/:projectId.
+ * Config cache (Redis → S3):
+ *   key: config:{group_id}   TTL: QUORUM_CONFIG_CACHE_TTL (default 300s)
  *
- * Configs are cached in-process with a TTL to avoid S3 calls on every request.
- * The cache is invalidated when a new config is uploaded (checked via ETag).
+ * Profile cache (Redis → DDB quorum-user-projects):
+ *   key: profile:{username}  TTL: QUORUM_PROFILE_CACHE_TTL (default 300s)
+ *
+ * Admin config cache (Redis → S3 configs/.quorum):
+ *   key: admin:platform      TTL: QUORUM_ADMIN_CACHE_TTL (default 300s)
+ *
+ * All three caches use write-through invalidation + pub/sub for multi-instance consistency.
  */
 
-import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
-import { QuorumConfigSchema } from '@as-quorum/mcp/config/schema'
-import { getConfig as ddbGetConfig, putConfig as ddbPutConfig, syncProjectMembers as ddbSyncProjectMembers } from './ddb.js'
+import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { QuorumConfigSchema } from './shared/config/schema.js'
+import { getUserProjects, getUserProjectsStrict } from './ddb.js'
+import { getRedis } from './redis.js'
 
-const TTL_MS = 5 * 60 * 1000 // 5 minutes
-
-/** @type {Map<string, { config: object, etag: string | null, loadedAt: number }>} */
-const cache = new Map()
+const CONFIG_TTL  = Number(process.env.QUORUM_CONFIG_CACHE_TTL  ?? 300)
+const PROFILE_TTL = Number(process.env.QUORUM_PROFILE_CACHE_TTL ?? 300)
+const ADMIN_TTL   = Number(process.env.QUORUM_ADMIN_CACHE_TTL   ?? 300)
 
 let s3Client = null
 
@@ -42,97 +46,64 @@ function getS3() {
   return s3Client
 }
 
+// ── Config cache ──────────────────────────────────────────────────────────────
+
 /**
- * Load a project config from S3 (with in-process caching).
- * Falls back to QUORUM_CONFIG_PATH local file if the env var is set (dev mode).
+ * Load a project config from Redis (hot path) or S3 (cold path).
+ * Falls back to QUORUM_CONFIG_PATH local file if set (dev mode).
  * @param {string} projectId
  * @returns {Promise<object>} Validated config object
  */
 export async function loadProjectConfig(projectId) {
-  const localPath = process.env.QUORUM_CONFIG_PATH
-  if (localPath) {
-    return loadLocalConfig(localPath)
+  if (process.env.QUORUM_CONFIG_PATH) {
+    return loadLocalConfig(process.env.QUORUM_CONFIG_PATH)
   }
 
   const bucket = process.env.QUORUM_CONFIG_BUCKET
-  if (!bucket) {
-    throw new Error('QUORUM_CONFIG_BUCKET not set and QUORUM_CONFIG_PATH not set')
-  }
+  if (!bucket) throw new Error('QUORUM_CONFIG_BUCKET not set and QUORUM_CONFIG_PATH not set')
 
-  const key = `${projectId}.quorum.json`
-  const cached = cache.get(projectId)
-  const now = Date.now()
+  const redis    = getRedis()
+  const cacheKey = `config:${projectId}`
 
-  // Return cached value if still fresh
-  if (cached && now - cached.loadedAt < TTL_MS) {
-    return cached.config
-  }
-
-  // DDB read-through (fast path) — skips S3 entirely on hit.
-  // DDB is best-effort: on any error we fall through to S3 silently.
-  try {
-    const ddbConfig = await ddbGetConfig(projectId)
-    if (ddbConfig) {
-      const validated = QuorumConfigSchema.parse(ddbConfig)
-      cache.set(projectId, { config: validated, etag: null, loadedAt: now })
-      return validated
-    }
-  } catch {
-    // Cache miss / validation failure — fall through to S3
-  }
-
-  // Check ETag for conditional refresh
+  // Redis hit
+  const cached = await redis.get(cacheKey)
   if (cached) {
-    try {
-      const head = await getS3().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-      if (head.ETag === cached.etag) {
-        // ETag unchanged — extend cache without re-parsing
-        cache.set(projectId, { ...cached, loadedAt: now })
-        return cached.config
-      }
-    } catch {
-      // HEAD failed — fall through to full GET
-    }
+    try { return QuorumConfigSchema.parse(JSON.parse(cached)) } catch { /* fall through */ }
   }
 
-  // Full GET from S3
-  const response = await getS3().send(new GetObjectCommand({ Bucket: bucket, Key: key }))
-  const body = await response.Body.transformToString()
-  const raw = JSON.parse(body)
-  const config = QuorumConfigSchema.parse(raw)
+  // S3 full GET
+  const s3Key   = `${projectId}.quorum.json`
+  const response = await getS3().send(new GetObjectCommand({ Bucket: bucket, Key: s3Key }))
+  const body     = await response.Body.transformToString()
+  const config   = QuorumConfigSchema.parse(JSON.parse(body))
 
-  cache.set(projectId, {
-    config,
-    etag: response.ETag ?? null,
-    loadedAt: now,
-  })
-
-  // DDB write-back — best-effort. Build member rows from config.members + role floors.
-  try {
-    const members = (config.members ?? []).map((m) => ({
-      github_username: m.github_username,
-      role:            m.role,
-      team:            m.team,
-      base_confidence: m.role && config.roles?.[m.role]
-        ? config.roles[m.role].base_confidence
-        : 0.5,
-    })).filter((m) => m.github_username)
-
-    await ddbPutConfig(projectId, config, response.ETag ?? null)
-    // Use group_id (the S3 key prefix and JWT claim) as the canonical slug.
-    // config.project is an optional display name — falls back to group_id when absent.
-    await ddbSyncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
-  } catch (err) {
-    console.error(`[Gateway] DDB write-back failed for ${projectId}: ${err.message}`)
-  }
+  await redis.set(cacheKey, JSON.stringify(config), 'EX', CONFIG_TTL)
 
   return config
 }
 
 /**
+ * Write a project config back to S3 and invalidate the Redis cache.
+ * @param {string} projectId
+ * @param {object} config  Validated config object
+ */
+export async function saveProjectConfig(projectId, config) {
+  const bucket = process.env.QUORUM_CONFIG_BUCKET
+  if (!bucket) throw new Error('QUORUM_CONFIG_BUCKET not set')
+
+  const s3Key = `${projectId}.quorum.json`
+  await getS3().send(new PutObjectCommand({
+    Bucket:      bucket,
+    Key:         s3Key,
+    Body:        JSON.stringify(config, null, 2),
+    ContentType: 'application/json',
+  }))
+
+  await invalidateProject(projectId)
+}
+
+/**
  * List all project IDs visible in the config bucket.
- * Used by GET /projects to show what projects exist.
- * Returns an empty array if the bucket is not configured.
  * @returns {Promise<string[]>}
  */
 export async function listProjectIds() {
@@ -140,7 +111,6 @@ export async function listProjectIds() {
   if (!bucket) return []
 
   const { ListObjectsV2Command } = await import('@aws-sdk/client-s3')
-
   const ids = []
   let token
   do {
@@ -159,34 +129,32 @@ export async function listProjectIds() {
 }
 
 /**
- * Load config from a local file path (dev mode — skips S3).
+ * Invalidate the config cache for a project.
+ * @param {string} projectId
+ */
+export async function invalidateProject(projectId) {
+  const redis    = getRedis()
+  const cacheKey = `config:${projectId}`
+  await redis.del(cacheKey)
+  await redis.publish('quorum:invalidate', cacheKey)
+}
+
+/**
+ * Load config from a local file path (dev mode — skips S3 and Redis).
  * @param {string} filePath
  * @returns {Promise<object>}
  */
 async function loadLocalConfig(filePath) {
   const { readFile } = await import('node:fs/promises')
   const body = await readFile(filePath, 'utf8')
-  const raw = JSON.parse(body)
-  return QuorumConfigSchema.parse(raw)
-}
-
-/**
- * Invalidate the cache for a specific project (after config update).
- * @param {string} projectId
- */
-export function invalidateProject(projectId) {
-  cache.delete(projectId)
+  return QuorumConfigSchema.parse(JSON.parse(body))
 }
 
 /**
  * Resolve a project by its SHA-256 token hash (used by projectMiddleware).
- *
- * Queries the projects table directly — token hashes are stored in the DB,
- * not in S3. Returns null if no matching active project is found.
- *
- * @param {string} tokenHash - SHA-256 hex of the raw X-Quorum-Token header
+ * @param {string} tokenHash
  * @param {import('pg').Pool} pool
- * @returns {Promise<object | null>} Project row or null
+ * @returns {Promise<object | null>}
  */
 export async function getProjectByTokenHash(tokenHash, pool) {
   const { rows } = await pool.query(
@@ -197,4 +165,136 @@ export async function getProjectByTokenHash(tokenHash, pool) {
     [tokenHash],
   )
   return rows[0] ?? null
+}
+
+// ── Profile cache ─────────────────────────────────────────────────────────────
+
+/**
+ * Load a user profile from Redis (hot path) or DDB quorum-user-projects (cold path).
+ *
+ * Profile shape:
+ * {
+ *   github_username: string,
+ *   projects: Array<{ group_id, role, base_confidence, is_owner, team }>
+ * }
+ *
+ * @param {string} username  GitHub username
+ * @returns {Promise<object>} User profile (always returns a valid shape; empty projects on miss)
+ */
+export async function loadUserProfile(username) {
+  const redis    = getRedis()
+  const cacheKey = `profile:${username}`
+
+  const buildProfile = (rows) => ({
+    github_username: username,
+    projects: rows.map((r) => ({
+      group_id:       r.project_id,
+      role:           r.role            ?? null,
+      base_confidence: r.base_confidence ?? 0.5,
+      is_owner:       r.is_owner        ?? false,
+      team:           r.team            ?? null,
+    })),
+  })
+
+  const cached = await redis.get(cacheKey)
+
+  if (cached) {
+    // Hot path with stale-while-revalidate: try a fresh DDB read; if it fails,
+    // prefer the stale cached entry over caching an empty (and thus role-less)
+    // profile. See Gap 7.
+    try {
+      const rows    = await getUserProjectsStrict(username)
+      const profile = buildProfile(rows)
+      await redis.set(cacheKey, JSON.stringify(profile), 'EX', PROFILE_TTL)
+      return profile
+    } catch (err) {
+      console.warn(`[Gateway] loadUserProfile(${username}): DDB failed, serving stale cache: ${err.message}`)
+      try { return JSON.parse(cached) } catch { /* fall through to cold path */ }
+    }
+  }
+
+  // Cold path — no cache to fall back on. getUserProjects returns [] on error
+  // and emits its own warn log; that empty result is cached only briefly via
+  // PROFILE_TTL and a subsequent successful read will overwrite it.
+  const rows    = await getUserProjects(username)
+  const profile = buildProfile(rows)
+  await redis.set(cacheKey, JSON.stringify(profile), 'EX', PROFILE_TTL)
+  return profile
+}
+
+/**
+ * Invalidate the profile cache for a user.
+ * @param {string} username
+ */
+export async function invalidateProfile(username) {
+  const redis    = getRedis()
+  const cacheKey = `profile:${username}`
+  await redis.del(cacheKey)
+  await redis.publish('quorum:invalidate', cacheKey)
+}
+
+// ── Admin config cache ────────────────────────────────────────────────────────
+
+const ADMIN_S3_KEY = 'configs/.quorum'
+
+/**
+ * Load the platform admin config from Redis or S3.
+ * @returns {Promise<object | null>} Admin config or null if not yet seeded
+ */
+export async function loadAdminConfig() {
+  const bucket = process.env.QUORUM_CONFIG_BUCKET
+  if (!bucket) return null
+
+  const redis    = getRedis()
+  const cacheKey = 'admin:platform'
+
+  // Redis hit
+  const cached = await redis.get(cacheKey)
+  if (cached) {
+    try { return JSON.parse(cached) } catch { /* fall through */ }
+  }
+
+  // S3 cold path
+  try {
+    const response = await getS3().send(new GetObjectCommand({ Bucket: bucket, Key: ADMIN_S3_KEY }))
+    const body     = await response.Body.transformToString()
+    const config   = JSON.parse(body)
+    await redis.set(cacheKey, JSON.stringify(config), 'EX', ADMIN_TTL)
+    return config
+  } catch (err) {
+    if (err.name === 'NoSuchKey') return null
+    console.error(`[Gateway] loadAdminConfig failed: ${err.message}`)
+    return null
+  }
+}
+
+/**
+ * Save the platform admin config to S3 and invalidate Redis.
+ * @param {object} config
+ */
+export async function saveAdminConfig(config) {
+  const bucket = process.env.QUORUM_CONFIG_BUCKET
+  if (!bucket) throw new Error('QUORUM_CONFIG_BUCKET not set')
+
+  await getS3().send(new PutObjectCommand({
+    Bucket:      bucket,
+    Key:         ADMIN_S3_KEY,
+    Body:        JSON.stringify(config, null, 2),
+    ContentType: 'application/json',
+  }))
+
+  const redis = getRedis()
+  await redis.del('admin:platform')
+  await redis.publish('quorum:invalidate', 'admin:platform')
+}
+
+/**
+ * Check if a GitHub username is a platform admin.
+ * @param {string} username
+ * @returns {Promise<boolean>}
+ */
+export async function isPlatformAdmin(username) {
+  const config = await loadAdminConfig()
+  if (!config?.admins) return false
+  return config.admins.some((a) => a.github_username === username)
 }

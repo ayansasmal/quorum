@@ -17,7 +17,7 @@
  */
 
 import { parseArgs } from 'node:util'
-import { verifyChain } from '@as-quorum/mcp/audit/chain'
+import { verifyChain } from '../gateway/src/shared/audit/chain.js'
 
 // ── Config + auth ─────────────────────────────────────────────────────────────
 

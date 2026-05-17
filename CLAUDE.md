@@ -43,29 +43,34 @@ graph TD
 
 ---
 
-## Current State (v0.2)
+## Current State (v0.3)
 
 **Built and working:**
-- MCP server (`@as-quorum/mcp`) with 10 tools — maintained in its own repo (`quorum-mcp`), installed via `npm install -g @as-quorum/mcp`
-- Quorum Gateway: ES256 JWT, GitHub OAuth, S3-backed project config, DynamoDB read-through cache, rate limiting, JWKS endpoint
-- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status
+- MCP server (`@as-quorum/mcp`) with 12 tools — maintained in its own repo (`quorum-mcp`), installed via `npm install -g @as-quorum/mcp`
+- Quorum Gateway: ES256 slim JWT `{ sub, is_admin }`, GitHub OAuth, S3-backed project config, Redis config+profile+admin cache (pub/sub invalidation), rate limiting, JWKS endpoint
+- `X-Quorum-Project` header: per-request project context — identity (who you are) decoupled from project scope (what you access)
+- `GET /user/profile/:username`: profile endpoint (Redis → DDB) with role, projects, base_confidence
+- Governance ownership: `POST /config/transfer-ownership`, `POST /config/update-role`, `GET /admin/config`, `POST /admin/users`
+- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel
 - Project selector: search + pagination (10/page), full light/dark theme, cancel-back-to-project support
-- `GET /auth/projects` (JWT): refresh project list without re-OAuth; `POST /auth/switch`: JWT-based project switch
 - `GET /schema/config`: public JSON Schema endpoint for editor validation and IDE autocomplete
-- DynamoDB layer: `quorum-configs` table (config cache with TTL) + `quorum-user-projects` table (membership index with GSI)
+- DynamoDB layer: `quorum-user-projects` table (membership index with GSI) — config cache retired to Redis
 - `POST /sync/configs`: EventBridge-compatible S3→DDB full sync (dual auth: sync token or `principal_architect` JWT)
 - Dual-store audit pipeline (PostgreSQL + Graphiti) with SHA256 tamper-evident chain
 - Governance: conflict detection (semantic + LLM), authority weighting, confidence decay, human-in-the-loop
 - Versioning: append-only, bidirectional audit↔version references, `triggered_by` on every write
-- Multi-project isolation via `group_id` scoping in every graph operation
-- Config: `group_id` required (canonical ID); `project` optional (display name only); JSON Schema at `src/config/quorum.schema.json`
+- Multi-project isolation via `group_id` scoping in every graph operation; `summary` column is the durable content store (survives FalkorDB volume wipes)
+- Config: `group_id` required (canonical ID); `owner` required (project owner GitHub username); `project` optional (display name only)
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
-- Local dev: Docker Compose + LocalStack (S3 + DynamoDB); `setup.sh docker clean --volumes` reliably wipes all data
+- Local dev: Docker Compose + LocalStack (S3 + DynamoDB) + Redis (:6380 on host); `setup.sh docker clean --volumes` reliably wipes all data
 - OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
 - Ops audit CLI: `scripts/audit-cli.js` — verify/lineage/export/stats via gateway HTTP (no direct pg)
 - `GET /pg/audit/lineage/:topic/:key` — audit lineage endpoint for compliance queries
+- `POST /api/bump/:topic/:key` — confidence endorsement with 7-day cooldown, role-weighted delta, capped at `starting_confidence`
+- PostgreSQL ILIKE fallback in `GET /api/search` when Graphiti/FalkorDB returns empty results
+- Agent identity tracking: `knowledge_versions` carries `agent_id`, `session_id`, `author_type` columns — written by `set_agent_context` gate in the MCP; `author_type` always `'agent'` for MCP writes (foundation for future human dashboard writes)
 
-**Not yet built (v0.3+):** PR ingestion, Atlassian integration
+**Not yet built (v0.4+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
 
@@ -77,18 +82,20 @@ graph TD
 gateway/                ← @as-quorum/gateway (private, enterprise self-hosted)
   src/
     server.js           ← Gateway entry point (Express :3001)
-    routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump · governance
-    middleware/         ← verify-jwt · project · rate-limit
-    keys.js · config-cache.js · ddb.js · errors.js
+    routes/             ← auth · config · dashboard · graphiti · jwks · oauth · pg · projects · schema · sync · bump · governance · user · admin
+    middleware/         ← verify-jwt (async, two-step: JWT → profile cache) · project · rate-limit
+    shared/             ← vendored copies of quorum-mcp shared modules (no npm dep)
+                           config/ · graph/ · audit/ · governance/
+    redis.js · keys.js · config-cache.js · ddb.js · errors.js
 
 dashboard/src/          ← React dashboard (private, enterprise self-hosted)
-  pages/                ← Stats · Graph · Pending · Knowledge · Audit · Config · Status
+  pages/                ← Stats · Graph · Pending · Knowledge · Audit · Config · Status · Admin
   components/           ← layout/ · session/ · status/
   context/              ← AuthContext.jsx · ThemeContext.jsx
-  api/                  ← typed API clients
+  api/                  ← typed API clients (incl. governance.js for v0.3 endpoints)
 
 tests/
-  gateway/              ← gateway route tests (auth · graphiti)
+  gateway/              ← gateway route tests (auth · graphiti · governance)
 
 scripts/                ← seed · audit-scan · decay · archive · recheck
   audit-cli.js          ← ops audit CLI (verify · lineage · export · stats) via gateway HTTP
@@ -104,11 +111,11 @@ The constitutional test suite enforces all of these at 100% coverage:
 
 | Rule | Enforced in |
 |------|-------------|
-| No hard delete | `BLOCKED_METHODS` in `src/graph/client.js` |
-| Audit append-only | `updateEntry()` / `deleteEntry()` always throw in `src/audit/pipeline.js` |
-| Reason required (≥10 chars) | Tool layer validation in `src/tools/remember.js` and `src/tools/forget.js` |
-| No self-approval | `reviewer !== author` check in `src/tools/review.js` |
-| Claude writes always DRAFT | `author === 'claude'` forces DRAFT in `storeFirst()` |
+| No hard delete | `BLOCKED_METHODS` in `gateway/src/shared/graph/client.js` + `quorum-mcp/src/graph/client.js` |
+| Audit append-only | `updateEntry()` / `deleteEntry()` always throw in `gateway/src/shared/audit/secondary.js` |
+| Reason required (≥10 chars) | `gateway/src/shared/governance/constitutional.js` + MCP tool layer (`quorum-mcp`) |
+| No self-approval | `enforceNoSelfApproval()` in `gateway/src/shared/governance/constitutional.js` |
+| Claude writes always DRAFT | `author === 'claude'` forces DRAFT in `storeFirst()` — in `quorum-mcp` |
 | `triggered_by` always set | Schema enforcement — never null |
 | Atomic ACTIVE transition | Old version → SUPERSEDED and new → ACTIVE in one transaction |
 | Bidirectional audit↔version | Every version record carries `created_by_audit`; every audit entry carries `version_id` |
@@ -133,6 +140,11 @@ QUORUM_CONFIG_BUCKET=quorum-configs
 QUORUM_DDB_CONFIGS_TABLE=quorum-configs          # default: quorum-configs
 QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects  # default: quorum-user-projects
 QUORUM_SYNC_SECRET=<static-secret>               # EventBridge sync token (optional)
+REDIS_URL=redis://redis:6379                      # Redis for config + profile cache (v0.3)
+QUORUM_CONFIG_CACHE_TTL=300                       # Config cache TTL in seconds
+QUORUM_PROFILE_CACHE_TTL=300                      # Profile cache TTL in seconds
+QUORUM_ADMIN_CACHE_TTL=300                        # Admin config cache TTL in seconds
+QUORUM_FIRST_ADMIN=                               # GitHub username — seeded into configs/.quorum on setup
 AWS_REGION · AWS_ENDPOINT_URL · AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY
 
 # Graphiti sidecar (Python container — local dev uses OpenAI)

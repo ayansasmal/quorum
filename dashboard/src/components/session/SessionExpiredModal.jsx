@@ -5,15 +5,16 @@
  *   1. `reauthNeeded` becomes `true` in AuthContext (set by the expiry timer or
  *      the visibility-change handler in AuthContext).
  *   2. This component renders a semi-transparent backdrop + centred card.
- *   3. The user clicks "Sign in with GitHub" which opens `/auth/github` in a
- *      small popup window (named `quorum_reauth`).
- *   4. The popup completes the GitHub OAuth flow and lands on `/login#oauth=<token>`.
- *      Login.jsx detects `window.opener`, sends
- *        `postMessage({ type: 'QUORUM_OAUTH', oauth, project_id }, origin)`
+ *   3. The user clicks "Sign in with GitHub" which opens
+ *      `/auth/github?project_id=<current>` in a small popup window.
+ *   4. The gateway completes the OAuth flow server-side and redirects the popup
+ *      to `/login#token=<quorum_jwt>`. Login.jsx detects `window.opener`, sends
+ *        `postMessage({ type: 'QUORUM_OAUTH', token }, origin)`
  *      back to this window, then calls `window.close()`.
- *   5. The `message` event listener in this component receives the payload,
- *      calls `completeReauth(oauth)` from AuthContext, which exchanges the OAuth
- *      token for a fresh Quorum JWT and clears `reauthNeeded`.
+ *   5. The `message` event listener receives the Quorum JWT, calls
+ *      `completeReauth(jwt)` from AuthContext, which applies the JWT and clears
+ *      `reauthNeeded`. If the JWT is a pre-auth variant (N-project user), AuthContext
+ *      calls POST /auth/switch with the user's current project automatically.
  *   6. The modal unmounts — the user is back on the same page they were on.
  *
  * Error handling:
@@ -57,7 +58,7 @@ function GitHubIcon() {
  * @returns {JSX.Element|null}
  */
 export default function SessionExpiredModal() {
-  const { reauthNeeded, completeReauth, logout } = useAuth()
+  const { reauthNeeded, completeReauth, logout, user } = useAuth()
 
   /** @type {[boolean, React.Dispatch<React.SetStateAction<boolean>>]} */
   const [loading, setLoading] = useState(false)
@@ -112,8 +113,11 @@ export default function SessionExpiredModal() {
     messageReceivedRef.current = false
     setLoading(true)
     setError(null)
+    // Pass the current project so the gateway can issue a scoped JWT directly
+    // when the user has only 1 project (avoids a round-trip POST /auth/switch).
+    const qs = user?.project ? `?project_id=${encodeURIComponent(user.project)}` : ''
     popupRef.current = window.open(
-      '/auth/github',
+      `/auth/github${qs}`,
       'quorum_reauth',
       'width=520,height=620,left=200,top=100',
     )
@@ -148,11 +152,11 @@ export default function SessionExpiredModal() {
     function handleMessage(event) {
       if (event.origin !== window.location.origin) return
       if (event.data?.type !== 'QUORUM_OAUTH') return
-      const { oauth } = event.data
-      if (!oauth) return
+      const { token } = event.data
+      if (!token) return
 
       messageReceivedRef.current = true   // mark message received before async work
-      completeReauth(oauth)
+      completeReauth(token)
         .catch((err) => { if (active) setError(err.message ?? 'Re-authentication failed') })
         .finally(() => { if (active) setLoading(false) })
     }

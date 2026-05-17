@@ -1,35 +1,25 @@
 /**
- * Quorum Gateway — DynamoDB cache layer.
+ * Quorum Gateway — DynamoDB membership layer.
  *
- * DynamoDB sits in front of S3 as a fast read layer for project configs and
- * user→project membership lookups. S3 remains the source of truth — DDB is
- * populated by:
- *   - read-through on cache miss in config-cache.js
- *   - the POST /sync/configs endpoint (manual + EventBridge scheduled)
+ * After v0.3: DynamoDB `quorum-user-projects` is the permanent source of truth for
+ * project membership. The former `quorum-configs` cache table is retired — Redis now
+ * serves that role (see config-cache.js).
  *
- * Two tables:
- *   1. quorum-configs           PK: project_id
- *      Attrs: config (Map), s3_etag (String), updated_at, ttl (Number, 1h)
- *   2. quorum-user-projects     PK: github_username, SK: project_id
- *      GSI: ProjectMembersIndex (PK: project_id, SK: github_username)
+ * Table: quorum-user-projects
+ *   PK: github_username   SK: project_id
+ *   GSI: ProjectMembersIndex (PK: project_id, SK: github_username)
  *
- * All exported functions are async and never throw on infrastructure errors
- * — DDB is a cache, not a system of record. Callers fall through to S3/DB.
+ * All exported functions are async and never throw on infrastructure errors —
+ * DDB is a cache layer. Callers fall through to S3/DB on error.
  */
 
 import {
   DynamoDBClient,
-  GetItemCommand,
-  PutItemCommand,
   QueryCommand,
-  ScanCommand,
   BatchWriteItemCommand,
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 
-const TTL_SECONDS = 3600 // 1 hour cache TTL
-
-const CONFIGS_TABLE       = process.env.QUORUM_DDB_CONFIGS_TABLE       ?? 'quorum-configs'
 const USER_PROJECTS_TABLE = process.env.QUORUM_DDB_USER_PROJECTS_TABLE ?? 'quorum-user-projects'
 const GSI_NAME            = 'ProjectMembersIndex'
 
@@ -37,7 +27,6 @@ let ddbClient = null
 
 /**
  * Lazy DynamoDBClient singleton.
- * Honours AWS_ENDPOINT_URL (LocalStack) and AWS_REGION exactly like the S3 client.
  * @returns {DynamoDBClient}
  */
 function getDdb() {
@@ -58,119 +47,55 @@ function getDdb() {
 }
 
 /**
- * Fetch a cached project config from DynamoDB.
- * @param {string} projectId
- * @returns {Promise<object | null>} Parsed config object, or null on miss / error / TTL expiry.
- */
-export async function getConfig(projectId) {
-  try {
-    const result = await getDdb().send(new GetItemCommand({
-      TableName: CONFIGS_TABLE,
-      Key: marshall({ project_id: projectId }),
-    }))
-    if (!result.Item) return null
-
-    const item = unmarshall(result.Item)
-
-    // DDB TTL is best-effort — also check ttl client-side to avoid serving stale data
-    if (item.ttl && Number(item.ttl) < Math.floor(Date.now() / 1000)) {
-      return null
-    }
-    return item.config ?? null
-  } catch (err) {
-    console.error(`[Gateway] ddb.getConfig(${projectId}) failed: ${err.message}`)
-    return null
-  }
-}
-
-/**
- * Store a project config in DynamoDB with a 1-hour TTL.
- * @param {string} projectId
- * @param {object} config    The validated config object.
- * @param {string | null} etag S3 ETag (used for staleness checks).
- * @returns {Promise<boolean>} true on success, false on error.
- */
-export async function putConfig(projectId, config, etag) {
-  try {
-    const now = Math.floor(Date.now() / 1000)
-    const item = {
-      project_id: projectId,
-      config,
-      s3_etag:    etag ?? null,
-      updated_at: new Date().toISOString(),
-      ttl:        now + TTL_SECONDS,
-    }
-    await getDdb().send(new PutItemCommand({
-      TableName: CONFIGS_TABLE,
-      Item: marshall(item, { removeUndefinedValues: true }),
-    }))
-    return true
-  } catch (err) {
-    console.error(`[Gateway] ddb.putConfig(${projectId}) failed: ${err.message}`)
-    return false
-  }
-}
-
-/**
- * List the projects a GitHub user belongs to (queries the user_projects table by PK).
+ * Throwing variant — DDB-only query, no error swallowing. Internal use for
+ * callers (e.g. loadUserProfile) that need to distinguish "no projects" from
+ * "DDB failed". See Gap 7.
  * @param {string} githubUsername
- * @returns {Promise<Array<{project_id: string, project_name: string, project_slug: string, role: string, team: string, base_confidence: number}>>}
+ * @returns {Promise<Array<object>>}
+ */
+export async function getUserProjectsStrict(githubUsername) {
+  const result = await getDdb().send(new QueryCommand({
+    TableName: USER_PROJECTS_TABLE,
+    KeyConditionExpression: '#u = :u',
+    ExpressionAttributeNames:  { '#u': 'github_username' },
+    ExpressionAttributeValues: marshall({ ':u': githubUsername }),
+  }))
+  return (result.Items ?? []).map((raw) => {
+    const item = unmarshall(raw)
+    return {
+      project_id:      item.project_id,
+      project_name:    item.project_name      ?? null,
+      project_slug:    item.project_slug      ?? null,
+      role:            item.role              ?? null,
+      team:            item.team              ?? null,
+      base_confidence: item.base_confidence   ?? null,
+      is_owner:        item.is_owner          ?? false,
+    }
+  })
+}
+
+/**
+ * List the projects a GitHub user belongs to.
+ * Forgiving variant — returns [] on DDB error (with a warn log so the failure
+ * is observable). Callers that need failure-distinguishing semantics should
+ * use {@link getUserProjectsStrict} instead.
+ *
+ * @param {string} githubUsername
+ * @returns {Promise<Array<{project_id, project_name, project_slug, role, team, base_confidence, is_owner}>>}
  */
 export async function getUserProjects(githubUsername) {
   try {
-    const result = await getDdb().send(new QueryCommand({
-      TableName: USER_PROJECTS_TABLE,
-      KeyConditionExpression: '#u = :u',
-      ExpressionAttributeNames:  { '#u': 'github_username' },
-      ExpressionAttributeValues: marshall({ ':u': githubUsername }),
-    }))
-    return (result.Items ?? []).map((raw) => {
-      const item = unmarshall(raw)
-      return {
-        project_id:      item.project_id,
-        project_name:    item.project_name      ?? null,
-        project_slug:    item.project_slug      ?? null,
-        role:            item.role              ?? null,
-        team:            item.team              ?? null,
-        base_confidence: item.base_confidence   ?? null,
-      }
-    })
+    return await getUserProjectsStrict(githubUsername)
   } catch (err) {
-    console.error(`[Gateway] ddb.getUserProjects(${githubUsername}) failed: ${err.message}`)
+    // Gap 7: warn (not silent) so an outage doesn't masquerade as "user has no projects",
+    // which would downgrade every user's role to null for the full profile-cache TTL.
+    console.warn(`[Gateway] ddb.getUserProjects(${githubUsername}) failed — returning empty profile: ${err.message}`)
     return []
   }
 }
 
 /**
- * Scan the quorum-configs table for projects that have guest_access enabled.
- * Full-table scan — configs table is expected to be small (< 1000 items).
- * Returns best-effort: errors return [] and fall through to S3.
- * @returns {Promise<Array<{ project_id: string, project_name: string | null, project_slug: string | null }>>}
- */
-export async function getGuestProjects() {
-  try {
-    const result = await getDdb().send(new ScanCommand({
-      TableName:                 CONFIGS_TABLE,
-      FilterExpression:          '#cfg.#ga = :t',
-      ExpressionAttributeNames:  { '#cfg': 'config', '#ga': 'guest_access' },
-      ExpressionAttributeValues: marshall({ ':t': true }),
-    }))
-    return (result.Items ?? []).map((raw) => {
-      const item = unmarshall(raw)
-      return {
-        project_id:   item.project_id,
-        project_name: item.config?.project  ?? null,
-        project_slug: item.config?.group_id ?? item.project_id,
-      }
-    })
-  } catch (err) {
-    console.error(`[Gateway] ddb.getGuestProjects() failed: ${err.message}`)
-    return []
-  }
-}
-
-/**
- * Chunk an array into fixed-size groups (used to respect DDB BatchWriteItem 25-item limit).
+ * Chunk an array into fixed-size groups (respects DDB BatchWriteItem 25-item limit).
  * @template T
  * @param {T[]} arr
  * @param {number} size
@@ -184,23 +109,18 @@ function chunk(arr, size) {
 
 /**
  * Sync the membership table for a given project.
- *
- * Adds (PutRequest) any members in `members` that are not already in DDB,
- * removes (DeleteRequest) any DDB rows for github_usernames that are no longer
- * in the new members list. No hard-deletes of unrelated rows — scope is the
- * single project_id.
- *
- * Idempotent: safe to call repeatedly with the same input.
+ * Upserts all incoming members; removes members no longer in the list.
+ * Idempotent — safe to call repeatedly with the same input.
  *
  * @param {string} projectId
  * @param {string} projectName
  * @param {string} projectSlug
- * @param {Array<{github_username: string, role: string, team: string, base_confidence: number}>} members
+ * @param {Array<{github_username, role, team, base_confidence, is_owner?}>} members
  * @returns {Promise<{added: number, removed: number}>}
  */
 export async function syncProjectMembers(projectId, projectName, projectSlug, members) {
   try {
-    // 1. Existing members in DDB (via GSI)
+    // 1. Existing members for this project (via GSI)
     const existing = new Set()
     let lastEvaluatedKey
     do {
@@ -219,13 +139,11 @@ export async function syncProjectMembers(projectId, projectName, projectSlug, me
       lastEvaluatedKey = result.LastEvaluatedKey
     } while (lastEvaluatedKey)
 
-    // 2. Diff against incoming members
+    // 2. Diff
     const incomingUsernames = new Set(
-      (members ?? [])
-        .map((m) => m.github_username)
-        .filter(Boolean),
+      (members ?? []).map((m) => m.github_username).filter(Boolean),
     )
-    const toAdd    = (members ?? []).filter((m) => m.github_username) // upsert all incoming
+    const toAdd    = (members ?? []).filter((m) => m.github_username)
     const toRemove = [...existing].filter((u) => !incomingUsernames.has(u))
 
     const updatedAt = new Date().toISOString()
@@ -240,21 +158,18 @@ export async function syncProjectMembers(projectId, projectName, projectSlug, me
             role:            m.role            ?? null,
             team:            m.team            ?? null,
             base_confidence: m.base_confidence ?? 0.5,
+            is_owner:        m.is_owner        ?? false,
             updated_at:      updatedAt,
           }, { removeUndefinedValues: true }),
         },
       })),
       ...toRemove.map((username) => ({
         DeleteRequest: {
-          Key: marshall({
-            github_username: username,
-            project_id:      projectId,
-          }),
+          Key: marshall({ github_username: username, project_id: projectId }),
         },
       })),
     ]
 
-    // 3. BatchWriteItem in chunks of 25 (DDB hard limit)
     for (const batch of chunk(writes, 25)) {
       if (batch.length === 0) continue
       await getDdb().send(new BatchWriteItemCommand({
@@ -266,5 +181,44 @@ export async function syncProjectMembers(projectId, projectName, projectSlug, me
   } catch (err) {
     console.error(`[Gateway] ddb.syncProjectMembers(${projectId}) failed: ${err.message}`)
     return { added: 0, removed: 0 }
+  }
+}
+
+/**
+ * Update the role (and optionally is_owner) for a single member in DDB.
+ * Used by POST /config/update-role and POST /config/transfer-ownership.
+ *
+ * @param {string} githubUsername
+ * @param {string} projectId
+ * @param {{ role?: string, base_confidence?: number, is_owner?: boolean, team?: string }} updates
+ * @returns {Promise<boolean>}
+ */
+export async function updateMemberRecord(githubUsername, projectId, updates) {
+  try {
+    const existing = await getUserProjects(githubUsername)
+    const current  = existing.find((r) => r.project_id === projectId)
+    if (!current) return false
+
+    const merged = {
+      github_username: githubUsername,
+      project_id:      projectId,
+      project_name:    current.project_name    ?? null,
+      project_slug:    current.project_slug    ?? null,
+      role:            updates.role            ?? current.role,
+      team:            updates.team            ?? current.team,
+      base_confidence: updates.base_confidence ?? current.base_confidence ?? 0.5,
+      is_owner:        updates.is_owner        ?? current.is_owner        ?? false,
+      updated_at:      new Date().toISOString(),
+    }
+
+    const { PutItemCommand } = await import('@aws-sdk/client-dynamodb')
+    await getDdb().send(new PutItemCommand({
+      TableName: USER_PROJECTS_TABLE,
+      Item:      marshall(merged, { removeUndefinedValues: true }),
+    }))
+    return true
+  } catch (err) {
+    console.error(`[Gateway] ddb.updateMemberRecord(${githubUsername}, ${projectId}) failed: ${err.message}`)
+    return false
   }
 }

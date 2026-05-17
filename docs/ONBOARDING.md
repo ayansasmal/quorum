@@ -81,7 +81,8 @@ Edit `my-project.quorum.json`:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `group_id` | **Yes** | Canonical project ID — S3 key prefix, DDB primary key, JWT claim, Graphiti namespace. Lowercase letters, numbers, hyphens only. |
+| `group_id` | **Yes** | Canonical project ID — S3 key prefix, Graphiti namespace. Lowercase letters, numbers, hyphens only. |
+| `owner` | **Yes** | GitHub username of the project owner. Required since v0.3. |
 | `project` | No | Human-readable display name for the dashboard. Falls back to `group_id` if omitted. |
 | `members` | No | Team roster. At least `github_username` or `git_email` needed per member for identity resolution. |
 | `roles` | No | Base confidence floors per role. Any role in `members` not listed here defaults to `0.5`. |
@@ -212,7 +213,7 @@ automatically:
 1. The gateway's `/.well-known/oauth-authorization-server` is discovered
 2. A local callback server starts on a random ephemeral port
 3. A browser window opens to the gateway's `/oauth/authorize` (redirects to GitHub)
-4. You approve the GitHub login — the gateway exchanges the code, enriches with project config claims, and redirects back to the local callback
+4. You approve the GitHub login — the gateway exchanges the code, issues a slim ES256 JWT (`{ sub, is_admin }` only), and redirects back to the local callback with project/role/team in the response body
 5. The MCP server completes the PKCE exchange and stores the ES256 JWT in-memory
 
 You can also trigger this manually:
@@ -332,9 +333,10 @@ curl http://localhost:3001/health  # must return {"status":"ok"}
 **Knowledge visible across projects**
 
 Check that `group_id` in your config matches the S3 key you uploaded to
-(`s3://quorum-configs/<group_id>.quorum.json`). The JWT `project` claim is derived
-from `group_id` — if they diverge, graph operations will target the wrong namespace.
-The `project` field is display-only and has no effect on routing.
+(`s3://quorum-configs/<group_id>.quorum.json`). In v0.3+, the JWT contains only
+`{ sub, is_admin }` — the active project is sent as the `X-Quorum-Project` request
+header on every call. The MCP server sets this automatically from `ctx.projectId`.
+The `project` field in config is display-only and has no effect on routing.
 
 ---
 

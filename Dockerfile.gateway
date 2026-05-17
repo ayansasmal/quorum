@@ -5,18 +5,17 @@
 # Never expose raw credentials to engineer machines — only the gateway URL.
 
 # ── Builder stage ──────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-COPY mcp/package.json ./mcp/
 COPY gateway/package.json ./gateway/
 COPY dashboard/package.json ./dashboard/
-RUN npm ci --only=production --workspaces --include-workspace-root
+RUN npm ci --omit=dev --workspaces --include-workspace-root
 
 # ── Runtime stage ──────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 RUN apk add --no-cache curl
 
@@ -24,7 +23,6 @@ WORKDIR /app
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
-COPY mcp/ ./mcp/
 COPY gateway/ ./gateway/
 
 EXPOSE 3001

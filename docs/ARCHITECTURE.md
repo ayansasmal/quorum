@@ -45,29 +45,35 @@ The MCP server (`@as-quorum/mcp`, maintained in the `quorum-mcp` repo) hosts the
 
 ## Quorum Gateway
 
-The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fronts every shared backend. It is the single trust boundary between humans/agents and the data plane (Graphiti, PostgreSQL, S3). The MCP server, the Dashboard, and external automations all authenticate against the Gateway with ES256 JWTs.
+The Gateway (`gateway/src/server.js`) is an Express service on port 3001 that fronts every shared backend. It is the single trust boundary between humans/agents and the data plane (Graphiti, PostgreSQL, S3). The MCP server, the Dashboard, and external automations all authenticate against the Gateway with ES256 JWTs.
 
 ### API Surface
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/auth/github` | Initiate GitHub OAuth (redirects to GitHub) |
-| GET | `/auth/callback` | OAuth redirect handler — exchanges `code` for GitHub token, then issues a Quorum JWT |
-| POST | `/auth/token` | Exchange a GitHub PAT for a Quorum JWT (verifies the PAT, looks up the member in project config, signs ES256 JWT with `group_id` and role claims) |
+| GET | `/auth/github` | Initiate GitHub OAuth for dashboard (redirects to GitHub → `/oauth/callback`) |
+| POST | `/auth/token` | Exchange a GitHub PAT for a slim Quorum JWT `{ sub, is_admin }` (CI fallback — no browser required) |
 | POST | `/auth/refresh` | Refresh an unexpired JWT — extends `exp` without re-running OAuth |
+| GET | `/auth/projects` | **Deprecated (410 Gone)** — use `GET /user/profile/{sub}` instead |
+| POST | `/auth/switch` | **Deprecated (410 Gone)** — set `X-Quorum-Project` header instead |
+| GET | `/user/profile/:username` | Returns the full profile for a user: all projects, roles, `is_owner` flag. Self/admin/shared-project access rules apply. v0.3 replacement for JWT role claims. |
+| POST | `/config/transfer-ownership` | Transfer project `owner` to another member. Actor must be owner or admin (admin cannot self-assign). Audited. |
+| POST | `/config/update-role` | Update a member's role in the project config. Actor must be owner or admin. Audited + profile-cache invalidated. |
+| GET | `/admin/config` | Platform admin list (`configs/.quorum`). Admin-only. |
+| POST | `/admin/users` | Add/remove platform admins. Admin-only. Audited. |
 | GET | `/.well-known/jwks.json` | Public JWKS for ES256 verification — consumed by MCP server, Dashboard, and any third-party verifier |
 | GET | `/.well-known/oauth-authorization-server` | RFC8414 metadata — MCP clients auto-discover all OAuth endpoints from here |
 | POST | `/oauth/register` | RFC7591 dynamic client registration — MCP client self-registers, no manual setup |
 | GET | `/oauth/authorize` | Start PKCE S256 flow → redirect to GitHub |
-| GET | `/oauth/callback` | GitHub callback → enrich with project config claims → issue 60s single-use auth code |
+| GET | `/oauth/callback` | Unified GitHub OAuth callback — handles both dashboard and MCP PKCE flows. Issues scoped Quorum JWT (dashboard) or short-lived auth code (MCP) |
 | POST | `/oauth/token` | Exchange auth code + PKCE verifier → Gateway-MCP ES256 JWT |
 | POST | `/graphiti/*` | JWT-authenticated proxy to Graphiti. `group_id` is injected from the JWT claim (clients cannot spoof project scope) |
 | GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over PostgreSQL — used by Dashboard and MCP server for versions, audit, pending decisions |
 | GET | `/pg/audit/lineage/:topic/:key` | Ordered audit trail for a knowledge node (JOIN audit_log + version_audit_links) |
+| POST | `/config/upload` | Onboard a new project — validate config, upload to S3, sync to DDB. Idempotent-fail: 409 if project already exists. Auth: `X-Quorum-Sync-Token` or `principal_architect` JWT |
 | GET | `/config/:projectId` | Fetch a project's `quorum.config.json` from S3 (cached) |
 | POST | `/config/validate` | Validate a config payload against the Zod schema before write — no auth required |
 | GET | `/schema/config` | Serve `quorum.config.schema.json` for editor validation and autocomplete — no auth required |
-| GET | `/projects` | List projects the authenticated user is a member of |
 | POST | `/bump/:topic/:key` | Confidence bump on recall — `X-Quorum-Token` shared-secret auth, called by the MCP server |
 | GET | `/api/stats` | Dashboard BFF — graph counts, confidence distribution, recent activity |
 | GET | `/api/graph` | Dashboard BFF — node + edge payload for Cytoscape rendering |
@@ -79,42 +85,71 @@ The Gateway (`src/gateway/server.js`) is an Express service on port 3001 that fr
 
 ### Auth Flow
 
+There are two auth paths sharing a single GitHub OAuth callback (`GET /oauth/callback`):
+
+**Dashboard OAuth flow** (`GET /auth/github` → GitHub → `GET /oauth/callback`) — v0.3 slim JWT:
+
 ```mermaid
 sequenceDiagram
     participant Browser
     participant Gateway
-    participant GitHub
-    participant S3
-    Browser->>Gateway: GET /auth/github
+    participant Redis
+    participant DDB
+    Browser->>Gateway: GET /auth/github (dashboard initiates)
     Gateway->>GitHub: redirect to OAuth consent
     GitHub-->>Browser: authorize
-    Browser->>Gateway: GET /auth/callback?code=...
-    Gateway->>GitHub: exchange code for access_token
-    GitHub-->>Gateway: GitHub user profile
-    Gateway->>S3: GET project config
-    S3-->>Gateway: members, roles, group_id
-    Gateway->>Gateway: match GitHub username → member<br/>sign ES256 JWT
-    Gateway-->>Browser: { jwt, exp, project }
+    Browser->>Gateway: GET /oauth/callback?code=&state=
+    Gateway->>GitHub: exchange code → GitHub user profile
+    Gateway-->>Browser: redirect login#token=<slim-jwt: {sub, is_admin}>
+    Browser->>Gateway: GET /user/profile/{sub} (Bearer slim-jwt)
+    Gateway->>Redis: profile:{sub} (cache hit or DDB miss)
+    Redis-->>Gateway: { projects: [...] }
+    Gateway-->>Browser: full profile with projects + roles
+    Note over Browser: 1 project → auto-select; n projects → show selector
+    Note over Browser: Active project stored in X-Quorum-Project header on all subsequent requests
 ```
 
-PAT-based exchange (`POST /auth/token`) follows the same shape but skips the redirect: the caller submits a GitHub PAT, the Gateway verifies it against `GET https://api.github.com/user`, then performs the same member lookup and JWT signing.
+**MCP PKCE flow** (OAuth 2.1, `GET /oauth/authorize` → GitHub → `GET /oauth/callback`):
+
+```mermaid
+sequenceDiagram
+    participant MCP
+    participant Gateway
+    participant GitHub
+    MCP->>Gateway: POST /oauth/register
+    Gateway-->>MCP: client_id
+    MCP->>Gateway: GET /oauth/authorize?client_id&code_challenge&state&project_id
+    Gateway->>GitHub: redirect to OAuth consent
+    GitHub-->>Gateway: GET /oauth/callback?code=&state=
+    Gateway->>Gateway: issue short-lived auth code (60s)
+    Gateway-->>MCP: redirect to localhost:PORT/callback?code=
+    MCP->>Gateway: POST /oauth/token (code + PKCE verifier)
+    Gateway-->>MCP: { access_token: <scoped-jwt> }
+```
+
+The gateway discriminates between the two flows using separate in-memory Maps: `pendingStates` (dashboard CSRF states set by `GET /auth/github`) and `pkceStore` (MCP PKCE sessions set by `GET /oauth/authorize`). A callback with a state in `pendingStates` follows the dashboard path; one in `pkceStore` follows the MCP path.
+
+PAT-based exchange (`POST /auth/token`) is a CI fallback: the caller submits a GitHub PAT, the Gateway verifies it against `GET https://api.github.com/user`, then performs the same member lookup and JWT signing.
 
 ### Graphiti Proxy Behaviour
 
 Every `/graphiti/*` call is intercepted by JWT middleware. The Gateway:
 
 1. Verifies the ES256 signature against its private key (matching JWKS).
-2. Extracts `group_id`, `sub` (GitHub username), and `role` from the JWT claims.
-3. Rewrites the request body to inject `group_id` — overwriting any client-supplied value. This means a JWT minted for `project-A` cannot be used to read or write `project-B`'s graph, regardless of payload manipulation.
+2. Extracts `sub` and `is_admin` from the slim JWT. Reads `X-Quorum-Project` header as active project. Resolves `role`, `base_confidence`, `is_owner` from the Redis profile cache (`profile:{sub}`).
+3. Rewrites the request body to inject `group_id` (= active project) — overwriting any client-supplied value. This means even if a caller sends `group_id: "project-B"`, the Gateway substitutes the project from the header/profile. Project isolation is enforced at the gateway regardless of payload manipulation.
 4. Forwards the rewritten request to the Graphiti sidecar.
 5. Streams the SSE/JSON response back to the caller unchanged.
 
-### S3-Backed Project Config
+### S3-Backed Project Config + Redis Cache (v0.3)
 
-Project configs live at `s3://quorum-configs/<group_id>.quorum.json` (flat bucket — no subdirectories). The Gateway caches
-them in-process (5-minute TTL) with a DDB read-through fast path. Configs are validated
-against the Zod schema on every load — an invalid config is a hard startup failure for
-that project.
+Project configs live at `s3://quorum-configs/<group_id>.quorum.json` (flat bucket — no subdirectories). The Gateway caches them in Redis (`config:{group_id}`, TTL from `QUORUM_CONFIG_CACHE_TTL`, default 300s). On cache miss the config is fetched from S3 and written back to Redis. DynamoDB is **no longer** used as a config cache (the `quorum-configs` DDB table is retired).
+
+User profiles are cached in Redis under `profile:{github_username}` (TTL from `QUORUM_PROFILE_CACHE_TTL`, default 300s) — sourced from `quorum-user-projects` DDB on cache miss. Cache invalidation is triggered immediately on every governance write (`POST /config/update-role`, `POST /config/transfer-ownership`, `POST /admin/users`) via `redis.del()` + pub/sub publish to `quorum:invalidate`.
+
+The platform admin list (`configs/.quorum` in S3) is cached under `admin:platform` in Redis (TTL from `QUORUM_ADMIN_CACHE_TTL`, default 300s) and loaded at gateway startup.
+
+Configs are validated against the Zod schema on every load — an invalid config is a hard startup failure for that project.
 
 The canonical JSON Schema is served publicly at `GET /schema/config` for editor tooling:
 
@@ -429,7 +464,9 @@ When Claude loads a version that was superseded since last session:
 
 ### Secondary Store — Version Tables
 
-The PostgreSQL secondary store gains two new append-only tables:
+> **v0.3 id schema.** All identifier columns use the `q_*` prefix scheme — `q_projects.q_project_id`, `q_keys.q_key_id`, etc. The legacy UUID-based tables (`projects`, `knowledge_keys`) have been retired. Migration is one-way; new installs receive the `q_*` schema from `gateway/src/shared/config/migrations.js`.
+
+The PostgreSQL secondary store gains two new append-only tables (legacy column names shown for clarity — production schema uses `q_*` id columns):
 
 ```sql
 -- Knowledge version snapshots (append-only)
@@ -447,6 +484,10 @@ CREATE TABLE knowledge_versions (
   supersedes_reason  TEXT,
   triggered_by    TEXT NOT NULL,
   conflict_id     TEXT,
+  -- Agent identity (v0.3) — written by set_agent_context gate in the MCP
+  agent_id        TEXT,                -- kebab-case agent identifier (e.g. "claude-code")
+  session_id      TEXT,                -- server-derived: sess_ + 8 hex chars (hash of PID+hrtime)
+  author_type     TEXT NOT NULL DEFAULT 'agent', -- 'agent' for all MCP writes; reserved for future 'human' dashboard writes
   UNIQUE(topic, key, version)          -- immutable once written
 );
 
