@@ -1,6 +1,6 @@
 # Quorum — System Analysis & Data Flow Reference
 
-> Generated: 2026-05-15
+> Updated: 2026-05-18
 > Scope: Full end-to-end data flow — Skills → MCP → Gateway → PostgreSQL + Graphiti + FalkorDB + DynamoDB + Redis
 > Purpose: Architectural reference, gap register, and prioritised fix backlog
 
@@ -14,7 +14,7 @@
 4. [Dual-Store Architecture](#4-dual-store-architecture)
 5. [Caching Layers](#5-caching-layers)
 6. [Constitutional Enforcement Points](#6-constitutional-enforcement-points)
-7. [Gap Register (all resolved)](#7-known-gaps--latent-issues)
+7. [Gap Register](#7-known-gaps--latent-issues)
 8. [Essential Files Reference](#8-essential-files-reference)
 9. [Shipped Backlog](#9-shipped-backlog)
 
@@ -267,6 +267,199 @@ authenticate.handler()
 
 **Data written:** None — JWT is in-memory only.
 
+**Gate exemptions:** Gate 1 (`no_project_context`) bypassed — `authenticate` is explicitly excluded from the project context check so it can run before `.quorum` exists. Gate 2 (`not_authenticated`) bypassed for the same reason. Gate 3 does not apply (not a write tool).
+
+---
+
+### g) `set_agent_context()` — register agent identity
+
+```
+set_agent_context.handler(pg, input, identity, ctx)
+  ↓ Validate agent_id: /^[a-z][a-z0-9-]{0,39}$/
+      → Throws invalid_agent_id if pattern fails
+  ↓ deriveSessionId()
+      → seed = `${process.pid}-${process.hrtime.bigint()}`
+      → 'sess_' + sha256(seed).slice(0,8)
+  ↓ _agentCtx = { agent_id, session_id, author_type: 'agent' }
+      — module-level singleton; overwritten if called again
+  → Returns { status:'context_set', agent_id, session_id, author_type:'agent', note }
+```
+
+**Zero HTTP calls.** This tool makes no gateway requests — it is pure in-memory state
+mutation in the MCP process. The `_agentCtx` value is read by subsequent write tools via
+`getAgentCtx()` and merged into `ctx` before calling each handler.
+
+**Data written:** None. Side effect only: module-level `_agentCtx`.
+
+**Gate behaviour:** Gates 1 and 2 apply (project context and auth required). Gate 3 does not
+apply (tool is not in `WRITE_TOOLS` — it would deadlock if it required itself).
+
+**Hardcoded field:** `author_type` is always `'agent'` regardless of caller input. This is
+foundational for future human dashboard writes (which will set `author_type = 'human'` in the
+gateway layer, not via the MCP tool).
+
+---
+
+### h) `config_upload()` — upload project config
+
+```
+config_upload.handler(pg, input, identity, ctx)
+  ↓ readFileSync(resolve(input.config_path))   — local file read
+  ↓ JSON.parse(raw)
+  ↓ gw._post('/config/upload', configData)
+      → POST /config/upload + Bearer JWT
+      → Gateway: authUpload(req)
+          → Accept if: sync token header present, OR role==='principal_architect', OR
+            bootstrap path: caller is listed as principal_architect in the uploaded config
+      → QuorumConfigSchema.safeParse(req.body)   — zod validation
+      → S3 HeadObjectCommand               — idempotency check → 409 if exists
+      → S3 PutObjectCommand                — write <group_id>.quorum.json
+      → syncOneProject(bucket, groupId)
+          → Read back from S3
+          → PutItem to DDB quorum-configs table
+          → Batch write to quorum-user-projects table (one item per member)
+      → getProjectByGroupId(pool, groupId) → null → createProject(pool, ...)
+          → INSERT INTO q_projects
+          → Allocates q_p{n} via sequence
+      → Returns { project_id, q_project_id, message, next_step }
+  IF 409: returns { status:'already_onboarded', q_project_id from error body }
+```
+
+**Data written:** S3 object, DynamoDB `quorum-configs` + `quorum-user-projects` records,
+PostgreSQL `q_projects` row (INSERT only — no audit log entry for config upload).
+
+**Gate exemptions:** Gate 1 (`no_project_context`) bypassed — config upload runs before the
+`.quorum` file exists (Phase 4 of onboarding). Gate 2 (auth) applies. Gate 3 does not apply.
+
+**Bootstrap self-authorization:** if the uploaded config lists the caller's GitHub username with
+role `principal_architect`, the gateway accepts the upload even without a pre-existing project
+entry. This is the bootstrap path for new project onboarding. Not documented elsewhere.
+
+---
+
+### i) `forget()` — soft-deprecate knowledge
+
+```
+forget.handler(pg, input, identity, ctx)
+  ↓ enforceNoHardDelete('forget')         — constitutional check before pipeline
+      NOTE: 'forget' contains no blocked keyword → passes trivially
+      Real enforcement is BLOCKED_METHODS in graph/client.js
+  ↓ enforceReasonRequired(input.reason)   — before pipeline
+  ↓ withAuditPipeline wraps:
+    ↓ getCurrentVersion(pg, topic, key, projectId)
+        → GET /pg/versions/{topic}/{key}
+    ↓ deleteEpisodeSoft(episodeId, { key, reason, author }, projectId)
+        → POST /graphiti/mcp { name:'add_memory', ... }   — adds DEPRECATED marker episode
+        → .catch(() => {})  — Graphiti failure is non-fatal
+    ↓ buildVersionRecord({ ..., status: DEPRECATED })
+    ↓ insertVersion(pg, versionRecord)
+        → POST /pg/versions → INSERT knowledge_versions (status=DEPRECATED, version=N+1)
+    ↓ transitionVersionStatus(pg, topic, key, oldVersion, 'DEPRECATED', forwardLink, projectId)
+        → PATCH /pg/versions/{topic}/{key}/{version}
+  ↓ writeAuditEntry() INTENT + OUTCOME
+```
+
+**Two-row deprecation pattern:** `forget` inserts a new DEPRECATED version row (v=N+1) AND
+updates the previous ACTIVE row status to DEPRECATED. Both rows share `status='DEPRECATED'`
+for the same topic:key — this is correct; the N+1 row records the deprecation reason and
+author, the old row records the prior content.
+
+**Data written:** Two `knowledge_versions` status updates (INSERT new row + UPDATE old row),
+Graphiti soft-delete episode (best-effort), `audit_log` entries.
+
+---
+
+### j) `review()` — approve/reject a DRAFT
+
+```
+review.handler(pg, input, identity, ctx)
+  ↓ enforceReasonRequired(input.note)   — before pipeline
+  ↓ withAuditPipeline wraps:
+    ↓ getLatestDraftVersion(pg, topic, key, projectId)
+        → GET /pg/versions/{topic}/{key}/drafts
+    ↓ enforceNoSelfApproval(targetVersion.author, reviewer)
+        → Throws if author === reviewer (case-insensitive, whitespace-normalised)
+    ↓ enforceReviewerTeam(topic, reviewerTeam)
+        → Reads getConfig() (in-memory from .quorum / S3)
+        → Checks domains[topic].required_reviewer_teams
+    ↓ Staleness check: getCurrentVersion(pg, topic, key, projectId)
+    IF action === 'request_changes':
+      → Returns without state change (no DB write)
+    IF action === 'approve' OR 'reject':
+      ↓ transitionVersionStatus(pg, ..., newStatus, null, projectId)
+          → PATCH /pg/versions/{topic}/{key}/{version}
+          → SQL: UPDATE knowledge_versions SET status=? WHERE ...
+      ↓ incrementDomainStat(pg, ...)   — fire-and-forget
+          ⚠️  See Gap #9: silently fails in gateway mode
+  ↓ writeAuditEntry() INTENT + OUTCOME
+```
+
+**Graphiti not updated.** When a DRAFT is approved → ACTIVE, ONLY the PostgreSQL
+`knowledge_versions.status` column changes. The Graphiti episode metadata (written at
+`remember` time with `status: DRAFT`) is NOT updated. `search()` filters results by
+`node.metadata?.status` — a newly-approved entry remains invisible in semantic search until
+the Graphiti metadata is corrected. See Gap #10.
+
+**Data written:** PostgreSQL `knowledge_versions` status UPDATE only. No new row, no Graphiti
+write. `audit_log` entries.
+
+---
+
+### k) `history()` — full version timeline
+
+```
+history.handler(pg, input, identity, ctx)
+  ↓ withAuditPipeline wraps:
+    ↓ getVersionHistory(pg, topic, key, projectId)
+        → GET /pg/versions/{topic}/{key}/history
+        → SQL: SELECT * FROM knowledge_versions WHERE topic=? AND key=? AND project_id=?
+               ORDER BY version ASC
+    IF versions found AND latest.graphiti_episode_id:
+      ↓ getEvolutionChain(episodeId, projectId)
+          → POST /graphiti/mcp { name:'get_entity_edge_facts', ... }
+          → .catch(() => [])   — Graphiti failure returns empty array silently
+      → Merge: each version gets graph_linked: true/false flag
+    ELSE:
+      → All versions return graph_linked: false
+  ↓ writeAuditEntry() INTENT + OUTCOME
+```
+
+**Degraded mode:** If Graphiti is unavailable or returns empty, history still works using only
+PostgreSQL data. All entries show `graph_linked: false`. No warning is surfaced — callers
+cannot distinguish a successful "no graph data" from a Graphiti failure.
+
+**Data written:** `audit_log` only.
+
+---
+
+### l) `export()` — dump knowledge to markdown/Confluence
+
+```
+export.handler(pg, input, identity, ctx)
+  ↓ withAuditPipeline wraps:
+    ↓ Parallel:
+      getVersionsByStatus(pg, 'ACTIVE', { topic, projectId })
+          → GET /pg/versions/by-status/ACTIVE
+      getVersionsByStatus(pg, 'SUPERSEDED', { topic, projectId })
+          → GET /pg/versions/by-status/SUPERSEDED
+    ↓ For each ACTIVE version:
+      searchNodes(`${topic}:${key}`, { limit:1, groupId:projectId })
+          → POST /graphiti/mcp   — content retrieval via search (not direct fetch)
+          → .catch(() => null)   — failure → placeholder text inserted silently
+    ↓ getVersionStatusCounts(pg, { topic, projectId })
+        → GET /pg/versions/status-counts
+    ↓ Format: markdown.build() or confluence.build()
+  ↓ writeAuditEntry() INTENT + OUTCOME
+```
+
+**Content retrieval caveat:** Content is fetched from Graphiti via a search call, not a direct
+episode GET. After a FalkorDB wipe, the search index is empty and content retrieval silently
+falls back to the placeholder `[Content stored in graph — search for this key to retrieve]`.
+The exported document contains placeholder rows without any warning to the caller. The correct
+content is in PostgreSQL `summary` column — `export` does NOT fall back to it.
+
+**Data written:** `audit_log` only.
+
 ---
 
 ## 3. Identity & Authorization Chain
@@ -485,20 +678,73 @@ they only hold one if it was returned by a prior query scoped to their own proje
 
 ---
 
+### 🔴 Gap 9 — `incrementDomainStat` Silently Fails in All Gateway-Mode MCP Calls
+
+**Discovered: 2026-05-18 (static analysis)**
+
+**Affected tools:** `recall`, `review`, `remember` (supersession path).
+
+**Root cause:** `incrementDomainStat(pg, ...)` in `quorum-mcp/src/graph/queries.js` uses the duck-typing guard:
+```javascript
+if (typeof pg.incrementDomainStat === 'function') return pg.incrementDomainStat(...)
+```
+`GatewayClient` does NOT implement `incrementDomainStat`, so the guard fails and the code falls through to `pg.query(rawSQL)`. `GatewayClient.query()` throws `"GatewayClient.query() called with raw SQL"`. The call sites wrap with `.catch(() => {})` — the error is swallowed silently.
+
+**Impact:** The `author_domain_stats` table is never written in production gateway mode. The authority formula (`calculateAuthority`) depends on `access_count` from this table. All `access_count` values are effectively 0, meaning authority scores are computed only from confidence and recency — not from usage frequency. The confidence `bump` endpoint (`POST /api/bump/:topic/:key`) works correctly (it has its own SQL path in the gateway), but organic recall-based stats do not accumulate.
+
+**Fix:** Add `incrementDomainStat(params)` as a typed method on `GatewayClient` backed by a `POST /pg/stats` gateway route, replacing the direct SQL fallback. The route should accept `{ topic, key, author, projectId, statType }` and run the INSERT/UPSERT.
+
+---
+
+### 🟡 Gap 10 — Graphiti Episode Metadata Not Updated on `review()` Approval
+
+**Discovered: 2026-05-18 (static analysis)**
+
+**Root cause:** When `review(action:'approve')` transitions a `knowledge_versions` row from DRAFT→ACTIVE in PostgreSQL, it does NOT make any Graphiti call. The Graphiti episode written at `remember` time carries `status: 'DRAFT'` in its metadata. `search()` in `src/tools/search.js` filters results by `node.metadata?.status`, excluding nodes with non-ACTIVE status.
+
+**Impact:** A newly-approved DRAFT entry is invisible in semantic search results until one of:
+- The entry is re-ingested via `scripts/reingest-to-graphiti.js`, OR
+- The Graphiti episode happens to be re-written by a subsequent `remember()` supersession
+
+This means the `review() → approve` flow creates a divergence between the PostgreSQL governance record (ACTIVE) and the Graphiti search index (DRAFT). Queries via `recall(topic, key)` still work (PostgreSQL only) but `search(query)` misses the entry.
+
+**Fix:** In `review.js`, after `transitionVersionStatus`, call `updateEpisodeMetadata(episodeId, { status: 'ACTIVE' }, projectId)` via `GatewayClient` — backed by a gateway route that calls Graphiti's `update_memory` or `add_memory` (overwrite) method. If `graphiti_episode_id` is null (FalkorDB wipe), fall back to `addEpisode()` to re-ingest the content from `version.summary`.
+
+---
+
+### 🟡 Gap 11 — No-Self-Approval Not Enforced in Conflict Resolution Path
+
+**Discovered: 2026-05-18 (static analysis)**
+
+**Root cause:** `enforceConflictPartyCannotSelfResolve()` exists in `constitutional.js` but is NOT called in `remember.js:resolveConflictDecision()`. An agent that triggered a conflict (e.g. by calling `remember()` which detected a clash with an existing entry) can call `remember()` again with `{ conflict_id, resolution:'supersede' }` to resolve the conflict in their own favour — without constitutional enforcement.
+
+**Impact:** A junior-role agent can create a conflict with a senior architect's entry, then immediately self-resolve it with `resolution: 'supersede'`, effectively overwriting the senior entry without any human review or cross-party approval. This bypasses the governance intent of conflict detection.
+
+**Fix:** In `remember.js:resolveConflictDecision()`, after loading the conflict record, call:
+```javascript
+enforceConflictPartyCannotSelfResolve(conflictRecord.incoming_author, identity.name)
+```
+where `conflictRecord.incoming_author` is the author who originally triggered the conflict (stored in `pending_decisions`).
+
+---
+
 ## Gap Priority Summary
 
-> Last updated: 2026-05-15 — all gaps resolved or superseded by q_* schema.
+> Last updated: 2026-05-18
 
 | # | Severity | Gap | Status |
 |---|----------|-----|--------|
 | 1 | ~~🔴 High~~ | ILIKE fallback dead code in MCP `search()` | ✅ Fixed — `pg.searchByText()` typed method via `/pg/search` route |
 | 2 | ~~🔴 High~~ | Cross-project contamination in Graphiti search | ✅ Fixed — `group_ids` re-enabled in `searchNodes()`/`searchFacts()` |
 | 3 | ~~🔴 High~~ | Concurrent supersession race condition | ✅ Fixed — `pg.atomicSupersede()` → `POST /pg/versions/supersede` (atomic transaction) |
-| 4 | ~~🟡 Medium~~ | Graphiti episode UUID is fictional | ✅ Superseded — evolution chain now uses PostgreSQL `supersedes_version` / `superseded_by_version` q_* FK columns; `graphiti_episode_id` is best-effort annotation only |
-| 5 | ~~🟡 Medium~~ | Identity stale after role change in MCP | ✅ Fixed — identity resolved fresh per tool call, not at startup |
-| 6 | ~~🟡 Medium~~ | `pending_decisions` missing project scope on resolution | ✅ Superseded — q_* schema uses `q_c{n}` IDs (globally unique opaque IDs from `q_conflict_seq`); no `AND project_id` guard needed |
+| 4 | ~~🟡 Medium~~ | Graphiti episode UUID is fictional | ✅ Superseded — evolution chain uses PostgreSQL q_* FK columns |
+| 5 | ~~🟡 Medium~~ | Identity stale after role change in MCP | ✅ Fixed — identity resolved fresh per tool call |
+| 6 | ~~🟡 Medium~~ | `pending_decisions` missing project scope on resolution | ✅ Superseded — q_* schema `q_c{n}` IDs are globally unique |
 | 7 | ~~🟡 Medium~~ | Silent privilege downgrade on DDB failure | ✅ Fixed — `console.warn()` logged on DDB error in `ddb.js` |
 | 8 | ~~🟢 Low~~ | Multi-instance Redis invalidation informational only | ✅ Fixed — `getRedis().del(key)` called in subscriber callback |
+| 9 | 🔴 High | `incrementDomainStat` silently fails in all gateway-mode MCP calls | 🔜 Open — `author_domain_stats` table never written in production |
+| 10 | 🟡 Medium | Graphiti episode metadata not updated on `review` approval | 🔜 Open — newly-approved entries may be filtered from semantic search |
+| 11 | 🟡 Medium | No-self-approval not enforced in `resolveConflictDecision` path | 🔜 Open — conflict originator can resolve their own conflict via `remember()` |
 
 ---
 
@@ -508,11 +754,19 @@ they only hold one if it was returned by a prior query scoped to their own proje
 |------|---------|
 | `quorum-mcp/src/server.js` | MCP startup, tool registration, identity closure, project context resolution (`resolveCtx`) |
 | `quorum-mcp/src/gateway/client.js` | HTTP client, token management, all typed gateway endpoints |
+| `quorum-mcp/src/tools/set-agent-context.js` | Gate 3 agent identity — `_agentCtx` singleton, `session_id` derivation, zero HTTP calls |
 | `quorum-mcp/src/tools/remember.js` | Full governance write pipeline — conflict detection, supersession, coexist flows |
-| `quorum-mcp/src/tools/search.js` | Dual-store search + broken ILIKE fallback (Gap #1) |
-| `quorum-mcp/src/tools/reflect.js` | LLM extraction + batch DRAFT remember |
-| `quorum-mcp/src/tools/authenticate.js` | OAuth 2.1 PKCE flow, callback server, token exchange |
-| `quorum-mcp/src/graph/client.js` | Graphiti MCP session, BLOCKED_METHODS, fictional episode UUID (Gap #4) |
+| `quorum-mcp/src/tools/recall.js` | PostgreSQL-only read; `incrementDomainStat` call silently fails (Gap #9) |
+| `quorum-mcp/src/tools/search.js` | Dual-store search (Graphiti primary, PostgreSQL ILIKE fallback via `searchByText`) |
+| `quorum-mcp/src/tools/reflect.js` | LLM extraction via `/governance/extract`; calls `rememberHandler` directly (no re-gate) |
+| `quorum-mcp/src/tools/forget.js` | Soft deprecation — two-row pattern (new DEPRECATED row + status update on old row) |
+| `quorum-mcp/src/tools/review.js` | Approve/reject DRAFT; Graphiti NOT updated (Gap #10); no-self-approval in `review` only |
+| `quorum-mcp/src/tools/history.js` | Version timeline; Graphiti evolution chain; silent fallback to `graph_linked:false` |
+| `quorum-mcp/src/tools/export.js` | Markdown/Confluence dump; content from Graphiti search (placeholder on FalkorDB wipe) |
+| `quorum-mcp/src/tools/pending.js` | Read tool with write side-effect — stale detection mutates `pending_decisions` |
+| `quorum-mcp/src/tools/authenticate.js` | OAuth 2.1 PKCE flow; Gate 1 + Gate 2 exempt; backed by `mcp-oauth.js` on gateway |
+| `quorum-mcp/src/tools/config-upload.js` | Gate 1 exempt; bootstrap self-auth path; S3+DDB+PG write chain |
+| `quorum-mcp/src/graph/client.js` | Graphiti MCP session, BLOCKED_METHODS, `graphiti_episode_id` is best-effort only |
 | `gateway/src/server.js` | Gateway entry point, pg pool, route mounting, startup sync |
 | `gateway/src/routes/pg.js` | All PostgreSQL REST endpoints, project-scoped queries |
 | `gateway/src/routes/graphiti.js` | Graphiti proxy, group_id sanitisation + injection, session header forwarding |
