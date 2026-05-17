@@ -362,6 +362,9 @@ router.post('/versions', async (req, res) => {
     q_key_id: qKeyId,
     q_project_id: qProjectId,
     version,
+    agent_id:    req.body.agent_id    ?? null,
+    session_id:  req.body.session_id  ?? null,
+    author_type: req.body.author_type ?? 'agent',
   }
 
   const inserted = await insertVersion(pool, record)

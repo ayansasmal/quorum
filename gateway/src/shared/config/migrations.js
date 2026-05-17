@@ -50,6 +50,22 @@ export const MIGRATIONS = [
       },
     }),
   },
+  // v3 → v4: add governance.agent_context_required (write tools require set_agent_context())
+  // DDL (run against PostgreSQL before deploying this version):
+  //   ALTER TABLE knowledge_versions ADD COLUMN IF NOT EXISTS agent_id    TEXT;
+  //   ALTER TABLE knowledge_versions ADD COLUMN IF NOT EXISTS session_id  TEXT;
+  //   ALTER TABLE knowledge_versions ADD COLUMN IF NOT EXISTS author_type TEXT NOT NULL DEFAULT 'agent';
+  {
+    version: 4,
+    description: 'Add governance.agent_context_required (agent identity gate for write tools)',
+    up: (project) => ({
+      ...project,
+      governance: {
+        agent_context_required: true,
+        ...project.governance,
+      },
+    }),
+  },
   // Add new migrations here — increment version, write an up() transform
 ]
 
