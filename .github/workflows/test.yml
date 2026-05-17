@@ -29,11 +29,8 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Upgrade npm to match local lockfile version
-        run: npm install --global npm@11
-
       - name: Install dependencies
-        run: npm ci
+        run: npm install --prefer-offline
 
       - name: Run gateway tests
         run: npm run test:gateway
@@ -60,11 +57,8 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Upgrade npm to match local lockfile version
-        run: npm install --global npm@11
-
       - name: Install dependencies
-        run: npm ci
+        run: npm install --prefer-offline
 
       - name: Scan for audit pipeline bypasses
         run: npm run audit:scan-bypasses
@@ -86,11 +80,8 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Upgrade npm to match local lockfile version
-        run: npm install --global npm@11
-
       - name: Install dependencies
-        run: npm ci
+        run: npm install --prefer-offline
 
       - name: Run full test suite with coverage
         run: npm run test:coverage
