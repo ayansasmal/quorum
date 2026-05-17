@@ -484,6 +484,10 @@ CREATE TABLE knowledge_versions (
   supersedes_reason  TEXT,
   triggered_by    TEXT NOT NULL,
   conflict_id     TEXT,
+  -- Agent identity (v0.3) — written by set_agent_context gate in the MCP
+  agent_id        TEXT,                -- kebab-case agent identifier (e.g. "claude-code")
+  session_id      TEXT,                -- server-derived: sess_ + 8 hex chars (hash of PID+hrtime)
+  author_type     TEXT NOT NULL DEFAULT 'agent', -- 'agent' for all MCP writes; reserved for future 'human' dashboard writes
   UNIQUE(topic, key, version)          -- immutable once written
 );
 

@@ -32,6 +32,7 @@ src/
     mcp-oauth.js          — PKCE OAuth 2.1 flow for MCP clients (RFC 8414 discovery)
     oauth.js              — Shared OAuth callback + state helpers
     pg.js                 — All PostgreSQL REST routes (/pg/versions/*, /pg/audit/*, /pg/pending/*, /pg/audit/lineage/:topic/:key)
+                            POST /pg/versions extracts agent_id, session_id, author_type from request body (all optional, defaults to null/'agent')
     graphiti.js           — JWT-gated proxy to Graphiti MCP with group_id injection
     config.js             — GET/PUT project config + transfer-ownership + update-role
     schema.js             — GET /schema/config (public JSON Schema)

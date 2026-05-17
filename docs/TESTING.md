@@ -97,8 +97,9 @@ Added as Phase 1 pre-merge gates to define the expected v0.3 behaviour before im
 | `tests/gateway/verify-jwt.test.js` | engram | Async two-step middleware: no `project` JWT claim → `X-Quorum-Project` header; `is_admin` flag; `loadUserProfile()` called with correct `sub`; expired JWT → 401 |
 | `tests/gateway/auth.test.js` (additions) | engram | `POST /auth/token` JWT payload contains only `{ sub, is_admin, jti, exp, iat }` — no `project`, `role`, `team`; `GET /auth/projects` → 410; `POST /auth/switch` → 410 |
 | `tests/gateway/pg-routes.test.js` (additions) | engram | `GET /pg/audit` returns `{ entries: [...] }` shape; `GET /pg/versions/drafts` filters to DRAFT only; `GET /pg/audit/lineage/:topic/:key` returns chain |
-| `quorum-mcp/tests/gateway-client.test.js` | quorum-mcp | `_request()` sends `X-Quorum-Project` header when `ctx.projectId` set; omits header when null; all 10 tool handlers pass `projectId` to `_request()` |
+| `quorum-mcp/tests/gateway-client.test.js` | quorum-mcp | `_request()` sends `X-Quorum-Project` header when `ctx.projectId` set; omits header when null; all 12 tool handlers pass `projectId` to `_request()` |
 | `quorum-mcp/tests/tools/remember.test.js` (addition) | quorum-mcp | `insertVersion` receives `summary = content` — content survives FalkorDB wipes via PostgreSQL `summary` column |
+| `quorum-mcp/tests/tools/set-agent-context.test.js` | quorum-mcp | `set_agent_context` validation (kebab-case, length, leading digit), happy path, `session_id` format (`sess_` + 8 hex), `author_type` always `'agent'`, Gate 3 blocks write tools until context set |
 
 ---
 
