@@ -10,11 +10,13 @@ Not published to npm. Teams check out the repo from GitHub and deploy via Docker
 
 HTTP gateway sitting between the MCP server and persistence layers. Responsibilities:
 
-- **Auth:** GitHub OAuth → ES256 JWT (ECDSA P-256) + refresh tokens. JWKS at `/.well-known/jwks.json`.
-- **Identity:** Injects `group_id` from JWT into every Graphiti call so projects are isolated.
-- **Config:** S3-backed project config with DynamoDB read-through cache.
-- **Audit API:** `/pg/*` routes expose PostgreSQL operations to the MCP over HTTP.
-- **Rate limiting:** Per-IP, configurable via env.
+- **Auth:** GitHub OAuth → ES256 slim JWT `{ sub, is_admin, jti, iat, exp }` + refresh tokens. JWKS at `/.well-known/jwks.json`. PKCE OAuth 2.1 also supported (`routes/mcp-oauth.js`) for MCP clients.
+- **Identity:** Two-step `verify-jwt.js` middleware — JWT → `loadUserProfile(sub)` from Redis (`profile:{sub}`) → DDB on miss. Active project is set per-request via `X-Quorum-Project` header (not in JWT). `group_id` is injected into every Graphiti call from `req.user.project`.
+- **Config:** S3-backed project config with Redis read-through cache (`config:{group_id}`). DynamoDB holds the user→projects membership index (`quorum-user-projects`).
+- **Audit API:** `/pg/*` routes expose PostgreSQL operations to the MCP over HTTP. Dual-store pipeline writes to PostgreSQL (`knowledge_versions.summary` for durable content + SHA256 chain) and Graphiti (semantic graph).
+- **Governance:** `routes/config.js` (transfer ownership, update role), `routes/admin.js` (platform admin management), `routes/governance.js` (LLM conflict detection), `routes/user.js` (`/user/profile/:username`).
+- **Confidence endorsement:** `POST /api/bump/:topic/:key` — 7-day cooldown, role-weighted delta, capped at `starting_confidence`.
+- **Rate limiting:** Per-IP via `express-rate-limit`.
 
 Runs on port **3001** by default.
 
@@ -26,23 +28,29 @@ Runs on port **3001** by default.
 src/
   server.js               — Express app entry point
   routes/
-    auth.js               — GitHub OAuth, JWT issue/refresh/revoke
-    pg.js                 — All PostgreSQL REST routes (/pg/versions/*, /pg/audit/*, /pg/pending/*)
-    graphiti.js           — Proxy to Graphiti MCP with group_id injection
-    config.js             — GET/PUT project config
+    auth.js               — GitHub OAuth (browser + PAT), slim JWT issue/refresh
+    mcp-oauth.js          — PKCE OAuth 2.1 flow for MCP clients (RFC 8414 discovery)
+    oauth.js              — Shared OAuth callback + state helpers
+    pg.js                 — All PostgreSQL REST routes (/pg/versions/*, /pg/audit/*, /pg/pending/*, /pg/audit/lineage/:topic/:key)
+    graphiti.js           — JWT-gated proxy to Graphiti MCP with group_id injection
+    config.js             — GET/PUT project config + transfer-ownership + update-role
     schema.js             — GET /schema/config (public JSON Schema)
     jwks.js               — GET /.well-known/jwks.json
-    sync.js               — POST /sync/configs (S3→DDB sync, EventBridge-compatible)
-    bump.js               — PATCH /bump (confidence bump endpoint)
-    projects.js           — GET /auth/projects, POST /auth/switch
-    dashboard.js          — Dashboard BFF routes
-    oauth.js              — OAuth state helpers
+    sync.js               — POST /sync/configs (S3→DDB sync, EventBridge-compatible; dual auth)
+    bump.js               — POST /api/bump/:topic/:key (confidence endorsement, 7-day cooldown)
+    projects.js           — Project listing (legacy /auth/projects + /auth/switch return 410)
+    dashboard.js          — Dashboard BFF routes (/api/stats, /api/graph, /api/knowledge, /api/search, /api/pending)
+    user.js               — GET /user/profile/:username (Redis → DDB)
+    admin.js              — Platform admin management (/admin/config, /admin/users)
+    governance.js         — LLM conflict detection via OpenAI
   middleware/
-    verify-jwt.js         — ES256 JWT verification, attaches req.user
-    project.js            — Injects project scope from JWT
-    rate-limit.js         — Rate limiting middleware
+    verify-jwt.js         — Async two-step: ES256 verify → loadUserProfile(sub) → X-Quorum-Project header
+                            attaches req.user = { sub, is_admin, project, role, base_confidence, is_owner }
+    project.js            — Guards project-scoped routes (400 if req.user.project null)
+    rate-limit.js         — Per-IP rate limiting (express-rate-limit)
   shared/                 — Vendored copies of quorum-mcp shared modules (no npm dep)
     config/schema.js      — QuorumConfigSchema (zod)
+    config/migrations.js  — PG schema migrations (q_* id schema)
     graph/schema.js       — KnowledgeStatus enum
     graph/queries.js      — Shared SQL query functions (pass real pg.Pool)
     graph/client.js       — Graphiti client (searchNodes, etc.)
@@ -50,8 +58,10 @@ src/
     audit/secondary.js    — writeAuditEntry (pass real pg.Pool)
     governance/constitutional.js — Constitutional enforcement
   keys.js                 — ES256 key generation/loading
-  config-cache.js         — In-memory config cache
-  ddb.js                  — DynamoDB client (quorum-configs + quorum-user-projects tables)
+  redis.js                — Redis client (separate command + subscriber connections)
+  config-cache.js         — Redis config + profile + admin cache wrappers
+  ddb.js                  — DynamoDB client (quorum-user-projects table; config cache retired)
+  llm.js                  — OpenAI wrapper for governance LLM calls
   errors.js               — Shared error types
 ```
 
@@ -81,11 +91,12 @@ When either repo changes shared logic (queries, audit, constitutional rules), th
 | File | Purpose |
 |------|---------|
 | `config/schema.js` | QuorumConfigSchema (zod) |
+| `config/migrations.js` | PostgreSQL schema migrations — `q_*` id schema (`q_projects`, `q_keys`) |
 | `graph/schema.js` | KnowledgeStatus enum |
 | `graph/queries.js` | SQL query helpers — always pass a real `pg.Pool` |
-| `graph/client.js` | Graphiti HTTP client (`searchNodes`, etc.) |
+| `graph/client.js` | Graphiti HTTP client (`searchNodes`, etc.) — `BLOCKED_METHODS` enforces no hard delete |
 | `audit/chain.js` | SHA256 tamper-evident chain helpers |
-| `audit/secondary.js` | `writeAuditEntry` — always pass a real `pg.Pool` |
+| `audit/secondary.js` | `writeAuditEntry` / `updateEntry`-throw / `deleteEntry`-throw — append-only |
 | `governance/constitutional.js` | Constitutional enforcement (self-approval, reason checks) |
 
 ---
@@ -98,10 +109,15 @@ POSTGRES_HOST / POSTGRES_PORT / POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD
 GRAPHITI_URL=http://graphiti:8000
 FALKORDB_HOST=falkordb  FALKORDB_PORT=6379
 QUORUM_CONFIG_BUCKET=quorum-configs
-QUORUM_DDB_CONFIGS_TABLE=quorum-configs
 QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects
 QUORUM_SYNC_SECRET=<static-secret>        # EventBridge sync token (optional)
+REDIS_URL=redis://redis:6379               # Redis for config + profile + admin cache
+QUORUM_CONFIG_CACHE_TTL=300                # seconds
+QUORUM_PROFILE_CACHE_TTL=300               # seconds
+QUORUM_ADMIN_CACHE_TTL=300                 # seconds
+QUORUM_FIRST_ADMIN=<github-username>       # seeded into configs/.quorum on setup
 AWS_REGION / AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+OPENAI_API_KEY=sk-...                      # governance LLM
 ```
 
 For local dev, LocalStack provides S3 + DynamoDB at `http://localhost:4566`. Use `awslocal` CLI.

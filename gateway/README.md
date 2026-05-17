@@ -1,5 +1,7 @@
 # @as-quorum/gateway
 
+[![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql)](https://postgresql.org) [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io) [![FalkorDB](https://img.shields.io/badge/FalkorDB-graph-orange)](https://falkordb.com) [![JWT](https://img.shields.io/badge/JWT-ES256-000000?logo=jsonwebtokens)](https://jwt.io) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](openapi.yaml)
+
 **Quorum Gateway** — the Express service that fronts Graphiti and PostgreSQL for all Quorum clients (MCP server and Dashboard).
 
 Handles GitHub OAuth, issues ES256 slim JWTs, resolves per-request project context via `X-Quorum-Project` header, caches project configs and user profiles in Redis, and proxies authenticated traffic to Graphiti MCP.

@@ -147,12 +147,21 @@ GRAPHITI_URL=http://graphiti:8001
 FALKORDB_HOST=falkordb
 FALKORDB_PORT=6379
 QUORUM_CONFIG_BUCKET=quorum-configs
+QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects
+QUORUM_SYNC_SECRET=                         # EventBridge sync token (optional)
+QUORUM_FIRST_ADMIN=                         # GitHub username seeded into configs/.quorum
+
+# Redis (config + profile + admin cache, v0.3)
+REDIS_URL=redis://redis:6379
+QUORUM_CONFIG_CACHE_TTL=300
+QUORUM_PROFILE_CACHE_TTL=300
+QUORUM_ADMIN_CACHE_TTL=300
 
 # GitHub OAuth (for engineer authentication)
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
 
-# LocalStack / AWS S3
+# LocalStack / AWS S3 + DynamoDB
 AWS_ENDPOINT_URL=http://localstack:4566
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test

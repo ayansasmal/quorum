@@ -464,7 +464,9 @@ When Claude loads a version that was superseded since last session:
 
 ### Secondary Store — Version Tables
 
-The PostgreSQL secondary store gains two new append-only tables:
+> **v0.3 id schema.** All identifier columns use the `q_*` prefix scheme — `q_projects.q_project_id`, `q_keys.q_key_id`, etc. The legacy UUID-based tables (`projects`, `knowledge_keys`) have been retired. Migration is one-way; new installs receive the `q_*` schema from `gateway/src/shared/config/migrations.js`.
+
+The PostgreSQL secondary store gains two new append-only tables (legacy column names shown for clarity — production schema uses `q_*` id columns):
 
 ```sql
 -- Knowledge version snapshots (append-only)
