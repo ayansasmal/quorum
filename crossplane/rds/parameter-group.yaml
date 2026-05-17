@@ -1,0 +1,38 @@
+##
+## RDS Parameter Group — quorum-pg16
+##
+## PostgreSQL 16 parameter group with Quorum-specific tuning.
+## PRODUCTION: review max_connections relative to instance class.
+##
+
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ParameterGroup
+metadata:
+  name: quorum-pg16
+  annotations:
+    crossplane.io/external-name: quorum-pg16
+spec:
+  forProvider:
+    region: us-east-1
+    family: postgres16
+    description: Quorum PostgreSQL 16 parameter group
+    parameter:
+      # Log slow queries (>1s) for performance monitoring
+      - name: log_min_duration_statement
+        value: "1000"
+        applyMethod: immediate
+      # Connection pooling headroom — gateway pool max:20, keep headroom
+      - name: max_connections
+        value: "200"
+        applyMethod: pending-reboot
+      # Enable query statistics
+      - name: pg_stat_statements.track
+        value: all
+        applyMethod: immediate
+
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+
+  providerConfigRef:
+    name: aws-provider

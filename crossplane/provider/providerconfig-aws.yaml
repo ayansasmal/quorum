@@ -26,6 +26,9 @@ spec:
     services:
       - s3
       - sts
+      - dynamodb
+      - rds
+      - elasticache
 
   # LocalStack accepts any non-empty credentials — test/test is the convention.
   # PRODUCTION: credentials.source: IRSA

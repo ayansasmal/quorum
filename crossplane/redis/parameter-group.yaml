@@ -1,0 +1,32 @@
+##
+## ElastiCache Parameter Group — quorum-redis7
+##
+## Redis 7 parameter group with Quorum-specific settings.
+## PRODUCTION: review maxmemory-policy relative to cache usage patterns.
+##
+
+apiVersion: elasticache.aws.upbound.io/v1beta1
+kind: ParameterGroup
+metadata:
+  name: quorum-redis7
+  annotations:
+    crossplane.io/external-name: quorum-redis7
+spec:
+  forProvider:
+    region: us-east-1
+    family: redis7
+    description: Quorum Redis 7 parameter group
+
+    parameter:
+      # Evict least-recently-used keys when memory is full.
+      # Suitable for Quorum's config + profile cache workload.
+      # PRODUCTION: review; allkeys-lru is aggressive — volatile-lru if TTLs are set.
+      - name: maxmemory-policy
+        value: allkeys-lru
+
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+
+  providerConfigRef:
+    name: aws-provider

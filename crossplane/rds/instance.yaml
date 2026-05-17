@@ -1,0 +1,85 @@
+##
+## RDS DB Instance — quorum-postgres
+##
+## PostgreSQL 16 instance for the Quorum gateway audit pipeline and version store.
+## LocalStack: db.t3.micro is accepted; most RDS options are no-op in LocalStack.
+## PRODUCTION: upgrade instance class, enable Multi-AZ, enable deletion protection.
+##
+## Credentials are sourced from a Kubernetes Secret (quorum-db-creds in crossplane-system).
+## Create it before applying this manifest:
+##
+##   kubectl create secret generic quorum-db-creds \
+##     --namespace crossplane-system \
+##     --from-literal=password=<secure-password>
+##
+## PRODUCTION: use AWS Secrets Manager or an ESO SecretStore instead of a k8s secret.
+##
+
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: Instance
+metadata:
+  name: quorum-postgres
+  annotations:
+    crossplane.io/external-name: quorum-postgres
+spec:
+  forProvider:
+    region: us-east-1
+    engine: postgres
+    engineVersion: "16"
+    instanceClass: db.t3.micro
+
+    dbName: quorum
+    username: quorum
+
+    # Password sourced from a Kubernetes Secret — never inline credentials.
+    passwordSecretRef:
+      namespace: crossplane-system
+      name: quorum-db-creds
+      key: password
+
+    allocatedStorage: 20
+    storageType: gp3
+    # PRODUCTION: storageEncrypted: true + kmsKeyId: arn:aws:kms:...
+    storageEncrypted: false
+
+    dbSubnetGroupNameRef:
+      name: quorum-db-subnet-group
+
+    parameterGroupNameRef:
+      name: quorum-pg16
+
+    # PRODUCTION: set vpcSecurityGroupIds to restrict access to gateway pods only
+    # vpcSecurityGroupIds:
+    #   - sg-00000000000000001
+
+    # PRODUCTION: multiAz: true
+    multiAz: false
+
+    # PRODUCTION: deletionProtection: true
+    deletionProtection: false
+
+    # Automated backups: 7-day retention
+    # PRODUCTION: increase to 14-35 days
+    backupRetentionPeriod: 7
+    backupWindow: "03:00-04:00"
+    maintenanceWindow: "Mon:04:00-Mon:05:00"
+
+    # Allow minor version auto-upgrades
+    autoMinorVersionUpgrade: true
+
+    # PRODUCTION: set to false and use a blue/green deployment for upgrades
+    applyImmediately: true
+
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+      Component: gateway-database
+
+  providerConfigRef:
+    name: aws-provider
+
+  # Write connection details (host, port, username, password) to a Secret
+  # so the gateway Deployment can mount them via envFrom.
+  writeConnectionSecretToRef:
+    namespace: quorum
+    name: quorum-postgres-conn
