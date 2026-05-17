@@ -118,10 +118,10 @@ export function calculateAuthority(episode) {
   // Net endorsement score: approved + recalled signals expertise; superseded signals over-confidence.
   // Floored at 0 so a heavily superseded author doesn't get a negative contribution.
   const dtr = episode.domain_track_record ?? {}
-  const domainScore = Math.max(
-    0,
-    Math.log1p((dtr.approved_count ?? 0) + (dtr.recalled_count ?? 0) - (dtr.superseded_count ?? 0)) / 10,
-  )
+  // Clamp net count to ≥ -1 before log1p: log1p(x) is only real for x ≥ -1, and
+  // Math.max(0, NaN) propagates NaN rather than flooring it.
+  const netCount = Math.max(-1, (dtr.approved_count ?? 0) + (dtr.recalled_count ?? 0) - (dtr.superseded_count ?? 0))
+  const domainScore = Math.max(0, Math.log1p(netCount) / 10)
 
   return (
     confidence  * weights.confidence +

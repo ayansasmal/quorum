@@ -119,13 +119,14 @@ async function loadFromDB(pg) {
 function buildEnvFallback() {
   console.error('[Quorum:config] WARNING: No config source found — using env var defaults. No member registry.')
   return QuorumConfigSchema.parse({
-    project: process.env.QUORUM_PROJECT_ID ?? 'default',
-    group_id: process.env.QUORUM_GROUP_ID ?? 'default',
-    members: [],
-    roles: {},
-    domains: {},
+    project:  process.env.QUORUM_PROJECT_ID ?? 'default',
+    group_id: process.env.QUORUM_GROUP_ID  ?? 'default',
+    owner:    process.env.QUORUM_FIRST_ADMIN ?? 'anonymous',
+    members:  [],
+    roles:    {},
+    domains:  {},
     thresholds: {
-      conflict_threshold: parseFloat(process.env.QUORUM_CONFLICT_THRESHOLD ?? '0.85'),
+      conflict_threshold:  parseFloat(process.env.QUORUM_CONFLICT_THRESHOLD  ?? '0.85'),
       authority_threshold: parseFloat(process.env.QUORUM_AUTHORITY_THRESHOLD ?? '0.20'),
     },
   })
@@ -263,6 +264,7 @@ export async function getProjectConfig(projectId, pg) {
   return QuorumConfigSchema.parse({
     project:  row.name,
     group_id: row.id,
+    owner:    row.owner ?? 'anonymous',
     members:  (row.members ?? []).map((m) => ({
       name:            m.github_username ?? 'unknown',
       team:            m.team            ?? 'platform',

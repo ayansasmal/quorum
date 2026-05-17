@@ -246,4 +246,30 @@ describe('POST /bump/:topic/:key', () => {
     expect(status).toBe(404)
     expect(body.error).toBe('not_found')
   })
+
+  it('returns 404 when project is not registered (getProjectByGroupId returns null)', async () => {
+    mockProfileRole('engineer')
+    getProjectByGroupId.mockResolvedValue(null)
+
+    const tok = await makeToken('alice')
+    const { status } = await post('/bump/auth/jwt-rotation', {}, {
+      Authorization:      `Bearer ${tok}`,
+      'X-Quorum-Project': 'platform-team',
+    })
+
+    expect(status).toBe(404)
+  })
+
+  it('propagates unexpected errors as 500 via next(err)', async () => {
+    mockProfileRole('engineer')
+    getProjectByGroupId.mockRejectedValue(new Error('DB connection lost'))
+
+    const tok = await makeToken('alice')
+    const { status } = await post('/bump/auth/jwt-rotation', {}, {
+      Authorization:      `Bearer ${tok}`,
+      'X-Quorum-Project': 'platform-team',
+    })
+
+    expect(status).toBe(500)
+  })
 })

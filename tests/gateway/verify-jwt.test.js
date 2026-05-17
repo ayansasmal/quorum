@@ -203,4 +203,38 @@ describe('verifyJwt — v0.3 slim JWT + X-Quorum-Project header', () => {
     expect(rawPayload.team).toBeUndefined()
     expect(rawPayload.base_confidence).toBeUndefined()
   })
+
+  it('resolves project by q_project_id format (q_p\\d+) via group_id fallback', async () => {
+    // When X-Quorum-Project looks like "q_p123" the middleware must match by q_project_id
+    const profileWithQId = {
+      username: 'alice',
+      projects: [
+        {
+          group_id:        'my-project',
+          q_project_id:    'q_p123',
+          role:            'engineer',
+          base_confidence: 0.7,
+          is_owner:        false,
+        },
+      ],
+    }
+    loadUserProfile.mockResolvedValue(profileWithQId)
+    const token = await signToken({ sub: 'alice', is_admin: false })
+
+    const { status, body } = await getProbe({ token, project: 'q_p123' })
+
+    expect(status).toBe(200)
+    expect(body.role).toBe('engineer')
+  })
+
+  it('resolves group_id branch (non q_p\\d+ format) for normal project IDs', async () => {
+    loadUserProfile.mockResolvedValue(PROFILE)
+    const token = await signToken({ sub: 'alice', is_admin: false })
+
+    // Standard group_id — takes the else branch
+    const { status, body } = await getProbe({ token, project: 'my-project' })
+
+    expect(status).toBe(200)
+    expect(body.project).toBe('my-project')
+  })
 })

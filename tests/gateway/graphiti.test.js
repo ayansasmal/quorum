@@ -300,3 +300,34 @@ describe('POST /graphiti/*path — MCP session ID forwarding', () => {
     expect(status).toBe(421)
   })
 })
+
+describe('POST /graphiti/*path — missing X-Quorum-Project', () => {
+  it('returns 400 when X-Quorum-Project header is absent', async () => {
+    // Build a request manually without the X-Quorum-Project header
+    const body = JSON.stringify({ params: {} })
+    const { status, body: responseBody } = await new Promise((resolve, reject) => {
+      const headers = {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'Authorization':  `Bearer ${token}`,
+        // X-Quorum-Project intentionally omitted
+      }
+      const req = http.request(
+        { hostname: '127.0.0.1', port, path: '/graphiti/mcp', method: 'POST', headers },
+        (res) => {
+          let raw = ''
+          res.on('data', (c) => { raw += c })
+          res.on('end', () => {
+            try   { resolve({ status: res.statusCode, body: JSON.parse(raw) }) }
+            catch { resolve({ status: res.statusCode, body: raw }) }
+          })
+        },
+      )
+      req.on('error', reject)
+      req.write(body)
+      req.end()
+    })
+    expect(status).toBe(400)
+    expect(responseBody.error).toBe('X-Quorum-Project header required')
+  })
+})

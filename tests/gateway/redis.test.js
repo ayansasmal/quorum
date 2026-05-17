@@ -99,6 +99,24 @@ describe('gateway/redis — invalidation subscriber', () => {
     expect(sub.del).not.toHaveBeenCalled()
   })
 
+  it('logs to console.error when command client emits error', async () => {
+    const { getRedis } = await import('../../gateway/src/redis.js')
+    const cmd = getRedis()
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    cmd.__emit('error', new Error('command error'))
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('command error'))
+    spy.mockRestore()
+  })
+
+  it('logs to console.error when subscriber client emits error', async () => {
+    const { getSubscriber } = await import('../../gateway/src/redis.js')
+    const sub = getSubscriber()
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    sub.__emit('error', new Error('subscriber error'))
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('subscriber error'))
+    spy.mockRestore()
+  })
+
   it('catches del() rejection and logs a warning (no unhandled rejection)', async () => {
     const { getRedis, getSubscriber, startInvalidationSubscriber } = await import(
       '../../gateway/src/redis.js'
