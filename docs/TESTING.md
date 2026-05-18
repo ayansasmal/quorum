@@ -100,6 +100,8 @@ Added as Phase 1 pre-merge gates to define the expected v0.3 behaviour before im
 | `quorum-mcp/tests/gateway-client.test.js` | quorum-mcp | `_request()` sends `X-Quorum-Project` header when `ctx.projectId` set; omits header when null; all 12 tool handlers pass `projectId` to `_request()` |
 | `quorum-mcp/tests/tools/remember.test.js` (addition) | quorum-mcp | `insertVersion` receives `summary = content` — content survives FalkorDB wipes via PostgreSQL `summary` column |
 | `quorum-mcp/tests/tools/set-agent-context.test.js` | quorum-mcp | `set_agent_context` validation (kebab-case, length, leading digit), happy path, `session_id` format (`sess_` + 8 hex), `author_type` always `'agent'`, Gate 3 blocks write tools until context set |
+| `tests/gateway/validate.test.js` | engram | 45 tests covering `validateKnowledgeInput`: all field rules, boundary values (500 chars, 501 chars, HTML chars, empty tags array, 11 tags), reason min/max, confidence range |
+| `tests/gateway/dashboard-write.test.js` | engram | 20 tests covering `POST /api/knowledge`, `POST /api/knowledge/:topic/:key/promote`, `POST /api/knowledge/:topic/:key/supersede`: 403 (wrong role), 413 (body too large), 400 (validation errors), 404 (no draft/active), 409 (duplicate active), 201/200 (success paths), server-set fields (`author`, `author_type`, `triggered_by`) |
 
 ---
 

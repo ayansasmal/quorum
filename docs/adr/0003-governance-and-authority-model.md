@@ -106,6 +106,8 @@ When Graphiti is unavailable, conflict detection is deferred. The entry is store
 as DRAFT with `status = PENDING_CONFLICT_CHECK`. The `/pending` tool surfaces these
 for human review when the graph comes back online.
 
+**Direct ACTIVE write (v0.4):** `principal_architect` may create entries that go directly to ACTIVE status (bypassing DRAFT), and may promote existing DRAFTs or supersede existing ACTIVE entries — all from the dashboard UI. This privilege reflects the role's authority to make governed decisions without requiring a secondary reviewer. The audit trail and validation invariants still apply in full.
+
 ### Domain track record
 
 `author_domain_stats` tracks per-author, per-domain counters:

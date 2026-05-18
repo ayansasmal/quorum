@@ -608,6 +608,32 @@ After running all scenarios, confirm:
 
 ---
 
+## PE Knowledge Write Flows
+
+### Create new entry
+1. Log in as `principal_architect`
+2. Navigate to `/knowledge`
+3. Click "+ Add entry" — KnowledgeForm modal opens
+4. Fill all fields; submit → entry appears in list with ACTIVE status
+5. Try submitting with content > 500 chars → validation error shown inline
+6. Try submitting with HTML in content (`<b>test</b>`) → validation error shown
+
+### Promote DRAFT to Active
+1. Navigate to `/knowledge`, open the detail drawer on a DRAFT entry
+2. "Promote" button visible in header → click
+3. ConfirmDialog opens with note field → note must be ≥ 10 chars
+4. Confirm → entry status becomes ACTIVE; drawer header now shows "Edit" instead of "Promote"
+5. As non-PE user: verify "Promote" button is NOT visible
+
+### Edit (supersede) Active entry
+1. Click `⋯` on an ACTIVE row → "Edit" option appears
+2. KnowledgeForm opens pre-filled with existing values
+3. Modify content → submit → new version created; old version SUPERSEDED
+4. Version history in drawer shows two entries
+5. As non-PE user: verify `⋯` button is NOT visible
+
+---
+
 ## Filing Bugs
 
 For any failed check, capture:

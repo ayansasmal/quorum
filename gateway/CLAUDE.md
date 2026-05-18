@@ -41,6 +41,7 @@ src/
     bump.js               — POST /api/bump/:topic/:key (confidence endorsement, 7-day cooldown)
     projects.js           — Project listing (legacy /auth/projects + /auth/switch return 410)
     dashboard.js          — Dashboard BFF routes (/api/stats, /api/graph, /api/knowledge, /api/search, /api/pending)
+                            POST /api/knowledge (create ACTIVE, PE only), POST /api/knowledge/:topic/:key/promote (DRAFT→ACTIVE, PE only), POST /api/knowledge/:topic/:key/supersede (atomic supersede, PE only). All gated: role check → validateKnowledgeInput → audit chain. Rate-limited 10/min/IP, 4KB payload cap.
     user.js               — GET /user/profile/:username (Redis → DDB)
     admin.js              — Platform admin management (/admin/config, /admin/users)
     governance.js         — LLM conflict detection via OpenAI
@@ -99,6 +100,7 @@ When either repo changes shared logic (queries, audit, constitutional rules), th
 | `audit/chain.js` | SHA256 tamper-evident chain helpers |
 | `audit/secondary.js` | `writeAuditEntry` / `updateEntry`-throw / `deleteEntry`-throw — append-only |
 | `governance/constitutional.js` | Constitutional enforcement (self-approval, reason checks) |
+| `graph/validate.js` | `validateKnowledgeInput(fields, opts)` + `ValidationError` — shared validation for all knowledge write routes; vendored copy in quorum-mcp |
 
 ---
 

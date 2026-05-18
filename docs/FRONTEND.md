@@ -627,6 +627,8 @@ dashboard/
     │   │   ├── KnowledgeBrowser.jsx
     │   │   ├── KnowledgeRow.jsx
     │   │   ├── KnowledgeDetail.jsx
+    │   │   ├── KnowledgeForm.jsx        ← create/supersede form (PE only)
+    │   │   ├── ConfirmDialog.jsx        ← confirmation overlay with optional note (PE only)
     │   │   └── VersionTimeline.jsx
     │   │
     │   ├── audit/
@@ -663,6 +665,17 @@ dashboard/
         ├── Config.jsx
         └── Status.jsx
 ```
+
+---
+
+### Knowledge Write Components (PE only)
+
+| Component | Purpose |
+|-----------|---------|
+| `components/knowledge/KnowledgeForm.jsx` | Controlled form for create and supersede. Props: `mode` ('create'\|'supersede'), `initialValues`, `onSubmit`, `onCancel`, `isSubmitting`, `error`. Live char counter on content (500-char limit). Tags stored as array with chip display. |
+| `components/knowledge/ConfirmDialog.jsx` | Reusable confirmation overlay. Props: `open`, `title`, `body`, `confirmLabel`, `destructive`, `noteLabel`, `noteRequired`, `onConfirm(note)`, `onCancel`, `isSubmitting`, `error`. ESC closes, backdrop click cancels. |
+
+The `Knowledge.jsx` page exposes a "+ Add entry" button (PE only) and a `⋯` row action menu (PE only) with Edit/Promote options. `KnowledgeDetail.jsx` shows a Promote button (DRAFT entries, PE only) and an Edit button (ACTIVE entries, PE only).
 
 ---
 

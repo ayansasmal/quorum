@@ -51,7 +51,7 @@ graph TD
 - `X-Quorum-Project` header: per-request project context — identity (who you are) decoupled from project scope (what you access)
 - `GET /user/profile/:username`: profile endpoint (Redis → DDB) with role, projects, base_confidence
 - Governance ownership: `POST /config/transfer-ownership`, `POST /config/update-role`, `GET /admin/config`, `POST /admin/users`
-- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel
+- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Knowledge Write (PE: create / promote / supersede), Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel
 - Project selector: search + pagination (10/page), full light/dark theme, cancel-back-to-project support
 - `GET /schema/config`: public JSON Schema endpoint for editor validation and IDE autocomplete
 - DynamoDB layer: `quorum-user-projects` table (membership index with GSI) — config cache retired to Redis
@@ -69,6 +69,7 @@ graph TD
 - `POST /api/bump/:topic/:key` — confidence endorsement with 7-day cooldown, role-weighted delta, capped at `starting_confidence`
 - PostgreSQL ILIKE fallback in `GET /api/search` when Graphiti/FalkorDB returns empty results
 - Agent identity tracking: `knowledge_versions` carries `agent_id`, `session_id`, `author_type` columns — written by `set_agent_context` gate in the MCP; `author_type` always `'agent'` for MCP writes (foundation for future human dashboard writes)
+- Dashboard knowledge write: `principal_architect` users can create ACTIVE entries, promote DRAFTs, and supersede ACTIVE entries directly from the Knowledge browser and detail drawer. All writes go through `validateKnowledgeInput` + role gate + audit chain. `author_type: 'human'`, `triggered_by: 'dashboard'`.
 
 **Not yet built (v0.4+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 

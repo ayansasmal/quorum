@@ -79,3 +79,5 @@ SUPERSEDED in a single PostgreSQL transaction.
 - The `review()` tool must enforce that only DRAFT versions can be approved or rejected
 - Staleness detection in `review()` must warn when the ACTIVE version has advanced since
   the DRAFT was authored
+
+**Dashboard (v0.4):** `principal_architect` users can write directly from the dashboard UI. Create → ACTIVE (bypasses DRAFT); Promote DRAFT → ACTIVE; Supersede ACTIVE → ACTIVE + old SUPERSEDED. All three transitions enforce the same constitutional rules (`validateKnowledgeInput`, role gate, audit chain). `author_type: 'human'`, `triggered_by: 'dashboard'`.
