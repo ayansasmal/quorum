@@ -89,7 +89,9 @@ export default function KnowledgeForm({
   const [entityType, setEntityType] = useState(initialValues.entity_type ?? 'Decision')
   const [tags, setTags] = useState(Array.isArray(initialValues.tags) ? initialValues.tags : [])
   const [tagInput, setTagInput] = useState('')
-  const [confidence, setConfidence] = useState(initialValues.confidence ?? 0.85)
+  const [confidence, setConfidence] = useState(
+    Math.max(0.5, Math.min(1.0, initialValues?.confidence ?? 0.85))
+  )
   const [reason, setReason] = useState('')
 
   /** Per-field validation error messages. */
@@ -129,12 +131,13 @@ export default function KnowledgeForm({
   /**
    * Run all client-side validation rules and populate `fieldErrors`.
    *
-   * @returns {boolean} True when all fields are valid.
+   * @param {string[]} [overrideTags] - Pre-resolved tag array to validate instead of reading
+   *   stale `tags` state. Pass the value computed synchronously in `handleSubmit` to avoid
+   *   the async `setTags` race condition.
+   * @returns {Object} An object containing any validation error messages keyed by field name.
    */
-  const validate = useCallback(() => {
-    // Flush tag input before validating so partially-typed tags are captured.
-    const pendingTags = tagInput.trim() ? parseTags(tagInput) : []
-    const allTags = [...new Set([...tags, ...pendingTags])]
+  const validate = useCallback((overrideTags) => {
+    const effectiveTags = overrideTags ?? tags
 
     const errs = {}
 
@@ -164,10 +167,10 @@ export default function KnowledgeForm({
       errs.content = 'Content must be 500 characters or fewer.'
     }
 
-    const invalidTags = allTags.filter((t) => !isValidTag(t))
+    const invalidTags = effectiveTags.filter((t) => !isValidTag(t))
     if (invalidTags.length > 0) {
       errs.tags = `Invalid tags: ${invalidTags.join(', ')}. Only lowercase letters, digits, and hyphens are allowed.`
-    } else if (allTags.length > 10) {
+    } else if (effectiveTags.length > 10) {
       errs.tags = 'A maximum of 10 tags is allowed.'
     }
 
@@ -182,8 +185,8 @@ export default function KnowledgeForm({
     }
 
     setFieldErrors(errs)
-    return Object.keys(errs).length === 0
-  }, [isSupersede, topic, key, content, tags, tagInput, reason])
+    return errs
+  }, [isSupersede, topic, key, content, tags, reason])
 
   // -------------------------------------------------------------------------
   // Submit
@@ -197,15 +200,23 @@ export default function KnowledgeForm({
   const handleSubmit = async (e) => {
     e.preventDefault()
 
-    // Flush tag input before validation.
-    const pendingTags = tagInput.trim() ? parseTags(tagInput) : []
-    const allTags = [...new Set([...tags, ...pendingTags])].slice(0, 10)
-    if (pendingTags.length > 0) {
+    // Prevent Enter-key triggered double-submits when already in flight.
+    if (isSubmitting) return
+
+    // Compute the final resolved tag list synchronously before any state updates,
+    // so validate() receives the correct value rather than stale `tags` state.
+    const pendingTags = tagInput.trim()
+      ? [...new Set([...tags, ...tagInput.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)])]
+      : tags
+    const allTags = pendingTags.slice(0, 10)
+
+    if (allTags.length !== tags.length || tagInput.trim()) {
       setTags(allTags)
       setTagInput('')
     }
 
-    if (!validate()) return
+    const errs = validate(allTags)
+    if (Object.keys(errs).length) return
 
     /** @type {Object} fields - Validated payload passed to the onSubmit callback. */
     const fields = {
@@ -255,7 +266,7 @@ export default function KnowledgeForm({
           Topic
         </label>
         {isSupersede ? (
-          <p className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+          <p id="kf-topic" className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
             {initialValues.topic}
           </p>
         ) : (
@@ -284,7 +295,7 @@ export default function KnowledgeForm({
           Key
         </label>
         {isSupersede ? (
-          <p className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+          <p id="kf-key" className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
             {initialValues.key}
           </p>
         ) : (
@@ -326,7 +337,6 @@ export default function KnowledgeForm({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           rows={5}
-          maxLength={500}
           placeholder="Describe this knowledge entry…"
           aria-describedby={fieldErrors.content ? 'kf-content-error' : undefined}
           aria-invalid={!!fieldErrors.content}

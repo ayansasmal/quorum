@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
  * Reusable confirmation dialog for knowledge actions
@@ -21,7 +21,7 @@ export default function ConfirmDialog({
   open,
   title,
   body,
-  confirmLabel,
+  confirmLabel = 'Confirm',
   destructive = false,
   noteLabel,
   noteRequired = false,
@@ -33,6 +33,13 @@ export default function ConfirmDialog({
   const [note, setNote] = useState('')
   const dialogRef = useRef(null)
 
+  /**
+   * Keep a stable ref to onCancel so the ESC keydown handler never closes over a
+   * stale copy of the callback between renders.
+   */
+  const onCancelRef = useRef(onCancel)
+  useEffect(() => { onCancelRef.current = onCancel }, [onCancel])
+
   // Reset note when dialog opens
   useEffect(() => {
     if (open) {
@@ -40,40 +47,41 @@ export default function ConfirmDialog({
     }
   }, [open])
 
-  // Handle ESC key
+  // Handle ESC key — depends only on `open`; uses ref to avoid stale-closure risk.
   useEffect(() => {
-    const handleEscKey = (e) => {
-      if (e.key === 'Escape' && open) {
-        onCancel()
-      }
+    if (!open) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onCancelRef.current()
     }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [open])
 
-    if (open) {
-      document.addEventListener('keydown', handleEscKey)
+  // Move focus to the dialog container when it opens for proper keyboard/a11y flow.
+  useEffect(() => {
+    if (open && dialogRef.current) {
+      dialogRef.current.focus()
     }
-
-    return () => {
-      document.removeEventListener('keydown', handleEscKey)
-    }
-  }, [open, onCancel])
-
-  if (!open) {
-    return null
-  }
+  }, [open])
 
   // Confirm button is disabled if:
   // - isSubmitting
   // - noteRequired && note.length < 10
   const isConfirmDisabled = isSubmitting || (noteRequired && note.length < 10)
 
-  const handleBackdropClick = () => {
+  const handleBackdropClick = useCallback(() => {
+    if (isSubmitting) return
     onCancel()
-  }
+  }, [isSubmitting, onCancel])
 
   const handleConfirm = () => {
     if (!isConfirmDisabled) {
       onConfirm(noteRequired ? note : '')
     }
+  }
+
+  if (!open) {
+    return null
   }
 
   return (
@@ -83,7 +91,8 @@ export default function ConfirmDialog({
     >
       <div
         ref={dialogRef}
-        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xl w-full max-w-md p-6 space-y-4"
+        tabIndex={-1}
+        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-2xl w-full max-w-md p-6 space-y-4 focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Title */}
@@ -98,7 +107,10 @@ export default function ConfirmDialog({
 
         {/* Error Banner */}
         {error && (
-          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-xs text-red-700 dark:text-red-300">
+          <div
+            role="alert"
+            className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md px-3 py-2 text-xs text-red-700 dark:text-red-300"
+          >
             {error}
           </div>
         )}
@@ -118,8 +130,10 @@ export default function ConfirmDialog({
               disabled={isSubmitting}
             />
             {noteRequired && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {note.length}/10 characters required
+              <p className="text-xs">
+                <span className={note.length >= 10 ? 'text-gray-400' : 'text-amber-400'}>
+                  {note.length} / 10 chars minimum
+                </span>
               </p>
             )}
           </div>
