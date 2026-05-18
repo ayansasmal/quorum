@@ -608,6 +608,55 @@ After running all scenarios, confirm:
 
 ---
 
+## Knowledge Write Flows
+
+### Create new entry (all roles)
+1. Log in as any authenticated user; navigate to `/knowledge`
+2. Click "+ Add entry" — KnowledgeForm modal opens
+3. Fill all fields; submit
+   - As `principal_architect` → entry appears in list with **ACTIVE** status
+   - As any other role → entry goes to **DRAFT** (visible at `/pending`, not in the browse list)
+4. Try submitting with content > 500 chars → validation error shown inline
+5. Try submitting with HTML in content (`<b>test</b>`) → validation error shown
+
+### Non-PE creates DRAFT alongside existing ACTIVE
+1. As non-PE, find a topic:key that already has an ACTIVE entry in the Knowledge browser
+2. Click "+ Add entry" and submit with the same topic and key
+3. Expected: 201 Created → DRAFT entry is created; the existing ACTIVE entry is unchanged
+4. Navigate to `/pending` → the new DRAFT appears in the "Draft entries — awaiting review" section
+5. As PE: verify "Promote" button is visible next to the DRAFT row
+6. As PE: try the same create → expected 409 with `already_exists` (PE must use supersede)
+
+### DRAFT review queue on Pending page
+1. Navigate to `/pending` as PE
+2. "Draft entries — awaiting review" section appears above the conflict decisions section
+3. Each row shows domain, key, type, confidence, author, created date, and a Promote button
+4. Click "Promote" → ConfirmDialog with note field (≥ 10 chars required)
+5. Confirm → DRAFT promoted to ACTIVE; row disappears from DRAFT section; entry appears in Knowledge browser
+6. Navigate to `/pending` as non-PE → DRAFT section visible but **no Promote button** — row is informational only with "These entries are awaiting review by a principal architect." note
+
+### Confidence floor applied server-side (dashboard create)
+1. As a non-PE engineer (base_confidence 0.70), submit a new knowledge entry with `confidence: 0.40`
+2. After creation, open the entry detail → stored confidence should be **0.70** (floored to role minimum), not 0.40
+3. As `senior_engineer` (base_confidence 0.80), submit with `confidence: 0.50` → stored confidence should be **0.80**
+4. As `principal_architect` (base_confidence 0.90), submit with `confidence: 0.95` → stored as **0.95** (above floor, kept as-is)
+
+### Promote DRAFT to Active (from Knowledge browser)
+1. Navigate to `/knowledge`, open the detail drawer on a DRAFT entry
+2. "Promote" button visible in header → click
+3. ConfirmDialog opens with note field → note must be ≥ 10 chars
+4. Confirm → entry status becomes ACTIVE; drawer header now shows "Edit" instead of "Promote"
+5. As non-PE user: verify "Promote" button is NOT visible
+
+### Edit (supersede) Active entry
+1. Click `⋯` on an ACTIVE row → "Edit" option appears
+2. KnowledgeForm opens pre-filled with existing values
+3. Modify content → submit → new version created; old version SUPERSEDED
+4. Version history in drawer shows two entries
+5. As non-PE user: verify `⋯` button is NOT visible
+
+---
+
 ## Filing Bugs
 
 For any failed check, capture:

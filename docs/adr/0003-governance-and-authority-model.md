@@ -106,6 +106,8 @@ When Graphiti is unavailable, conflict detection is deferred. The entry is store
 as DRAFT with `status = PENDING_CONFLICT_CHECK`. The `/pending` tool surfaces these
 for human review when the graph comes back online.
 
+**Dashboard write (v0.4):** All authenticated users can create knowledge entries from the dashboard UI. Status is role-determined server-side: `principal_architect` → `ACTIVE` (bypasses DRAFT); all other roles → `DRAFT` (requires review). Non-PE users may create a DRAFT even when an ACTIVE version already exists for that key — the DRAFT is a proposal; the PE reviews it on the Pending page and promotes it if correct. PE attempting to create against an existing ACTIVE receives a 409 and must use supersede. Confidence submitted below the author's `base_confidence` floor is silently raised to the floor (`Math.max(submitted, base_confidence)`) — authority floors apply equally in the dashboard and MCP write paths. `principal_architect` may additionally promote DRAFTs to ACTIVE and supersede ACTIVE entries — privileges that reflect their authority to make governed decisions without a secondary reviewer. The audit trail and validation invariants apply in full for all roles. DRAFT entries are surfaced on the Pending page (`GET /api/drafts`) as a review queue separate from the conflict decision queue.
+
 ### Domain track record
 
 `author_domain_stats` tracks per-author, per-domain counters:

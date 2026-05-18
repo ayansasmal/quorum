@@ -41,6 +41,13 @@ graph TD
 
 The MCP server (`@as-quorum/mcp`, maintained in the `quorum-mcp` repo) hosts the governance layer and audit pipeline. It **always** communicates with the Gateway over HTTP — there is no direct database path. The Gateway enforces JWT auth, injects `group_id` from the JWT claim into every Graphiti call, and exposes the `/pg/*` REST surface for both the MCP server and the Dashboard.
 
+**Key flows:**
+- Engineers connect the MCP server via `claude mcp add quorum`; it always talks to the gateway over HTTP (default: `http://localhost:3001`)
+- The dashboard connects through the gateway (GitHub OAuth → ES256 JWT → BFF API)
+- The MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
+- Identity chain: JWT (gateway) → `QUORUM_AUTHOR` env → git email → anonymous; dashboard uses GitHub OAuth
+- **Dashboard write:** `POST /api/knowledge` open to all roles (PE → `ACTIVE`, others → `DRAFT`). Non-PE may create a DRAFT even when an ACTIVE version exists (the DRAFT is a proposal). PE creating against an existing ACTIVE gets a 409 — use supersede. Confidence is floored at `req.user.base_confidence` (role default 0.7/0.8/0.9). `promote` and `supersede` are PE-only. All three: `validateKnowledgeInput` → PostgreSQL (`insertVersion` or `atomicSupersede`) → Graphiti (via `/graphiti/*`) → `writeAuditEntry`. `author_type: 'human'`, `triggered_by: 'dashboard'`. Rate-limited 10/min/IP, 4 KB payload cap. `GET /api/drafts` surfaces all DRAFT entries for the Pending page review queue.
+
 ---
 
 ## Quorum Gateway
@@ -201,7 +208,7 @@ The Dashboard (`dashboard/`) is a React + Vite SPA on port 3002, served via Ngin
 | Stats | Aggregate counts (active / superseded / draft / deprecated), confidence histogram, recent activity feed |
 | Knowledge Graph | Cytoscape.js-rendered force-directed graph. Click a node for full detail, supersession chain, and outbound edges |
 | Pending Decisions | DRAFT entries awaiting review and unresolved CONFLICTS_WITH edges. Approve / reject / request_changes inline |
-| Knowledge Browser | Paginated list filterable by topic, domain, status, author. Click through to version history |
+| Knowledge Browser | Paginated list filterable by topic, domain, status, author. Click through to version history. Knowledge Write (PE: create / promote / supersede) |
 | Audit Timeline | Append-only feed from PostgreSQL — every `remember`, `forget`, `review`, and conflict resolution with SHA256 chain link |
 | Config Editor | Edit `quorum.config.json` for the current project. Validates against schema before PUT |
 | System Status | Live `/health` probe — PostgreSQL, Graphiti, FalkorDB, S3 component breakdown |

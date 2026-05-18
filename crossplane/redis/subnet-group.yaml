@@ -1,0 +1,28 @@
+##
+## ElastiCache Subnet Group — quorum-redis-subnet-group
+##
+## LocalStack: subnet IDs are placeholders — LocalStack does not validate them.
+## PRODUCTION: replace with real subnet IDs from your VPC (private subnets only).
+## Reuse the same private subnets used by RDS for consistency.
+##
+
+apiVersion: elasticache.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: quorum-redis-subnet-group
+  annotations:
+    crossplane.io/external-name: quorum-redis-subnet-group
+spec:
+  forProvider:
+    region: us-east-1
+    description: Quorum Redis subnet group
+    # PRODUCTION: replace with actual private subnet IDs from your VPC.
+    subnetIds:
+      - subnet-00000000000000001
+      - subnet-00000000000000002
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+
+  providerConfigRef:
+    name: aws-provider

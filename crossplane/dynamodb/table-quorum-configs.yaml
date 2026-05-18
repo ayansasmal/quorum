@@ -1,0 +1,51 @@
+##
+## DynamoDB Table — quorum-configs
+##
+## Stores project config records synced from S3. PK: group_id (STRING).
+## Managed by Crossplane provider-aws-dynamodb.
+##
+## PRODUCTION: change billingMode to PAY_PER_REQUEST or PROVISIONED with
+## autoscaling depending on traffic profile.
+##
+
+apiVersion: dynamodb.aws.upbound.io/v1beta1
+kind: Table
+metadata:
+  name: quorum-configs
+  annotations:
+    crossplane.io/external-name: quorum-configs
+spec:
+  forProvider:
+    region: us-east-1
+
+    # Primary key
+    attribute:
+      - name: group_id
+        type: S
+
+    hashKey: group_id
+
+    # LocalStack-friendly billing mode — no capacity planning needed in dev.
+    # PRODUCTION: switch to PAY_PER_REQUEST or set readCapacity/writeCapacity.
+    billingMode: PAY_PER_REQUEST
+
+    tags:
+      - key: ManagedBy
+        value: crossplane
+      - key: Application
+        value: quorum
+      - key: Table
+        value: quorum-configs
+
+    # Point-in-time recovery — enable in production.
+    # PRODUCTION: pointInTimeRecovery: enabled: true
+    pointInTimeRecovery:
+      - enabled: false
+
+    # Server-side encryption with AWS-owned key.
+    # PRODUCTION: use customerManagedKeyEnabled: true with a KMS key ARN.
+    serverSideEncryption:
+      - enabled: false
+
+  providerConfigRef:
+    name: aws-provider

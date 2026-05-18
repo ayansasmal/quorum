@@ -116,3 +116,5 @@ an orphan that breaks compliance queries.
   before the database write, not after
 - The `BLOCKED_METHODS` list must be updated whenever Graphiti adds new
   destructive endpoints
+- `author_type` is always server-set: `'agent'` for MCP writes, `'human'` for dashboard writes — never from the request body
+- Input validation (`validateKnowledgeInput`) is enforced at all five write routes (shared module, vendored to both gateway and quorum-mcp). Rules: content ≤ 500 chars + no HTML; topic/key kebab-case slugs; tags ≤ 10 items; confidence 0.5–1.0; reason ≥ 10 chars for promote/supersede.

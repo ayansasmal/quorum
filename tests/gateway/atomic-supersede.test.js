@@ -164,7 +164,7 @@ const validNewVersion = {
   supersedes_reason: 'switching to JWT',
   tags: ['auth'],
   entity_type: 'Decision',
-  content: 'Use JWT',
+  summary: 'Use JWT',
 }
 
 describe('POST /pg/versions/supersede — atomic supersession', () => {

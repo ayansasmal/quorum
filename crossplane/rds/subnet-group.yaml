@@ -1,0 +1,27 @@
+##
+## RDS DB Subnet Group — quorum-db-subnet-group
+##
+## LocalStack: subnet IDs are placeholders — LocalStack does not validate them.
+## PRODUCTION: replace with real subnet IDs from your VPC (private subnets only).
+##
+
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: quorum-db-subnet-group
+  annotations:
+    crossplane.io/external-name: quorum-db-subnet-group
+spec:
+  forProvider:
+    region: us-east-1
+    description: Quorum PostgreSQL subnet group
+    # PRODUCTION: replace with actual private subnet IDs from your VPC.
+    subnetIds:
+      - subnet-00000000000000001
+      - subnet-00000000000000002
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+
+  providerConfigRef:
+    name: aws-provider

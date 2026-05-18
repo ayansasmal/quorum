@@ -59,6 +59,7 @@ import {
   getCurrentVersion,
   getDraftVersions,
   getVersionsByStatus,
+  insertVersion,
 } from '../../gateway/src/shared/graph/queries.js'
 import { getAllEntries } from '../../gateway/src/shared/audit/secondary.js'
 import pgRoutes from '../../gateway/src/routes/pg.js'
@@ -221,5 +222,125 @@ describe('GET /pg/audit/lineage/:topic/:key', () => {
 
     expect(status).toBe(200)
     expect(body).toEqual({ entries: [] })
+  })
+})
+
+// ── POST helper ───────────────────────────────────────────────────────────────
+
+function post(path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let raw = ''
+        res.on('data', (c) => { raw += c })
+        res.on('end', () => {
+          try { resolve({ status: res.statusCode, body: JSON.parse(raw) }) }
+          catch { resolve({ status: res.statusCode, body: raw }) }
+        })
+      },
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+// ── POST /pg/versions — validation ───────────────────────────────────────────
+
+describe('POST /pg/versions — validation', () => {
+  const validBody = {
+    topic: 'infra',
+    key: 'retry-policy',
+    summary: 'Use exponential backoff for all retries.',
+    entity_type: 'Pattern',
+  }
+
+  it('accepts a valid body and returns 201', async () => {
+    insertVersion.mockResolvedValue({ version_id: 'q_k1_v1', version: 1 })
+
+    const { status } = await post('/pg/versions', validBody)
+
+    expect(status).toBe(201)
+  })
+
+  it('rejects summary containing <script> with 400 validation_error on content field', async () => {
+    const { status, body } = await post('/pg/versions', {
+      ...validBody,
+      summary: '<script>alert(1)</script>',
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('validation_error')
+    expect(body.field).toBe('content')
+  })
+
+  it('rejects topic with spaces/uppercase with 400 validation_error on topic field', async () => {
+    const { status, body } = await post('/pg/versions', {
+      ...validBody,
+      topic: 'My Topic',
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('validation_error')
+    expect(body.field).toBe('topic')
+  })
+
+  it('rejects unknown entity_type with 400 validation_error on entity_type field', async () => {
+    const { status, body } = await post('/pg/versions', {
+      ...validBody,
+      entity_type: 'Unknown',
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('validation_error')
+    expect(body.field).toBe('entity_type')
+  })
+})
+
+// ── POST /pg/versions/supersede — validation ─────────────────────────────────
+
+describe('POST /pg/versions/supersede — validation', () => {
+  const validBody = {
+    new_version: {
+      topic: 'infra',
+      key: 'retry-policy',
+      summary: 'Use exponential backoff for all retries.',
+      entity_type: 'Pattern',
+      version: 2,
+      author: 'alice',
+    },
+    supersedes_version: 1,
+    supersedes_reason: 'Updated to reflect new backoff strategy after load testing.',
+  }
+
+  it('rejects missing supersedes_reason with 400 validation_error on reason field', async () => {
+    const { supersedes_reason: _omit, ...bodyWithoutReason } = validBody
+    const { status, body } = await post('/pg/versions/supersede', bodyWithoutReason)
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('validation_error')
+    expect(body.field).toBe('reason')
+  })
+
+  it('rejects supersedes_reason shorter than 10 chars with 400 validation_error on reason field', async () => {
+    const { status, body } = await post('/pg/versions/supersede', {
+      ...validBody,
+      supersedes_reason: 'Too short',
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('validation_error')
+    expect(body.field).toBe('reason')
   })
 })
