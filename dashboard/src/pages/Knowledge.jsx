@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, MoreHorizontal } from 'lucide-react'
 import { useKnowledge, useSearch, useKnowledgeWrite } from '../api/knowledge.js'
 import { useStats } from '../api/stats.js'
@@ -22,17 +23,21 @@ export default function Knowledge() {
   const [promoteTarget, setPromoteTarget] = useState(null)
   const [openMenu,      setOpenMenu]      = useState(null)
   const [writeSuccess,  setWriteSuccess]  = useState(null)
+  const successTimerRef = useRef(null)
 
   const { currentProjectData } = useAuth()
   const isPE = currentProjectData?.role === 'principal_architect'
 
   const write = useKnowledgeWrite(() => {
+    clearTimeout(successTimerRef.current)
     setWriteSuccess('Saved.')
-    setTimeout(() => setWriteSuccess(null), 3000)
+    successTimerRef.current = setTimeout(() => setWriteSuccess(null), 3000)
   })
 
+  useEffect(() => () => clearTimeout(successTimerRef.current), [])
+
   useEffect(() => {
-    if (openMenu === null) return
+    if (!openMenu) return
     const close = () => setOpenMenu(null)
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
@@ -118,9 +123,9 @@ export default function Knowledge() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200/50 dark:divide-gray-800/50">
-              {items.map((row, i) => (
+              {items.map((row) => (
                 <tr
-                  key={i}
+                  key={`${row.topic}:${row.key}`}
                   onClick={() => setSelected(row)}
                   className="hover:bg-gray-100/40 dark:hover:bg-gray-800/40 cursor-pointer"
                 >
@@ -137,33 +142,22 @@ export default function Knowledge() {
                   <td className="px-4 py-2.5 text-xs text-gray-500">{row.author}</td>
                   <td className="px-4 py-2.5 text-xs text-gray-600">{fmtDate(row.updated_at)}</td>
                   {isPE && (
-                    <td className="px-2 py-2.5 relative w-8" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-2 py-2.5 w-8" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === i ? null : i) }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (openMenu?.row === row) {
+                            setOpenMenu(null)
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setOpenMenu({ row, top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                          }
+                        }}
                         className="rounded p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                         aria-label="Row actions"
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
-                      {openMenu === i && (
-                        <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1">
-                          {(row.status ?? 'ACTIVE') === 'DRAFT' ? (
-                            <button
-                              onClick={() => { setOpenMenu(null); setPromoteTarget(row) }}
-                              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                            >
-                              Promote to Active
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => { setOpenMenu(null); setEditTarget(row) }}
-                              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                      )}
                     </td>
                   )}
                 </tr>
@@ -197,6 +191,32 @@ export default function Knowledge() {
         </div>
       )}
 
+      {/* Row action menu (portal — avoids overflow-hidden clip) */}
+      {openMenu && createPortal(
+        <div
+          className="fixed z-50 min-w-[160px] rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1"
+          style={{ top: openMenu.top, right: openMenu.right }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(openMenu.row.status ?? 'ACTIVE') === 'DRAFT' ? (
+            <button
+              onClick={() => { setOpenMenu(null); setPromoteTarget(openMenu.row) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              Promote to Active
+            </button>
+          ) : (
+            <button
+              onClick={() => { setOpenMenu(null); setEditTarget(openMenu.row) }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              Edit
+            </button>
+          )}
+        </div>,
+        document.body
+      )}
+
       {/* Detail panel */}
       {selected && <KnowledgeDetail row={selected} onClose={() => setSelected(null)} />}
 
@@ -208,9 +228,10 @@ export default function Knowledge() {
               mode="create"
               onSubmit={async (fields) => {
                 await write.create.mutateAsync(fields)
+                write.create.reset()
                 setShowCreateForm(false)
               }}
-              onCancel={() => setShowCreateForm(false)}
+              onCancel={() => { write.create.reset(); setShowCreateForm(false) }}
               isSubmitting={write.create.isPending}
               error={write.create.error?.message ?? null}
             />
@@ -238,9 +259,10 @@ export default function Knowledge() {
                   key:   editTarget.key,
                   ...fields,
                 })
+                write.supersede.reset()
                 setEditTarget(null)
               }}
-              onCancel={() => setEditTarget(null)}
+              onCancel={() => { write.supersede.reset(); setEditTarget(null) }}
               isSubmitting={write.supersede.isPending}
               error={write.supersede.error?.message ?? null}
             />
@@ -263,9 +285,10 @@ export default function Knowledge() {
               key:   promoteTarget.key,
               note,
             })
+            write.promote.reset()
             setPromoteTarget(null)
           }}
-          onCancel={() => setPromoteTarget(null)}
+          onCancel={() => { write.promote.reset(); setPromoteTarget(null) }}
           isSubmitting={write.promote.isPending}
           error={write.promote.error?.message ?? null}
         />
