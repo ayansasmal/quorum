@@ -1,0 +1,66 @@
+{{- if .Values.recheckJob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "quorum.fullname" . }}-recheck-conflicts
+  labels:
+    {{- include "quorum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: recheck-job
+spec:
+  # Every 5 minutes — processes up to BATCH_SIZE (50) deferred conflict checks per run
+  schedule: {{ .Values.recheckJob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "quorum.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: recheck-job
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: recheck-conflicts
+              image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+              imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+              command: ["node", "scripts/recheck-conflicts.js"]
+              env:
+                - name: POSTGRES_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: host
+                - name: POSTGRES_PORT
+                  value: "5432"
+                - name: POSTGRES_DB
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: database
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: username
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: password
+                - name: GRAPHITI_URL
+                  value: {{ .Values.graphiti.url | quote }}
+                {{- if .Values.recheckJob.batchSize }}
+                - name: RECHECK_BATCH_SIZE
+                  value: {{ .Values.recheckJob.batchSize | quote }}
+                {{- end }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+{{- end }}

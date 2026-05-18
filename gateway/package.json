@@ -1,0 +1,26 @@
+{
+  "name": "@as-quorum/gateway",
+  "version": "0.2.0",
+  "description": "Quorum Gateway — JWT auth, GitHub OAuth, multi-project config proxy",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1040.0",
+    "@aws-sdk/client-s3": "3.1032.0",
+    "@aws-sdk/util-dynamodb": "^3.996.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.10.1",
+    "jose": "5.10.0",
+    "pg": "8.20.0",
+    "uuid": "^14.0.0",
+    "zod": "4.3.6"
+  }
+}

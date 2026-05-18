@@ -1,0 +1,63 @@
+{{- if .Values.decayJob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "quorum.fullname" . }}-decay-confidence
+  labels:
+    {{- include "quorum.labels" . | nindent 4 }}
+    app.kubernetes.io/component: decay-job
+spec:
+  schedule: {{ .Values.decayJob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "quorum.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: decay-job
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: decay-confidence
+              image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+              imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+              command: ["node", "scripts/decay-confidence.js"]
+              env:
+                - name: POSTGRES_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: host
+                - name: POSTGRES_PORT
+                  value: "5432"
+                - name: POSTGRES_DB
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: database
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: username
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "quorum.fullname" . }}-postgresql-secret
+                      key: password
+                {{- if .Values.decayJob.projectId }}
+                - name: QUORUM_PROJECT_ID
+                  value: {{ .Values.decayJob.projectId | quote }}
+                {{- end }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+{{- end }}

@@ -124,6 +124,22 @@ app.kubernetes.io/component: graphiti
 app.kubernetes.io/component: graphiti
 {{- end }}
 
+{{/* ── Dashboard helpers ──────────────────────────────────────── */}}
+
+{{- define "quorum.dashboard.fullname" -}}
+{{- printf "%s-dashboard" (include "quorum.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "quorum.dashboard.labels" -}}
+{{ include "quorum.labels" . }}
+app.kubernetes.io/component: dashboard
+{{- end }}
+
+{{- define "quorum.dashboard.selectorLabels" -}}
+{{ include "quorum.selectorLabels" . }}
+app.kubernetes.io/component: dashboard
+{{- end }}
+
 {{/* Graphiti OpenAI secret name */}}
 {{- define "quorum.graphiti.openaiSecretName" -}}
 {{- if .Values.graphiti.openaiSecret.existingSecret }}

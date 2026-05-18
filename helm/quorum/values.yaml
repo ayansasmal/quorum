@@ -5,6 +5,59 @@ global:
   imageRegistry: ""
   imagePullSecrets: []
 
+# ── Confidence decay CronJob (GAP-04) ─────────────────────────────────────────
+decayJob:
+  enabled: true
+  schedule: "0 2 * * 0"   # Sunday 2am UTC — weekly
+  projectId: ""            # leave empty to use QUORUM_PROJECT_ID from env; set to scope per-project
+
+# ── Audit log archival CronJob (GAP-05) ───────────────────────────────────────
+archiveJob:
+  enabled: true
+  schedule: "0 3 1 * *"      # 1st of month, 3am UTC
+  s3Bucket: ""                # set to enable S3 upload; empty = dry-run mode
+  awsRegion: "ap-southeast-2"
+  afterDays: "90"             # archive entries older than N days
+
+# ── Deferred conflict re-check CronJob (GAP-03) ───────────────────────────────
+recheckJob:
+  enabled: true
+  schedule: "*/5 * * * *"   # every 5 minutes — re-check PENDING_CONFLICT_CHECK rows
+  batchSize: "50"           # max rows processed per run
+
+# ── Dashboard ──────────────────────────────────────────────────────────────────
+# React/nginx SPA. Nginx proxies /api + /auth to the Gateway service at runtime.
+# Build locally: docker build -t quorum-dashboard:0.2.0 ./dashboard
+dashboard:
+  enabled: true
+  image:
+    repository: quorum-dashboard
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+    nodePort: null   # set when type=NodePort (local dev)
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    host: quorum-dashboard.company.internal
+    tls:
+      enabled: true
+      secretName: quorum-dashboard-tls
+  podAnnotations: {}
+  tolerations: []
+  affinity: {}
+
 # ── Quorum Gateway ──────────────────────────────────────────────────────────────
 # Central microservice: holds DB credentials, S3 access, JWT signing keys.
 # Engineers only need QUORUM_GATEWAY_URL + GitHub token.
@@ -118,6 +171,10 @@ postgresql:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # GAP-11: native PostgreSQL TLS — set enabled: true for production
+  tls:
+    enabled: false            # set true in production
+    certSecretName: ""        # cert-manager Certificate secret name (required when enabled)
 
 # ── Graphiti sidecar ───────────────────────────────────────────────────────────
 graphiti:
@@ -143,3 +200,7 @@ graphiti:
     limits:
       cpu: 2000m
       memory: 2Gi
+  # GAP-11: NetworkPolicy restricting Graphiti ingress to the gateway pod only.
+  # Sufficient threat model for same-namespace services without a full service mesh.
+  networkPolicy:
+    enabled: false            # set true in production

@@ -10,9 +10,8 @@ spec:
     rule:
       - applyServerSideEncryptionByDefault:
           - sseAlgorithm: AES256
-        # Production upgrade: switch to aws:kms and reference a KMS key.
-        # The Terraform setup in terraform/main.tf already creates the KMS key
-        # and outputs its ARN as kms_key_arn — use that here.
+        # Production upgrade: switch to aws:kms.
+        # Create a KMS key via Crossplane (provider-aws Key resource) and set:
         #   sseAlgorithm: aws:kms
         #   kmsMasterKeyId: arn:aws:kms:ap-southeast-2:ACCOUNT_ID:key/KEY_ID
         bucketKeyEnabled: true

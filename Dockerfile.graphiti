@@ -21,10 +21,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends git curl && \
 
 WORKDIR /app
 
-# Sparse-clone only the mcp_server directory to keep the image small
-RUN git clone --depth 1 --filter=blob:none --sparse \
+# Pinned Graphiti commit SHA — update this when taking upstream changes.
+# To upgrade: check https://github.com/getzep/graphiti/commits/main,
+# pick a commit, test locally, then update GRAPHITI_SHA here.
+ARG GRAPHITI_SHA=c427615044678f4bde026745d8d28a16504868c5
+
+# Sparse-clone only the mcp_server directory to keep the image small,
+# then checkout the pinned SHA so builds are reproducible.
+RUN git clone --filter=blob:none --sparse \
       https://github.com/getzep/graphiti.git /tmp/graphiti && \
     cd /tmp/graphiti && \
+    git checkout "${GRAPHITI_SHA}" && \
     git sparse-checkout set mcp_server && \
     mv mcp_server /app/ && \
     rm -rf /tmp/graphiti
@@ -34,6 +41,14 @@ WORKDIR /app/mcp_server
 # Install from the mcp_server pyproject.toml with FalkorDB backend support
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir ".[falkordb]"
+
+# Patch: FastMCP defaults host='127.0.0.1' which auto-enables TransportSecurityMiddleware
+# with allowed_hosts=["127.0.0.1:*","localhost:*"]. Docker inter-container calls arrive
+# with the service hostname (e.g. graphiti:8000) which that allowlist rejects with 421.
+# Passing host='0.0.0.0' at construction time bypasses the auto-enable entirely.
+# The post-init mcp.settings.host = '0.0.0.0' assignment in main.py is still present
+# but doesn't update the already-constructed middleware — hence the constructor patch.
+RUN python3 -c "import pathlib; f=pathlib.Path('src/graphiti_mcp_server.py'); s=f.read_text(); s=s.replace('    instructions=GRAPHITI_MCP_INSTRUCTIONS,\n)', \"    instructions=GRAPHITI_MCP_INSTRUCTIONS,\n    host='0.0.0.0',\n)\"); f.write_text(s); print('patched FastMCP host=0.0.0.0')"
 
 EXPOSE 8000
 

@@ -1,0 +1,71 @@
+##
+## ElastiCache Replication Group — quorum-redis
+##
+## Redis 7 single-node cluster for Quorum gateway config, profile, and admin caches.
+## LocalStack: most ElastiCache options are no-op; encryption and auth are ignored.
+## PRODUCTION: enable encryption, auth token, multi-AZ, and automatic failover.
+##
+## Connection details (primary_endpoint_address, port) are written to a Secret
+## so the gateway Deployment can mount them via envFrom.
+##
+
+apiVersion: elasticache.aws.upbound.io/v1beta1
+kind: ReplicationGroup
+metadata:
+  name: quorum-redis
+  annotations:
+    crossplane.io/external-name: quorum-redis
+spec:
+  forProvider:
+    region: us-east-1
+    description: Quorum Redis replication group — gateway config + profile cache
+
+    engine: redis
+    # PRODUCTION: pin to a specific patch version, e.g. "7.0.15"
+    engineVersion: "7.0"
+    nodeType: cache.t3.micro
+
+    # Single-node for dev/LocalStack — no replica, no failover.
+    # PRODUCTION: numCacheClusters: 2, automaticFailoverEnabled: true, multiAzEnabled: true
+    numCacheClusters: 1
+    automaticFailoverEnabled: false
+    multiAzEnabled: false
+
+    port: 6379
+
+    subnetGroupNameRef:
+      name: quorum-redis-subnet-group
+
+    parameterGroupNameRef:
+      name: quorum-redis7
+
+    # PRODUCTION: atRestEncryptionEnabled: true
+    atRestEncryptionEnabled: false
+    # PRODUCTION: transitEncryptionEnabled: true + authToken: <secret>
+    transitEncryptionEnabled: false
+
+    # Automated snapshots — disabled for dev.
+    # PRODUCTION: snapshotRetentionLimit: 7, snapshotWindow: "03:00-04:00"
+    snapshotRetentionLimit: 0
+
+    maintenanceWindow: "mon:05:00-mon:06:00"
+
+    # Allow minor version upgrades automatically.
+    autoMinorVersionUpgrade: true
+
+    # PRODUCTION: set logDeliveryConfigurations for slow-log + engine-log to CloudWatch
+    # logDeliveryConfigurations: [...]
+
+    tags:
+      ManagedBy: crossplane
+      Application: quorum
+      Component: gateway-cache
+
+  providerConfigRef:
+    name: aws-provider
+
+  # Write primary endpoint + port to a Secret.
+  # Gateway mounts this via REDIS_URL (assembled from endpoint + port in gateway code).
+  writeConnectionSecretToRef:
+    namespace: quorum
+    name: quorum-redis-conn

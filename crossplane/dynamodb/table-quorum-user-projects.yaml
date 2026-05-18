@@ -1,0 +1,54 @@
+##
+## DynamoDB Table — quorum-user-projects
+##
+## Membership index: maps GitHub usernames → projects + roles.
+## PK: github_username (STRING), SK: project_id (STRING).
+## GSI: ProjectMembersIndex — PK: project_id, SK: github_username.
+## Managed by Crossplane provider-aws-dynamodb.
+##
+
+apiVersion: dynamodb.aws.upbound.io/v1beta1
+kind: Table
+metadata:
+  name: quorum-user-projects
+  annotations:
+    crossplane.io/external-name: quorum-user-projects
+spec:
+  forProvider:
+    region: us-east-1
+
+    # Composite key: username → project
+    attribute:
+      - name: github_username
+        type: S
+      - name: project_id
+        type: S
+
+    hashKey: github_username
+    rangeKey: project_id
+
+    billingMode: PAY_PER_REQUEST
+
+    # GSI: look up all members of a project
+    globalSecondaryIndex:
+      - name: ProjectMembersIndex
+        hashKey: project_id
+        rangeKey: github_username
+        projectionType: ALL
+
+    tags:
+      - key: ManagedBy
+        value: crossplane
+      - key: Application
+        value: quorum
+      - key: Table
+        value: quorum-user-projects
+
+    pointInTimeRecovery:
+      - enabled: false
+
+    serverSideEncryption:
+      - enabled: false
+
+  providerConfigRef:
+    name: aws-provider

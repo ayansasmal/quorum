@@ -5,15 +5,17 @@
 # Never expose raw credentials to engineer machines — only the gateway URL.
 
 # ── Builder stage ──────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+COPY gateway/package.json ./gateway/
+COPY dashboard/package.json ./dashboard/
+RUN npm ci --omit=dev --workspaces --include-workspace-root
 
 # ── Runtime stage ──────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 RUN apk add --no-cache curl
 
@@ -21,11 +23,11 @@ WORKDIR /app
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
-COPY src/ ./src/
+COPY gateway/ ./gateway/
 
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl -f http://localhost:3001/health || exit 1
 
-CMD ["node", "src/gateway/server.js"]
+CMD ["node", "gateway/src/server.js"]

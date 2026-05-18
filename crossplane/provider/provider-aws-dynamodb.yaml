@@ -1,0 +1,10 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-dynamodb
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-dynamodb:v1
+  controllerConfigRef:
+    name: localstack-config
+  # PRODUCTION: swap controllerConfigRef for runtimeConfigRef with IRSA annotation.
+  # See provider-aws-s3.yaml for the IRSA ControllerConfig template.

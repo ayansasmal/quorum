@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "http://localhost:3001/schema/config",
+  "title": "Quorum Project Config",
+  "description": "Configuration file for a Quorum project. Upload via POST /config/upload or name it <group_id>.quorum.json.",
+  "type": "object",
+  "required": ["owner", "group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GitHub username of the project owner. The owner can transfer ownership and update member roles."
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Canonical identifier for this project. Lowercase letters, numbers, and hyphens only. Used as S3 key, DynamoDB primary key, JWT project claim, and Graphiti namespace."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name shown in the dashboard project picker. Optional — falls back to group_id if not provided."
+    },
+    "members": {
+      "type": "array",
+      "default": [],
+      "description": "Team roster with role and identity signals.",
+      "items": {
+        "type": "object",
+        "required": ["name", "team", "role"],
+        "additionalProperties": false,
+        "properties": {
+          "name":            { "type": "string", "minLength": 1 },
+          "team":            { "type": "string", "minLength": 1 },
+          "role":            { "type": "string", "minLength": 1, "description": "One of: principal_architect, senior_engineer, engineer, junior" },
+          "github_username": { "type": "string", "description": "GitHub username for identity verification." },
+          "git_email":       { "type": "string", "format": "email", "description": "Git committer email — fallback identity signal." }
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "default": {},
+      "description": "Role definitions — sets the base_confidence floor for each role.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["base_confidence"],
+        "additionalProperties": false,
+        "properties": {
+          "base_confidence": {
+            "type": "number", "minimum": 0, "maximum": 1,
+            "description": "Confidence floor (0–1). Author-provided confidence below this value is raised to the floor."
+          }
+        }
+      }
+    },
+    "domains": {
+      "type": "object",
+      "default": {},
+      "description": "Per-domain governance overrides (e.g. auth, payments, infra).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "conflict_threshold": {
+            "type": "number", "minimum": 0, "maximum": 1,
+            "description": "Semantic similarity threshold to trigger conflict detection in this domain. Overrides the global thresholds.conflict_threshold."
+          },
+          "required_reviewer_teams": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Teams whose members are permitted to review knowledge in this domain. Empty array = any team member may review."
+          }
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "default": {},
+      "description": "Global conflict and authority thresholds. Domain-level overrides take precedence.",
+      "additionalProperties": false,
+      "properties": {
+        "conflict_threshold": {
+          "type": "number", "minimum": 0, "maximum": 1, "default": 0.85,
+          "description": "Cosine similarity threshold to trigger conflict detection."
+        },
+        "authority_threshold": {
+          "type": "number", "minimum": 0, "maximum": 1, "default": 0.20,
+          "description": "Minimum authority delta for auto-supersede without conflict."
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "description": "Webhook notification config — Quorum POSTs here when a conflict enters the human review queue.",
+      "additionalProperties": false,
+      "properties": {
+        "webhook_url": {
+          "type": "string", "format": "uri",
+          "description": "HTTP(S) URL to POST when a conflict.pending_review event fires."
+        },
+        "dashboard_url": {
+          "type": "string", "format": "uri",
+          "description": "QUORUM_DASHBOARD_URL override — used to build the dashboard deep-link in the webhook payload."
+        }
+      }
+    },
+    "guest_access": {
+      "type": "boolean",
+      "default": false,
+      "description": "Allow any GitHub-authenticated user to read this project's knowledge as a guest. Guests are read-only; all writes are forced to DRAFT."
+    }
+  }
+}

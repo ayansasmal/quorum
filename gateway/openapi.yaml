@@ -1,0 +1,2181 @@
+openapi: 3.1.0
+info:
+  title: Quorum Gateway API
+  version: 0.3.0
+  description: |
+    Quorum Gateway — governed engineering memory for Claude Code and AI agents.
+
+    All protected endpoints require an ES256 JWT in the `Authorization: Bearer <token>` header.
+    Tokens are issued after completing GitHub OAuth at `GET /auth/github`.
+
+    **Project scoping:** Every authenticated request has its `project_id` injected from the JWT
+    claim. Engineers cannot read or write data belonging to other projects.
+
+    **Base URL (local dev):** `http://localhost:3001`
+  contact:
+    name: Quorum
+    url: https://github.com/your-org/quorum
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: http://localhost:3001
+    description: Local development (Docker Compose)
+  - url: https://quorum.your-org.com
+    description: Enterprise self-hosted instance
+
+security:
+  - BearerAuth: []
+
+components:
+  parameters:
+    XQuorumProject:
+      name: X-Quorum-Project
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Active project scope as a `group_id` slug (e.g. `platform-team`) or `q_p{n}`
+        surrogate key (e.g. `q_p1`). Required on all project-scoped routes; optional
+        on routes that operate across all projects the caller belongs to (e.g.
+        `GET /user/profile/:username`). Decouples identity (JWT `sub`) from project
+        context so the same token works across multiple projects.
+
+    XQuorumProjectRequired:
+      name: X-Quorum-Project
+      in: header
+      required: true
+      schema: { type: string }
+      description: |
+        Active project scope as a `group_id` slug (e.g. `platform-team`) or `q_p{n}`
+        surrogate key (e.g. `q_p1`). Required — all mutations are project-scoped.
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: ES256-signed JWT issued by this gateway after GitHub OAuth.
+
+  schemas:
+    # ── Knowledge version ─────────────────────────────────────────────────────
+    KnowledgeVersion:
+      type: object
+      description: A single version record in the knowledge store.
+      properties:
+        id:               { type: integer }
+        topic:            { type: string }
+        key:              { type: string }
+        version:          { type: integer }
+        status:
+          type: string
+          enum: [DRAFT, ACTIVE, SUPERSEDED, DEPRECATED, REJECTED]
+        content_hash:     { type: string }
+        author:           { type: string }
+        author_role:      { type: string }
+        confidence:       { type: number, minimum: 0, maximum: 1 }
+        starting_confidence: { type: number, minimum: 0, maximum: 1 }
+        created_at:       { type: string, format: date-time }
+        created_by_audit: { type: string, description: Audit entry ID that created this version }
+        triggered_by:     { type: string, description: Tool or event that triggered this write }
+        conflict_id:      { type: string, nullable: true }
+        graphiti_episode_id: { type: string, nullable: true }
+        supersedes_version: { type: integer, nullable: true }
+        supersedes_reason: { type: string, nullable: true }
+        superseded_by_version: { type: integer, nullable: true }
+        superseded_by_author:  { type: string, nullable: true }
+        superseded_at:         { type: string, format: date-time, nullable: true }
+        tags:             { type: array, items: { type: string } }
+        project_id:       { type: string }
+        entity_type:      { type: string }
+        summary:          { type: string }
+
+    # ── Audit entry ───────────────────────────────────────────────────────────
+    AuditEntry:
+      type: object
+      description: A tamper-evident audit log entry with SHA256 chain linkage.
+      properties:
+        entry_id:       { type: string, format: uuid }
+        operation:      { type: string }
+        tool:           { type: string }
+        timestamp:      { type: string, format: date-time }
+        author:         { type: string }
+        author_role:    { type: string }
+        session_id:     { type: string, nullable: true }
+        content_hash:   { type: string, nullable: true }
+        governance_json: { type: object }
+        outcome_json:    { type: object }
+        version_impact:
+          type: object
+          description: >
+            Versions affected by this audit event. Items in versions_created and
+            versions_superseded are objects (written by the MCP audit pipeline via
+            buildAuditVersionImpact) or strings in "topic:key:version" form
+            (written by the dashboard review flow). Consumers must handle both shapes.
+          properties:
+            versions_created:
+              type: array
+              items:
+                oneOf:
+                  - type: string
+                    description: "topic:key:version string (dashboard review flow)"
+                  - type: object
+                    description: Version record object (MCP audit pipeline)
+                    properties:
+                      version:      { type: integer }
+                      status:       { type: string }
+                      content_hash: { type: string, nullable: true }
+                      triggered_by: { type: string, nullable: true }
+            versions_superseded:
+              type: array
+              items:
+                oneOf:
+                  - type: string
+                  - type: object
+                    properties:
+                      version:       { type: integer }
+                      status_before: { type: string }
+        entry_hash:      { type: string, description: SHA256 of this entry's canonical JSON }
+        previous_hash:   { type: string, nullable: true }
+        chain_position:  { type: integer }
+        project_id:      { type: string }
+
+    # ── Pending decision ──────────────────────────────────────────────────────
+    PendingDecision:
+      type: object
+      description: A conflict queued for human review.
+      properties:
+        conflict_id:          { type: string }
+        decision_type:        { type: string, enum: [conflict] }
+        conflict_topic:       { type: string }
+        conflict_key:         { type: string }
+        status:               { type: string, enum: [pending, resolved, stale] }
+        active_version_at_creation: { type: integer, nullable: true }
+        existing_content:     { type: string, nullable: true }
+        incoming_content:     { type: string }
+        conflict_reason:      { type: string }
+        enrichment:           { type: string, description: JSON-stringified enrichment object }
+        more_pending_same_key: { type: integer }
+        project_id:           { type: string }
+        created_at:           { type: string, format: date-time }
+        updated_at:           { type: string, format: date-time }
+        resolution:           { type: string, nullable: true }
+        resolution_note:      { type: string, nullable: true }
+        resolved_by:          { type: string, nullable: true }
+        resolved_at:          { type: string, format: date-time, nullable: true }
+        stale_warning:        { type: string, nullable: true }
+        current_active_version: { type: integer, nullable: true }
+        split_existing_key:   { type: string, nullable: true }
+        split_incoming_key:   { type: string, nullable: true }
+        merged_content:       { type: string, nullable: true }
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    TokenResponse:
+      type: object
+      properties:
+        token:         { type: string, description: ES256-signed JWT }
+        refresh_token: { type: string, description: Opaque refresh token (store securely) }
+        expires_in:    { type: integer, description: JWT lifetime in seconds }
+
+    UserInfo:
+      type: object
+      properties:
+        sub:     { type: string, description: GitHub username }
+        project: { type: string }
+        role:    { type: string }
+        team:    { type: string }
+        method:  { type: string }
+        base_confidence: { type: number }
+
+    # ── Error ─────────────────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        error:   { type: string }
+        message: { type: string }
+
+    # ── MCP OAuth 2.1 ─────────────────────────────────────────────────────────
+    OAuthMetadata:
+      type: object
+      description: RFC8414 Authorization Server Metadata
+      properties:
+        issuer:                                { type: string }
+        authorization_endpoint:                { type: string }
+        token_endpoint:                        { type: string }
+        registration_endpoint:                 { type: string }
+        response_types_supported:              { type: array, items: { type: string } }
+        grant_types_supported:                 { type: array, items: { type: string } }
+        code_challenge_methods_supported:      { type: array, items: { type: string } }
+        token_endpoint_auth_methods_supported: { type: array, items: { type: string } }
+
+    OAuthClientRegistration:
+      type: object
+      description: RFC7591 dynamic client registration response
+      properties:
+        client_id:                  { type: string }
+        redirect_uris:              { type: array, items: { type: string } }
+        grant_types:                { type: array, items: { type: string } }
+        response_types:             { type: array, items: { type: string } }
+        token_endpoint_auth_method: { type: string }
+
+    OAuthTokenResponse:
+      type: object
+      description: OAuth 2.1 token endpoint response
+      properties:
+        access_token: { type: string, description: ES256-signed JWT for MCP client auth }
+        token_type:   { type: string, enum: [bearer] }
+        expires_in:   { type: integer, description: Token lifetime in seconds }
+
+paths:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Health
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      summary: Gateway health check
+      operationId: getHealth
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: Gateway and all dependencies are healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [healthy, degraded] }
+                  postgres: { type: string }
+                  graphiti: { type: string }
+                  timestamp: { type: string, format: date-time }
+        '503':
+          description: One or more dependencies are unavailable
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # MCP OAuth 2.1 Authorization Server (BL-12)
+  # Implements MCP spec 2025-03-26 Third-Party Authorization flow.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /.well-known/oauth-authorization-server:
+    get:
+      summary: RFC8414 Authorization Server Metadata
+      operationId: getOAuthMetadata
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        MCP clients use this endpoint to discover the gateway's OAuth endpoints.
+        No authentication required.
+      responses:
+        '200':
+          description: Authorization server metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthMetadata' }
+
+  /oauth/register:
+    post:
+      summary: RFC7591 Dynamic Client Registration
+      operationId: registerOAuthClient
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        MCP clients register themselves before starting the authorization flow.
+        Returns a `client_id` that must be presented in subsequent OAuth requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redirect_uris]
+              properties:
+                redirect_uris:
+                  type: array
+                  items: { type: string, format: uri }
+                  description: URIs the gateway is allowed to redirect to after authorization
+      responses:
+        '201':
+          description: Client registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthClientRegistration' }
+        '400':
+          description: Invalid client metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/authorize:
+    get:
+      summary: Start PKCE Authorization Flow
+      operationId: startOAuthAuthorize
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        Initiates the PKCE S256 authorization flow. The gateway validates the request
+        and redirects the user to GitHub for identity verification. Only `S256` is
+        accepted for `code_challenge_method`.
+      parameters:
+        - name: response_type
+          in: query
+          required: true
+          schema: { type: string, enum: [code] }
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+          description: CSRF token — must be validated by the client on callback
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string }
+          description: base64url(SHA256(code_verifier))
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string, enum: [S256] }
+        - name: project_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional Quorum project ID — enriches the issued JWT with role/team claims
+      responses:
+        '302':
+          description: Redirect to GitHub OAuth
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: GITHUB_CLIENT_ID not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/callback:
+    get:
+      summary: GitHub OAuth Callback
+      operationId: oauthMcpCallback
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        GitHub redirects here after the user authorizes. The gateway exchanges the GitHub
+        code for the user's login, enriches with project config claims, issues a single-use
+        60-second auth code, and redirects back to the MCP client's `redirect_uri`.
+
+        The GitHub access token is used only to fetch the user's login and is never stored.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: error
+          in: query
+          required: false
+          schema: { type: string }
+          description: Set by GitHub if the user denied authorization
+      responses:
+        '302':
+          description: Redirect to MCP client redirect_uri with `code` and `state`
+        '400':
+          description: Invalid or expired state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '502':
+          description: GitHub identity exchange failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /oauth/token:
+    post:
+      summary: Exchange Auth Code for JWT
+      operationId: exchangeOAuthToken
+      security: []
+      tags: [MCP OAuth]
+      description: |
+        Exchanges a single-use authorization code and PKCE verifier for a Gateway-MCP JWT.
+        Accepts `application/x-www-form-urlencoded` (standard OAuth 2.1) and `application/json`.
+
+        The returned JWT carries: `sub` (GitHub login), `project`, `role`, `team`,
+        `base_confidence`, `method: "oauth2_pkce"`, `mcp_client_id`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, code, client_id, redirect_uri, code_verifier]
+              properties:
+                grant_type:    { type: string, enum: [authorization_code] }
+                code:          { type: string }
+                client_id:     { type: string }
+                redirect_uri:  { type: string, format: uri }
+                code_verifier: { type: string, description: Raw PKCE verifier (before hashing) }
+          application/json:
+            schema:
+              type: object
+              required: [grant_type, code, client_id, redirect_uri, code_verifier]
+              properties:
+                grant_type:    { type: string, enum: [authorization_code] }
+                code:          { type: string }
+                client_id:     { type: string }
+                redirect_uri:  { type: string, format: uri }
+                code_verifier: { type: string }
+      responses:
+        '200':
+          description: JWT issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthTokenResponse' }
+        '400':
+          description: Invalid grant, expired code, or PKCE mismatch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Auth / OAuth
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /auth/github:
+    get:
+      summary: Start GitHub OAuth flow
+      operationId: startOAuth
+      security: []
+      tags: [Auth]
+      description: Redirects the user to GitHub's OAuth authorization page.
+      responses:
+        '302':
+          description: Redirect to GitHub OAuth
+
+  /auth/token:
+    post:
+      summary: Exchange GitHub OAuth code for JWT (MCP / programmatic flow)
+      operationId: exchangeToken
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: GitHub OAuth code }
+      responses:
+        '200':
+          description: JWT and refresh token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400':
+          description: Missing or invalid code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/refresh:
+    post:
+      summary: Refresh JWT using a refresh token
+      operationId: refreshToken
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: New JWT issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Refresh token invalid or expired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/projects:
+    post:
+      summary: Register a new project (principal_architect only)
+      operationId: createProject
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id:  { type: string }
+                project_name: { type: string }
+      responses:
+        '201':
+          description: Project created
+        '403':
+          description: Insufficient role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    get:
+      summary: "DEPRECATED — use GET /user/profile/{sub} instead"
+      operationId: listProjects
+      deprecated: true
+      tags: [Auth]
+      description: |
+        **Deprecated in v0.3 (returns 410 Gone).** Use `GET /user/profile/{sub}` instead.
+        The profile endpoint returns the same project list with role, base_confidence, and is_owner fields.
+      responses:
+        '410':
+          description: Gone — endpoint retired in v0.3
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/switch:
+    post:
+      summary: "DEPRECATED — set X-Quorum-Project header instead"
+      operationId: switchProject
+      deprecated: true
+      tags: [Auth]
+      description: |
+        **Deprecated in v0.3 (returns 410 Gone).** Set the `X-Quorum-Project: <group_id>` header
+        on every request instead. The verify-jwt middleware resolves role and ownership per-request
+        from the Redis profile cache.
+      responses:
+        '410':
+          description: Gone — endpoint retired in v0.3
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # JWKS
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /.well-known/jwks.json:
+    get:
+      summary: JWKS endpoint — public keys for JWT verification
+      operationId: getJwks
+      security: []
+      tags: [Auth]
+      responses:
+        '200':
+          description: JSON Web Key Set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items: { type: object }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Schema (public)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /schema/config:
+    get:
+      summary: JSON Schema for Quorum project config files
+      operationId: getConfigSchema
+      security: []
+      tags: [Config]
+      description: |
+        Returns the JSON Schema for `.quorum.json` config files.
+        Used by the dashboard config editor for validation and IDE autocomplete.
+      responses:
+        '200':
+          description: JSON Schema object
+          content:
+            application/json:
+              schema: { type: object }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Project config
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /config/{projectId}:
+    get:
+      summary: Get project config
+      operationId: getProjectConfig
+      tags: [Config]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Project config object
+          content:
+            application/json:
+              schema: { type: object }
+        '404':
+          description: Config not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/{projectId}/invalidate:
+    post:
+      summary: Invalidate the config cache for a project
+      operationId: invalidateProjectConfig
+      tags: [Config]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Cache invalidated
+
+  /config/upload:
+    post:
+      summary: Onboard a new project — upload config to S3 and sync to DDB
+      operationId: uploadConfig
+      security: []
+      tags: [Config]
+      description: |
+        One-time onboarding operation. Validates the config, uploads it to S3 as
+        `<group_id>.quorum.json`, and syncs to DynamoDB. Idempotent-fail: returns
+        409 if the project already exists in S3.
+
+        Auth: `X-Quorum-Sync-Token` header OR a `principal_architect` JWT.
+        No standard Bearer JWT required for first-time onboarding (bootstrap problem).
+      parameters:
+        - name: X-Quorum-Sync-Token
+          in: header
+          required: false
+          schema: { type: string }
+          description: Sync token (QUORUM_SYNC_SECRET) — alternative to principal_architect JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuorumConfig' }
+      responses:
+        '201':
+          description: Project onboarded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project_id: { type: string }
+                  message:    { type: string }
+        '207':
+          description: Config uploaded to S3 but DDB sync failed — call POST /sync/configs to retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '400':
+          description: Config validation failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Missing auth — requires X-Quorum-Sync-Token or principal_architect JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Project already onboarded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/validate:
+    post:
+      summary: Validate a config object against the JSON Schema
+      operationId: validateConfig
+      security: []
+      tags: [Config]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:  { type: boolean }
+                  errors: { type: array, items: { type: object } }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # v0.3 — Governance endpoints
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /user/profile/{username}:
+    get:
+      summary: Get user profile — projects, roles, and ownership flags
+      operationId: getUserProfile
+      tags: [User]
+      description: |
+        v0.3 replacement for JWT role claims and `GET /auth/projects`.
+        Returns all projects the user is a member of with their current role,
+        base_confidence, is_owner, and team fields sourced from the Redis profile cache.
+
+        Access rules:
+        - Self: always allowed
+        - Platform admin: any user
+        - Others: requester must share at least one project with the target user
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+          description: GitHub username of the target user
+        - $ref: '#/components/parameters/XQuorumProject'
+      responses:
+        '200':
+          description: User profile with project memberships
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  github_username: { type: string }
+                  is_admin:        { type: boolean }
+                  projects:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group_id:        { type: string }
+                        role:            { type: string }
+                        base_confidence: { type: number }
+                        is_owner:        { type: boolean }
+                        team:            { type: string }
+        '403':
+          description: Forbidden — no shared project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/transfer-ownership:
+    post:
+      summary: Transfer project ownership to another member
+      operationId: transferOwnership
+      tags: [Config]
+      description: |
+        Transfers the `owner` field in the project config to a new member.
+        Actor must be the current owner, or a platform admin (admin cannot transfer to themselves).
+        The action is audited and profile caches for both actors are invalidated immediately.
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, reason]
+              properties:
+                to:     { type: string, description: GitHub username of the new owner }
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Ownership transferred
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:      { type: boolean }
+                  project: { type: string }
+                  from:    { type: string }
+                  to:      { type: string }
+        '400':
+          description: Validation error (not a member, short reason, missing params)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not the owner or admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /config/update-role:
+    post:
+      summary: Update a project member's role
+      operationId: updateMemberRole
+      tags: [Config]
+      description: |
+        Updates a member's role in the S3 project config and DDB membership record.
+        Actor must be the project owner or a platform admin.
+        The affected user's profile cache is invalidated immediately.
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [github_username, role, reason]
+              properties:
+                github_username: { type: string }
+                role:            { type: string, description: Must be a valid role in the project config }
+                reason:          { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:              { type: boolean }
+                  project:         { type: string }
+                  github_username: { type: string }
+                  role:            { type: string }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not owner or admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/config:
+    get:
+      summary: Get platform admin list
+      operationId: getAdminConfig
+      tags: [Admin]
+      description: Returns the `configs/.quorum` admin config. Platform admin only.
+      responses:
+        '200':
+          description: Platform admin configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  admins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        github_username: { type: string }
+                        added_at:        { type: string, format: date-time }
+                        added_by:        { type: string }
+                  version:    { type: integer }
+                  updated_at: { type: string, format: date-time }
+        '403':
+          description: Not a platform admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /admin/users:
+    post:
+      summary: Add or remove a platform admin
+      operationId: manageAdminUsers
+      tags: [Admin]
+      description: |
+        Adds or removes a GitHub user from the platform admin list in `configs/.quorum`.
+        Platform admin only. Cannot remove the last admin. Audited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, github_username, reason]
+              properties:
+                action:          { type: string, enum: [add, remove] }
+                github_username: { type: string }
+                reason:          { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: Admin list updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  action: { type: string }
+                  github_username: { type: string }
+        '400':
+          description: Validation error or last admin removal attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Not a platform admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Graphiti proxy
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /graphiti/{path}:
+    post:
+      summary: Proxy to Graphiti MCP (group_id injected from JWT)
+      operationId: graphitiProxy
+      tags: [Graphiti]
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Graphiti response
+          content:
+            application/json:
+              schema: { type: object }
+        '401':
+          description: Invalid or missing JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Knowledge versions — /pg/versions
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /pg/versions/{topic}/{key}:
+    get:
+      summary: Get current ACTIVE version for topic:key
+      operationId: getCurrentVersion
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current active version, or null if none exists
+          content:
+            application/json:
+              schema:
+                nullable: true
+                oneOf:
+                  - { $ref: '#/components/schemas/KnowledgeVersion' }
+                  - { type: 'null' }
+
+  /pg/versions/{topic}/{key}/history:
+    get:
+      summary: Get all versions for topic:key (newest first)
+      operationId: getVersionHistory
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of version records
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KnowledgeVersion' }
+
+  /pg/versions/{topic}/{key}/at:
+    get:
+      summary: Get version that was ACTIVE at a given date
+      operationId: getVersionAtDate
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          description: ISO 8601 date-time; returns the version active at that moment
+      responses:
+        '200':
+          description: Version active at the given date, or null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                oneOf:
+                  - { $ref: '#/components/schemas/KnowledgeVersion' }
+                  - { type: 'null' }
+
+  /pg/versions/{topic}/{key}/next-number:
+    get:
+      summary: Get next version number for topic:key
+      operationId: getNextVersionNumber
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Next version number (1 if no versions exist yet)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next_version: { type: integer }
+
+  /pg/versions/{topic}/{key}/{version}:
+    get:
+      summary: Get a specific version by number
+      operationId: getSpecificVersion
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: The requested version record, or null
+          content:
+            application/json:
+              schema:
+                nullable: true
+                oneOf:
+                  - { $ref: '#/components/schemas/KnowledgeVersion' }
+                  - { type: 'null' }
+
+    patch:
+      summary: Transition a version's status
+      operationId: transitionVersionStatus
+      tags: [Versions]
+      description: |
+        Legal transitions: DRAFT→ACTIVE, DRAFT→REJECTED, ACTIVE→SUPERSEDED, ACTIVE→DEPRECATED.
+        This is the only permitted UPDATE on the knowledge_versions table.
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newStatus]
+              properties:
+                newStatus:
+                  type: string
+                  enum: [ACTIVE, REJECTED, SUPERSEDED, DEPRECATED]
+                forwardLink:
+                  type: object
+                  nullable: true
+                  properties:
+                    supersededByVersion: { type: integer }
+                    supersededByAuthor:  { type: string }
+      responses:
+        '200':
+          description: Updated version record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeVersion' }
+        '400':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /pg/versions:
+    post:
+      summary: Insert a new version record (append-only)
+      operationId: insertVersion
+      tags: [Versions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KnowledgeVersion' }
+      responses:
+        '201':
+          description: Inserted version record with all fields populated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeVersion' }
+
+  /pg/versions/by-tag/{tag}:
+    get:
+      summary: Get all ACTIVE versions containing a tag
+      operationId: getVersionsByTag
+      tags: [Versions]
+      parameters:
+        - name: tag
+          in: path
+          required: true
+          schema: { type: string }
+          description: Tag to match (case-insensitive, trimmed)
+      responses:
+        '200':
+          description: Array of matching ACTIVE version records
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KnowledgeVersion' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Version ↔ Audit links — /pg/audit-links
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /pg/audit-links:
+    post:
+      summary: Insert a version ↔ audit cross-reference link
+      operationId: insertVersionAuditLink
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [auditEntryId, topic, key, version, linkType]
+              properties:
+                auditEntryId: { type: string, format: uuid }
+                topic:        { type: string }
+                key:          { type: string }
+                version:      { type: integer }
+                linkType:
+                  type: string
+                  enum: [created, superseded]
+      responses:
+        '201':
+          description: Link created
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Audit log — /pg/audit
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /pg/audit:
+    post:
+      summary: Write an audit log entry (append-only, SHA256 chain)
+      operationId: writeAuditEntry
+      tags: [Audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuditEntry' }
+      responses:
+        '201':
+          description: Stored audit entry with chain fields populated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEntry' }
+
+    get:
+      summary: List audit entries (filterable)
+      operationId: getAllAuditEntries
+      tags: [Audit]
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+          description: Filter entries from this timestamp
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+          description: Filter entries to this timestamp
+        - name: tool
+          in: query
+          schema: { type: string }
+          description: Filter by tool name
+      responses:
+        '200':
+          description: Audit entries wrapped in an object (not a bare array)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+
+  /pg/audit/count:
+    get:
+      summary: Count total audit entries
+      operationId: countAuditEntries
+      tags: [Audit]
+      responses:
+        '200':
+          description: Total count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+
+  /pg/audit/{entryId}:
+    get:
+      summary: Get a single audit entry by ID
+      operationId: getAuditEntry
+      tags: [Audit]
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Audit entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditEntry' }
+        '404':
+          description: Entry not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Pending decisions — /pg/pending
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /pg/pending:
+    get:
+      summary: List pending decisions
+      operationId: getPendingDecisions
+      tags: [Pending]
+      parameters:
+        - name: topic
+          in: query
+          schema: { type: string }
+          description: Filter by conflict topic (maps to conflict_topic column)
+        - name: include_stale
+          in: query
+          schema: { type: boolean }
+          description: When false (default), returns only status='pending' decisions. When true, returns all statuses.
+      responses:
+        '200':
+          description: Array of pending decisions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PendingDecision' }
+
+    post:
+      summary: Insert a new pending decision
+      operationId: insertPendingDecision
+      tags: [Pending]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PendingDecision' }
+      responses:
+        '201':
+          description: Pending decision created
+
+  /pg/pending/{conflictId}:
+    patch:
+      summary: Resolve or update a pending decision
+      operationId: updatePendingDecision
+      tags: [Pending]
+      parameters:
+        - name: conflictId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, resolution, note, resolvedBy]
+              properties:
+                status:          { type: string, enum: [resolved, stale] }
+                resolution:      { type: string, enum: [accept, reject, split, merge, coexist] }
+                note:            { type: string }
+                resolvedBy:      { type: string }
+                splitExistingKey: { type: string, nullable: true }
+                splitIncomingKey: { type: string, nullable: true }
+                mergedContent:    { type: string, nullable: true }
+      responses:
+        '200':
+          description: Decision updated
+        '404':
+          description: Conflict not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /pg/pending/count/{topic}/{key}:
+    get:
+      summary: Count pending decisions for a specific topic:key
+      operationId: countPendingForKey
+      tags: [Pending]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Count of pending decisions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Projects — /projects
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /projects:
+    post:
+      summary: Create a new project
+      operationId: createProjectRecord
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id:   { type: string }
+                project_name: { type: string }
+      responses:
+        '201':
+          description: Project created
+        '409':
+          description: Project already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    get:
+      summary: List all projects
+      operationId: listAllProjects
+      tags: [Projects]
+      responses:
+        '200':
+          description: Array of project records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:           { type: string }
+                    project_id:   { type: string }
+                    project_name: { type: string }
+                    created_at:   { type: string, format: date-time }
+
+  /projects/{id}:
+    get:
+      summary: Get a project by ID
+      operationId: getProjectById
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Project record
+          content:
+            application/json:
+              schema: { type: object }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    patch:
+      summary: Update a project
+      operationId: updateProject
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: Updated project record
+          content:
+            application/json:
+              schema: { type: object }
+
+    delete:
+      summary: Delete a project (soft delete)
+      operationId: deleteProject
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Project deleted
+
+  /projects/{id}/token/rotate:
+    post:
+      summary: Rotate project API token
+      operationId: rotateProjectToken
+      tags: [Projects]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: New token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Confidence bump — /bump
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /bump/{topic}/{key}:
+    post:
+      summary: Bump confidence for an ACTIVE knowledge version
+      operationId: bumpConfidence
+      tags: [Confidence]
+      description: |
+        Increases the confidence score of the current ACTIVE version for topic:key.
+        Subject to per-author cooldown. Authenticated via JWT or `X-Quorum-Token` header.
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: Optional reason for bump }
+      responses:
+        '200':
+          description: Bump applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  previous_confidence: { type: number }
+                  new_confidence:      { type: number }
+                  delta:               { type: number }
+        '429':
+          description: Cooldown period has not elapsed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Sync — /sync
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /sync/configs:
+    post:
+      summary: Sync S3 project configs to DynamoDB
+      operationId: syncConfigs
+      tags: [Admin]
+      description: |
+        Performs a full sync of all `.quorum.json` files from S3 to the DynamoDB cache.
+        EventBridge-compatible: also accepts `{ source, detail }` event envelope.
+
+        Auth: accepts either `X-Quorum-Sync-Token` header (static secret) or a
+        `principal_architect` JWT in `Authorization: Bearer`.
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Optional EventBridge event envelope (ignored if empty)
+      responses:
+        '200':
+          description: Sync complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced: { type: integer, description: Number of configs synced }
+                  errors: { type: integer }
+        '401':
+          description: Missing or invalid auth
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # Governance LLM — /governance
+
+  /governance/detect-conflict:
+    post:
+      tags: [Governance]
+      summary: LLM contradiction check between two knowledge nodes
+      description: |
+        Asks the gateway LLM whether two pieces of engineering knowledge contradict each other.
+        Called by the MCP `remember()` tool during conflict detection.
+        Returns `contradicts: false` on uncertainty (conservative bias).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [existing, incoming]
+              properties:
+                existing: { type: string, description: Existing knowledge node content }
+                incoming: { type: string, description: Incoming knowledge node content }
+      responses:
+        '200':
+          description: Contradiction analysis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contradicts:      { type: boolean }
+                  reason:           { type: string }
+                  possible_split:   { type: boolean }
+                  split_suggestion: { type: string, nullable: true }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /governance/enrich:
+    post:
+      tags: [Governance]
+      summary: LLM reviewer brief for a confirmed conflict
+      description: |
+        Generates a structured analysis brief to help a human reviewer decide between
+        two conflicting knowledge nodes. Called at conflict-creation time so reviewers
+        get instant analysis without waiting for an LLM call during review.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [existing, incoming, conflict_reason]
+              properties:
+                existing:         { type: string }
+                incoming:         { type: string }
+                conflict_reason:  { type: string }
+                possible_split:   { type: boolean, default: false }
+                split_suggestion: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Reviewer brief
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysis:               { type: string }
+                  risks_if_approved:      { type: array, items: { type: string } }
+                  questions_for_reviewer: { type: array, items: { type: string } }
+                  existing_rationale:     { type: string, nullable: true }
+                  possible_split:         { type: boolean }
+                  split_suggestion:       { type: string, nullable: true }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /governance/extract:
+    post:
+      tags: [Governance]
+      summary: LLM knowledge extraction from a completed task summary
+      description: |
+        Extracts reusable, team-specific engineering knowledge from a task summary.
+        Called by the MCP `reflect()` tool. Returns 0–3 items; empty array is valid
+        when the task contains nothing worth extracting.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_summary]
+              properties:
+                task_summary:   { type: string }
+                decisions_made: { type: array, items: { type: string }, default: [] }
+                patterns_used:  { type: array, items: { type: string }, default: [] }
+      responses:
+        '200':
+          description: Extracted knowledge items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    maxItems: 3
+                    items:
+                      type: object
+                      properties:
+                        topic:       { type: string }
+                        key:         { type: string }
+                        content:     { type: string }
+                        entity_type: { type: string, enum: [Decision, Pattern, Constraint, Runbook, Requirement] }
+                        confidence:  { type: number, enum: [0.35, 0.55, 0.75] }
+                        mode:        { type: string, enum: [echoing, extracting, generalising] }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Missing or invalid JWT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { description: OPENAI_API_KEY not configured on gateway, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  # ── /pg/versions — status/draft helpers (added feat/dashboard) ────────────────
+
+  /pg/versions/drafts:
+    get:
+      summary: All DRAFT versions for this project (optional ?topic= filter)
+      operationId: getDraftVersions
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of DRAFT version records
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/KnowledgeVersion' } }
+
+  /pg/versions/status-counts:
+    get:
+      summary: Version counts grouped by status (optional ?topic= filter)
+      operationId: getVersionStatusCounts
+      tags: [Versions]
+      parameters:
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Object mapping status → count
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: integer }
+
+  /pg/versions/by-status/{status}:
+    get:
+      summary: Versions filtered by status (optional ?topic= filter)
+      operationId: getVersionsByStatus
+      tags: [Versions]
+      parameters:
+        - name: status
+          in: path
+          required: true
+          schema: { type: string, enum: [DRAFT, ACTIVE, SUPERSEDED, DEPRECATED] }
+        - name: topic
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Array of version records with matching status
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/KnowledgeVersion' } }
+
+  /pg/audit/lineage/{topic}/{key}:
+    get:
+      summary: Ordered audit trail for a knowledge node (topic:key)
+      operationId: getAuditLineage
+      tags: [Audit]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit entries for this node wrapped in { entries: [...] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+
+  # ── Dashboard BFF — /api/* (added feat/dashboard) ─────────────────────────────
+  # These endpoints aggregate data for the React dashboard; they require JWT +
+  # X-Quorum-Project header. All are project-scoped.
+
+  /api/stats:
+    get:
+      summary: Aggregated dashboard metrics — domain breakdown, confidence distribution, pending queue, activity
+      operationId: getDashboardStats
+      tags: [Dashboard]
+      responses:
+        '200':
+          description: Stats object
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domains:
+                    type: array
+                    description: Per-topic breakdown of active/draft counts and avg confidence
+                    items:
+                      type: object
+                      properties:
+                        domain:          { type: string }
+                        active_count:    { type: integer }
+                        draft_count:     { type: integer }
+                        avg_confidence:  { type: number }
+                  pending:
+                    type: object
+                    description: Pending conflict queue summary
+                    properties:
+                      total:            { type: integer }
+                      avg_age_hours:    { type: number }
+                      oldest_age_hours: { type: number }
+                  activity:
+                    type: array
+                    description: Daily operation counts for the past 30 days
+                    items:
+                      type: object
+                      properties:
+                        date:            { type: string, format: date }
+                        operation_count: { type: integer }
+                  confidence:
+                    type: object
+                    description: Confidence histogram buckets (ACTIVE entries only)
+                    properties:
+                      high:   { type: integer, description: confidence > 0.7 }
+                      medium: { type: integer, description: confidence 0.4–0.7 }
+                      low:    { type: integer, description: confidence < 0.4 }
+                  lowest_confidence:
+                    type: array
+                    description: Up to 10 ACTIVE entries with lowest confidence (candidates for refresh)
+                    items:
+                      type: object
+                      properties:
+                        topic:           { type: string }
+                        key:             { type: string }
+                        confidence:      { type: number }
+                        last_accessed_at: { type: string, format: date-time, nullable: true }
+                  most_accessed:
+                    type: array
+                    description: Up to 10 ACTIVE entries with highest recall frequency
+                    items:
+                      type: object
+                      properties:
+                        topic:        { type: string }
+                        key:          { type: string }
+                        confidence:   { type: number }
+                        access_count: { type: integer }
+
+  /api/graph:
+    get:
+      summary: Knowledge graph nodes and edges for Cytoscape.js visualisation
+      operationId: getGraphData
+      tags: [Dashboard]
+      parameters:
+        - name: domain
+          in: query
+          description: Filter by topic/domain. Required when total ACTIVE node count > 500.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Graph data in Cytoscape.js element format. Includes a hub node (project or domain) and spoke edges connecting all knowledge nodes to it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    description: Cytoscape node elements. First element is always the hub node.
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          type: object
+                          properties:
+                            id:          { type: string, description: "topic:key:version or hub ID" }
+                            topic:       { type: string }
+                            key:         { type: string }
+                            entity_type: { type: string }
+                            confidence:  { type: number }
+                            author:      { type: string }
+                            summary:     { type: string }
+                            status:      { type: string }
+                            node_type:   { type: string, description: "'hub' for the central hub node, absent for knowledge nodes" }
+                  edges:
+                    type: array
+                    description: Cytoscape edge elements — SUPERSEDES (version lineage) and BELONGS_TO (spoke to hub)
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          type: object
+                          properties:
+                            id:     { type: string }
+                            source: { type: string }
+                            target: { type: string }
+                            type:   { type: string, enum: [SUPERSEDES, BELONGS_TO] }
+        '400':
+          description: Graph too large — specify ?domain= to filter
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /api/knowledge:
+    get:
+      summary: Knowledge browser — paginated list of active versions
+      operationId: getKnowledgeList
+      tags: [Dashboard]
+      parameters:
+        - name: domain
+          in: query
+          description: Filter by topic/domain (maps to `topic` column)
+          schema: { type: string }
+        - name: tag
+          in: query
+          description: Filter by tag (exact match, case-insensitive)
+          schema: { type: string }
+        - name: entity_type
+          in: query
+          description: Filter by entity type
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: >
+            Paginated knowledge list. Items are a subset of KnowledgeVersion:
+            topic, key, entity_type, confidence, author, tags, version, and updated_at
+            (aliased from the created_at column). Only ACTIVE entries are returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:       { type: string }
+                        key:         { type: string }
+                        entity_type: { type: string }
+                        confidence:  { type: number }
+                        author:      { type: string }
+                        tags:        { type: array, items: { type: string } }
+                        version:     { type: integer }
+                        updated_at:  { type: string, format: date-time, description: "Aliased from created_at — timestamp of this version's creation" }
+                  total:  { type: integer }
+                  page:   { type: integer }
+                  pages:  { type: integer }
+
+  /api/knowledge/{topic}/{key}:
+    get:
+      summary: Single knowledge entry — PG metadata + content resolved from summary or Graphiti fallback
+      operationId: getKnowledgeEntry
+      tags: [Dashboard]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: >
+            Flat knowledge entry object. `content` is populated from the PostgreSQL `summary` column
+            (written by every `remember()` call via buildVersionRecord). Falls back to a Graphiti
+            `search_nodes` query for entries written before the summary column was introduced.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topic, key, version, entity_type, confidence, author, author_role, tags, status, created_at]
+                properties:
+                  topic:               { type: string }
+                  key:                 { type: string }
+                  version:             { type: integer }
+                  entity_type:         { type: string }
+                  confidence:          { type: number, minimum: 0, maximum: 1 }
+                  author:              { type: string }
+                  author_role:         { type: string }
+                  tags:                { type: array, items: { type: string } }
+                  status:              { type: string, enum: [ACTIVE, DRAFT, SUPERSEDED, DEPRECATED, REJECTED] }
+                  created_at:          { type: string, format: date-time }
+                  graphiti_episode_id: { type: string, nullable: true }
+                  content:             { type: string, nullable: true, description: "The knowledge text. Null for legacy entries written before summary column was populated." }
+        '404':
+          description: No ACTIVE version exists for this topic:key in the project
+
+  /api/search:
+    get:
+      summary: Search knowledge graph (Graphiti first, PostgreSQL ILIKE fallback)
+      operationId: searchKnowledge
+      tags: [Dashboard]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: domain
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, maximum: 50 }
+      responses:
+        '200':
+          description: Search results with source indicator
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, source]
+                properties:
+                  results: { type: array, items: { type: object } }
+                  source:  { type: string, enum: [graphiti, postgres] }
+
+  /api/review/{conflictId}:
+    post:
+      summary: Approve, reject, or request changes on a pending decision
+      operationId: reviewDecision
+      tags: [Dashboard]
+      parameters:
+        - name: conflictId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, note]
+              properties:
+                action: { type: string, enum: [approve, reject, request_changes] }
+                note:   { type: string, minLength: 10, description: Mandatory review note (≥10 chars) }
+      responses:
+        '200':
+          description: Review outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, conflict_id, reviewer, note]
+                properties:
+                  status:        { type: string, enum: [approved, rejected, changes_requested] }
+                  conflict_id:   { type: string }
+                  topic:         { type: string }
+                  key:           { type: string }
+                  version:       { type: integer, nullable: true }
+                  reviewer:      { type: string }
+                  note:          { type: string }
+                  stale_warning: { type: string, nullable: true }
+        '400': { description: Invalid action or note too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Self-approval blocked or wrong project, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Conflict ID not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/bump/{topic}/{key}:
+    post:
+      summary: Confidence bump — register positive signal for a knowledge node
+      operationId: bumpConfidence
+      tags: [Dashboard]
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Bump applied — returns updated confidence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topic, key, bumped_by, delta_applied, confidence_before, confidence_after]
+                properties:
+                  topic:               { type: string }
+                  key:                 { type: string }
+                  project_id:          { type: string }
+                  bumped_by:           { type: string }
+                  role:                { type: string }
+                  delta_applied:       { type: number }
+                  confidence_before:   { type: number }
+                  confidence_after:    { type: number }
+                  starting_confidence: { type: number }
+                  clock_reset:         { type: boolean }
+                  next_bump_allowed:   { type: string, format: date-time }
+        '404': { description: No ACTIVE knowledge at topic:key, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Bump cooldown active, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+tags:
+  - name: Health
+    description: Gateway health check
+  - name: Auth
+    description: GitHub OAuth, JWT issuance, and project management
+  - name: Config
+    description: Project configuration endpoints
+  - name: Graphiti
+    description: Graphiti MCP proxy (knowledge graph operations)
+  - name: Versions
+    description: Knowledge version CRUD (append-only)
+  - name: Audit
+    description: Tamper-evident audit log (append-only, SHA256 chain)
+  - name: Pending
+    description: Conflict queue — decisions awaiting human review
+  - name: Projects
+    description: Project registry
+  - name: Confidence
+    description: Confidence bump operations
+  - name: Admin
+    description: Platform admin management (v0.3 — add/remove platform admins)
+  - name: User
+    description: User profile endpoints (v0.3 — per-request role resolution from Redis profile cache)
+  - name: Governance
+    description: LLM-powered governance — conflict detection, reviewer enrichment, knowledge extraction
+  - name: Dashboard
+    description: Dashboard BFF routes — aggregated data for the React UI (require X-Quorum-Project header)

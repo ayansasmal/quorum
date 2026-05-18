@@ -2,6 +2,8 @@
 
 > *Every AI dystopia film has the same root cause — humans removed themselves from the decision loop. Quorum puts them back in.*
 
+[![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://github.com/ayansasmal/quorum-mcp) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](gateway/openapi.yaml)
+
 **Quorum** is a governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
 
 ---
@@ -57,73 +59,70 @@ Quorum checks existing knowledge graph
 - **Governance first** — conflict detection with human-in-the-loop resolution. Not silent. Not automatic. Governed.
 - **Provenance always** — every node carries author, timestamp, confidence, source, conflict history
 - **Authority-weighted writes** — a junior engineer's addition does not silently overwrite a senior architect's ADR
-- **Self-evolving** — Claude Code skill reflects after every task and adds learnings automatically
 - **Human at the fork** — agents operate autonomously on established knowledge; humans only intervene at genuine ambiguity
+- **Quorum Gateway** — Express service fronting Graphiti and PostgreSQL with slim ES256 JWT (`{ sub, is_admin }` only), GitHub OAuth, Redis config/profile cache, and S3-backed per-project configuration
+- **Quorum Dashboard** — React SPA for browsing the knowledge graph, resolving conflicts, reviewing drafts, editing project config, and managing ownership + roles
 - **Export to human** — everything Quorum knows, exportable as Markdown or Confluence markup
 
 ---
 
 ## Architecture
 
+```mermaid
+graph TB
+    CC[Claude Code\nAI Agents] -->|MCP stdio| MCP[quorum-mcp\nNode.js :8000]
+    Browser[Dashboard\nnginx :3002] -->|Bearer JWT\nX-Quorum-Project| GW[Quorum Gateway\nExpress :3001]
+    MCP -->|Bearer JWT\nX-Quorum-Project| GW
+    GW -->|proxy| Graphiti[Graphiti MCP\nPython :8001]
+    Graphiti --> FalkorDB[(FalkorDB\n:6379)]
+    GW --> PG[(PostgreSQL\naudit + versions)]
+    GW --> REDIS[(Redis\nconfig + profile cache)]
+    GW --> S3[(S3\nproject configs)]
+    GW --> DDB[(DynamoDB\nmembership index)]
 ```
-Claude Code / AI Agents
-        │ MCP (stdio)
-        ▼
-┌─────────────────────┐
-│  quorum-mcp         │  ← npm install -g @as-quorum/mcp
-│  (Node.js)          │
-└──────────┬──────────┘
-           │ HTTP + JWT
-┌──────────▼──────────┐
-│  Quorum Gateway     │  ← this repo (self-hosted)
-│  Governance Layer   │
-│  Conflict detection │
-│  Authority weights  │
-│  Provenance track   │
-│  Confidence scores  │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  Graphiti Engine    │  ← Temporal knowledge graph (OSS)
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  FalkorDB           │  ← Graph storage
-│  PostgreSQL         │  ← Audit chain (SHA256, append-only)
-└─────────────────────┘
-```
+
+
+**Identity model (v0.3):** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and base_confidence are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates "who you are" from "what project you're working in."
+
+**Content durability:** all knowledge text is stored in the PostgreSQL `knowledge_versions.summary` column on every write. Graphiti/FalkorDB holds semantic graph embeddings and is the fallback — it is treated as eventually consistent and can be wiped without permanent content loss.
+
+---
+
+## Current State (v0.3 shipped)
+
+- **Identity / authz** — ES256 slim JWT `{ sub, is_admin, jti, iat, exp }`; per-request `X-Quorum-Project` header for project scope; role/`base_confidence`/`is_owner` resolved from Redis profile cache (`profile:{sub}`) → DynamoDB on miss
+- **Storage schema** — `q_*` id schema (`q_projects`, `q_keys`) replaces UUID-based tables; flat S3 layout `<group_id>.quorum.json`
+- **Audit pipeline** — dual-store: PostgreSQL (durable, tamper-evident SHA256 chain, `summary` column for content) + Graphiti (semantic traversal); audit log is append-only at the application layer
+- **Caching** — Redis for config (`config:{group_id}`), user profile (`profile:{sub}`), and platform admin (`admin:platform`), each 300s TTL, pub/sub invalidation on governance writes
+- **Membership index** — `quorum-user-projects` DynamoDB table with GSI for reverse lookup; `POST /sync/configs` performs S3→DDB full sync (dual auth: sync token or `principal_architect` JWT)
+- **Dashboard** — Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel; full light/dark theme; project selector with search + pagination
+- **Tests** — 31 test files, 476 passing tests; coverage 86% lines · 77% branches · 88% functions (threshold 75% all); CI on Node 22 via `npm test` + `npm test -- --coverage`
+- **Tooling** — OpenAPI 3.1 spec at [`gateway/openapi.yaml`](gateway/openapi.yaml); public JSON Schema at `GET /schema/config`; ops audit CLI at [`scripts/audit-cli.js`](scripts/audit-cli.js); confidence endorsement via `POST /api/bump/:topic/:key` (7-day cooldown)
 
 ---
 
 ## Quick Start
 
-**Step 1 — Self-host the gateway** (requires Docker):
+> **Full step-by-step guide:** [docs/QUICKSTART.md](docs/QUICKSTART.md)
+
+**Prerequisites:** Node.js 20+, Docker Desktop, `pip install awscli-local`, OpenAI API key
 
 ```bash
-git clone https://github.com/ayansasmal/quorum
+git clone https://github.com/ayansasmal/quorum.git
 cd quorum
-cp .env.example .env     # add OPENAI_API_KEY (used by Graphiti)
-./scripts/setup.sh docker
-```
+cp .env.example .env          # set OPENAI_API_KEY — the only required change
 
-**Step 2 — Install the MCP server on each engineer's machine:**
+./scripts/setup.sh docker     # start stack, upload configs to S3, seed knowledge graph
 
-```bash
+# Install the Quorum MCP server (separate package — installs skill + registers with Claude Code)
 npm install -g @as-quorum/mcp
-quorum install   # installs skill, hooks, and registers MCP with Claude Code
+quorum install
 ```
 
-**Step 3 — Connect a project:**
+After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
 
 ```bash
-cd your-project
-quorum init      # creates .quorum file with the project group_id
-```
-
-**Step 4 — Verify:**
-
-```bash
-claude "What does Quorum know about auth?"
+node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL + QUORUM_GITHUB_TOKEN)
 ```
 
 > For full setup, troubleshooting, and production deployment: [QUICKSTART.md](docs/QUICKSTART.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md)
@@ -135,31 +134,31 @@ claude "What does Quorum know about auth?"
 **Core knowledge tools:**
 
 | Tool | Description |
-|---|---|
-| `remember(topic, key, content, author)` | Store knowledge — creates new version, never edits |
-| `recall(topic, key, options?)` | Retrieve — default ACTIVE, `{history}` `{at}` `{version}` options |
+|------|-------------|
+| `remember(topic, key, content, opts?)` | Store knowledge — creates new version, never edits in place |
+| `recall(topic, key, opts?)` | Retrieve — default ACTIVE; `{history}` `{at}` `{version}` options |
 | `history(topic, key)` | Full version timeline with triggered_by and audit links |
-| `search(query, domain?)` | Semantic search across graph |
-| `reflect(task_summary)` | Post-task self-evolving extraction |
-| `export(topic?, format)` | Export to markdown or Confluence |
+| `search(query, domain?)` | Semantic search across graph; falls back to PG ILIKE if Graphiti empty |
+| `reflect(task_summary, opts?)` | Post-task extraction — stores as DRAFT for human review |
+| `export(topic?, format)` | Export to Markdown or Confluence-ready format |
 | `forget(topic, key, reason)` | Deprecate — creates DEPRECATED version, never hard delete |
 
 **Governance tools:**
 
 | Tool | Description |
-|---|---|
-| `review(action, topic, key, reviewer, note)` | Approve / reject / request changes on DRAFT knowledge |
-| `pending()` | Surface unresolved conflicts and DRAFTs awaiting human review |
+|------|-------------|
+| `review(action, topic, key, note)` | Approve / reject / request changes on DRAFT knowledge |
+| `pending()` | Surface unresolved conflicts and DRAFTs awaiting review |
+| `authenticate()` | PKCE OAuth flow — opens browser to GitHub login, stores JWT in-memory |
+| `config_upload(opts)` | Upload project config to S3 and sync DynamoDB membership index |
 
-**Integrations (v0.4):**
+**Integrations (v0.4+):**
 
 | Tool | Description |
-|---|---|
-| `ingest_pr(pr_url, options?)` | Extract knowledge from merged GitHub PR |
+|------|-------------|
+| `ingest_pr(pr_url, opts?)` | Extract knowledge from merged GitHub PR |
 | `enrich_from_jira(issue_key)` | Fetch Jira issue via Atlassian MCP, extract knowledge |
 | `enrich_from_confluence(page_id)` | Fetch Confluence page, extract ADRs / runbooks / designs |
-| `search_atlassian(query, sources?)` | Unified search across Jira + Confluence + graph |
-| `sync_atlassian(domain?)` | Proactive staleness detection for Atlassian-linked knowledge |
 
 ---
 
@@ -178,7 +177,8 @@ claude "What does Quorum know about auth?"
 | Point-in-time recall | ⚠️ partial | ✅ recall({ at: date }) deterministic |
 | Draft approval workflow | ❌ | ✅ review() tool |
 | Self-evolving skill | ❌ | ✅ Claude Code SKILL.md |
-| Export to human | ❌ | ✅ markdown + confluence |
+| Export to human | ❌ | ✅ Markdown + Confluence |
+| Durable content store | ⚠️ graph only | ✅ PostgreSQL summary column (survives FalkorDB wipes) |
 | PR knowledge ingestion | ❌ | ✅ ingest_pr() (v0.4) |
 | Atlassian integration | ❌ | ✅ Jira + Confluence via MCP (v0.4) |
 | Engineering entity types | ❌ | ✅ Decision, Pattern, Constraint, Runbook |
@@ -195,15 +195,31 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 ## Roadmap
 
-- **v0.1** — Core MCP server + Graphiti integration + conflict detection
-- **v0.2** — Full governance (authority weighting, human-in-the-loop, confidence scoring)
-- **v0.3** — Self-evolving Claude Code skill + dashboard knowledge write + DRAFT review queue ✅
-- **v0.4** — PR ingestion + Atlassian integration (Jira + Confluence)
-- **v1.0** — Production ready
-- **Future** — Confluence ingestion, Draw.io parsing, cross-org federation
+- **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack
+- **v0.2** (shipped) — Quorum Gateway (ES256 JWT, GitHub OAuth, S3-backed project config), multi-project scoping, authority weighting, confidence decay, human-in-the-loop conflict resolution, Quorum Dashboard, self-evolving SKILL.md
+- **v0.3** (shipped) — Slim JWT `{ sub, is_admin }`, Redis config/profile/admin cache with pub/sub invalidation, `X-Quorum-Project` header, `GET /user/profile/:username`, ownership governance (transfer, role update, admin management), PostgreSQL `summary` as durable content store, PG ILIKE fallback in search
+- **v0.4** — Self-evolving graph: PACE framework, decision quality feedback loop, governance health dashboard, PR ingestion (`ingest_pr`)
+- **v0.5** — Multi-team namespacing, Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`), cross-team promotion workflow
+- **v1.0** — Production hardening, external security audit, hosted docs
+
+> Full detail: [docs/ROADMAP.md](docs/ROADMAP.md)
+
+---
+
+## Repository Structure
+
+```
+gateway/          ← @as-quorum/gateway — Express :3001 (private, self-hosted)
+dashboard/        ← React SPA served via nginx :3002 (private, self-hosted)
+tests/            ← Gateway integration tests (vitest)
+scripts/          ← setup.sh · audit-cli.js · seed · decay · archive
+docs/             ← ARCHITECTURE · TESTING · DEPLOYMENT · QUICKSTART · DIAGRAMS
+```
+
+> MCP server source: [github.com/as-quorum/quorum-mcp](https://github.com/as-quorum/quorum-mcp) — installed as `@as-quorum/mcp`
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Elastic License 2.0.
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Elastic License 2.0.

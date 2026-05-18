@@ -1,48 +1,52 @@
 {
   "name": "quorum",
   "version": "0.2.0",
-  "description": "Governance layer for AI agent engineering memory — built on Graphiti's temporal knowledge graph",
+  "description": "Quorum monorepo — governed engineering memory for Claude Code and AI agents",
   "type": "module",
-  "license": "Apache-2.0",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "bin": {
-    "quorum": "./cli.js"
-  },
-  "exports": {
-    "./server": "./src/server.js",
-    "./cli": "./cli.js"
-  },
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "workspaces": [
+    "gateway",
+    "dashboard"
+  ],
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "start:gateway": "node src/gateway/server.js",
-    "dev:gateway": "node --watch src/gateway/server.js",
+    "version": "node scripts/sync-versions.js && git add gateway/package.json dashboard/package.json",
+    "version:sync": "node scripts/sync-versions.js",
+    "release": "commit-and-tag-version",
+    "release:dry": "commit-and-tag-version --dry-run",
+    "release:minor": "commit-and-tag-version --release-as minor",
+    "release:major": "commit-and-tag-version --release-as major",
+    "release:patch": "commit-and-tag-version --release-as patch",
+    "docker:start": "./scripts/setup.sh docker",
+    "docker:rebuild": "./scripts/setup.sh docker rebuild",
+    "docker:clean": "./scripts/setup.sh docker clean",
+    "docker:clean:all": "./scripts/setup.sh docker clean --volumes",
+    "docker:ps": "./scripts/setup.sh docker ps",
+    "dev:gateway": "npm run dev --workspace=gateway",
+    "start:gateway": "npm run start --workspace=gateway",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:constitutional": "vitest run tests/constitutional",
-    "test:governance": "vitest run tests/governance",
-    "test:tools": "vitest run tests/tools",
+    "test:gateway": "vitest run tests/gateway",
     "test:coverage": "vitest run --coverage",
-    "test:coverage:constitutional": "vitest run --coverage --coverage.include='src/governance/constitutional.js' tests/constitutional",
     "seed": "node scripts/seed.js",
     "audit:scan-bypasses": "node scripts/audit-scan.js",
-    "audit:scan-graphiti-deletes": "node scripts/audit-scan-deletes.js"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "3.830.0",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "commander": "14.0.3",
-    "express": "4.21.2",
-    "express-rate-limit": "^7.5.1",
-    "jose": "5.10.0",
-    "pg": "8.20.0",
-    "uuid": "13.0.0",
-    "zod": "4.3.6"
+    "audit:scan-harddeletes": "node scripts/audit-scan-harddeletes.js",
+    "audit:cli": "node scripts/audit-cli.js",
+    "job:decay": "node scripts/decay-confidence.js",
+    "job:archive": "node scripts/archive-audit.js",
+    "job:recheck": "node scripts/recheck-conflicts.js",
+    "prepare": "husky || true"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.0",
+    "@commitlint/config-conventional": "^21.0.0",
     "@vitest/coverage-v8": "4.1.2",
+    "commit-and-tag-version": "^12.7.3",
+    "husky": "^9.1.7",
     "vitest": "4.1.2"
+  },
+  "overrides": {
+    "fast-xml-parser": "^5.7.2",
+    "hono": "^4.12.15"
   }
 }
