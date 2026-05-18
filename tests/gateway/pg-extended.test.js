@@ -296,11 +296,12 @@ describe('POST /pg/versions', () => {
     const newRow = { version_id: 'q_k1_v1', status: 'DRAFT' }
     insertVersion.mockResolvedValue(newRow)
     const { status, body } = await post('/pg/versions', {
-      topic:  'auth',
-      key:    'jwt-rotation',
-      content: 'stored content',
-      status:  'DRAFT',
-      author:  'alice',
+      topic:       'auth',
+      key:         'jwt-rotation',
+      summary:     'stored content',
+      entity_type: 'Decision',
+      status:      'DRAFT',
+      author:      'alice',
     })
     expect(status).toBe(201)
     expect(body.version_id).toBe('q_k1_v1')
@@ -342,12 +343,13 @@ describe('POST /pg/versions/supersede', () => {
 
     const { status, body } = await post('/pg/versions/supersede', {
       new_version: {
-        topic:   'auth',
-        key:     'jwt-rotation',
-        version: 2,
-        content: 'updated content',
-        status:  'ACTIVE',
-        author:  'alice',
+        topic:       'auth',
+        key:         'jwt-rotation',
+        version:     2,
+        summary:     'updated content',
+        entity_type: 'Decision',
+        status:      'ACTIVE',
+        author:      'alice',
       },
       supersedes_version: 1,
       supersedes_reason:  'Updated approach',

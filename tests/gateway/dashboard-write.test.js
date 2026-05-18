@@ -1,8 +1,8 @@
 /**
  * Dashboard BFF write endpoint tests.
  *
- * Covers the three principal_architect-only knowledge write routes:
- *   POST /api/knowledge              — create new ACTIVE entry
+ * Covers the dashboard knowledge write routes:
+ *   POST /api/knowledge              — create entry (all roles; PE→ACTIVE, others→DRAFT)
  *   POST /api/knowledge/:topic/:key/promote   — promote DRAFT → ACTIVE
  *   POST /api/knowledge/:topic/:key/supersede — edit ACTIVE entry (atomic)
  *
@@ -175,13 +175,16 @@ describe('POST /api/knowledge', () => {
     entity_type: 'Pattern',
   }
 
-  it('returns 403 when role is not principal_architect', async () => {
-    mockUser = { sub: 'bob', project: 'q_p1', role: 'engineer', is_admin: false }
+  it('returns 201 with DRAFT status when role is not principal_architect', async () => {
+    mockUser = { sub: 'bob', project: 'q_p1', role: 'engineer', base_confidence: 0.7, is_admin: false }
 
-    const { status, body } = await post('/api/knowledge', validBody)
+    const { status } = await post('/api/knowledge', validBody)
 
-    expect(status).toBe(403)
-    expect(body.error).toBe('forbidden')
+    expect(status).toBe(201)
+    expect(insertVersion).toHaveBeenCalledWith(
+      fakePool,
+      expect.objectContaining({ status: 'DRAFT' }),
+    )
   })
 
   it('returns 400 when content contains HTML chars', async () => {
