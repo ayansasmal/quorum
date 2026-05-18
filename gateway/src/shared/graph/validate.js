@@ -1,4 +1,9 @@
 /**
+ * Canonical source — vendored copy lives at quorum-mcp/src/shared/graph/validate.js
+ * Sync manually when this file changes.
+ */
+
+/**
  * Shared knowledge write input validator.
  *
  * Called by all four knowledge write routes before any DB operation.
