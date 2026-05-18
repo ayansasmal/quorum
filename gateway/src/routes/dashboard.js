@@ -13,7 +13,7 @@
  *   POST /api/bump/:topic/:key         — confidence endorsement (dashboard version)
  */
 
-import { Router } from 'express'
+import express, { Router } from 'express'
 import {
   getProjectByGroupId,
   getOrCreateKey,
@@ -26,12 +26,59 @@ import {
   getBumpLog,
   recordBump,
   updateConfidence,
+  getNextVersionNumber,
+  insertVersion,
 } from '../shared/graph/queries.js'
 import { searchNodes, searchFacts } from '../shared/graph/client.js'
 import { writeAuditEntry } from '../shared/audit/secondary.js'
 import { enforceNoSelfApproval, enforceReasonRequired } from '../shared/governance/constitutional.js'
+import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
+import { createHash } from 'node:crypto'
 
 const router = Router()
+
+/** 4 KB body limit for PE knowledge write endpoints. */
+const jsonSmall = express.json({ limit: '4kb' })
+
+/**
+ * Per-IP rate limiter for PE knowledge write endpoints (10 writes/min/IP).
+ * Uses a simple in-memory sliding window — not cluster-safe but sufficient for
+ * single-instance dashboard BFF usage.
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export const peWriteLimit = (req, res, next) => {
+  const ip = req.ip ?? 'unknown'
+  const now = Date.now()
+  const window = 60_000
+  const max = 10
+  if (!peWriteLimit._windows) peWriteLimit._windows = new Map()
+  const hits = (peWriteLimit._windows.get(ip) ?? []).filter((t) => t > now - window)
+  hits.push(now)
+  peWriteLimit._windows.set(ip, hits)
+  if (hits.length > max) {
+    return res.status(429).json({ error: 'write_rate_limit', message: 'Too many write requests — 10/min per IP' })
+  }
+  next()
+}
+
+/**
+ * Sends 403 if the request user is not a principal_architect.
+ * Returns true if the check passed (caller should return if false).
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @returns {boolean}
+ */
+function requirePrincipalArchitect(req, res) {
+  if (req.user.role !== 'principal_architect') {
+    res.status(403).json({ error: 'forbidden', message: 'principal_architect role required' })
+    return false
+  }
+  return true
+}
 
 /**
  * Resolve req.user.project (group_id) → q_project_id, sending a 404 if the
@@ -448,7 +495,14 @@ router.get('/knowledge/:topic/:key', async (req, res, next) => {
 // ── GET /api/search ────────────────────────────────────────────────────────────
 
 /**
- * Semantic search via Graphiti. Maps Graphiti node results to dashboard format.
+ * Combined semantic + keyword search.
+ *
+ * Runs Graphiti (semantic) and PostgreSQL (keyword: summary/key/topic/tags ILIKE)
+ * in parallel via Promise.allSettled so a Graphiti outage never blocks tag/key
+ * matches. Graphiti results are listed first; postgres-only matches are appended,
+ * deduplicated on topic:key.
+ *
+ * Query params: q (required), domain (optional exact-match scope), limit (default 10)
  */
 router.get('/search', async (req, res, next) => {
   const groupId   = req.user.project ?? 'default'
@@ -461,65 +515,82 @@ router.get('/search', async (req, res, next) => {
   }
 
   try {
-    // Graphiti groupId is the human-readable group_id (matches FalkorDB partitioning).
-    // The Postgres fallback below uses the resolved q_project_id.
-    const graphitiResult = await searchNodes(
-      domain ? `[${domain}] ${query}` : query,
-      { groupId, limit },
-    )
-
-    const nodes = graphitiResult?.nodes ?? graphitiResult?.results ?? []
-
-    if (nodes.length > 0) {
-      return res.json({
-        results: nodes.map((n) => ({
-          topic:       n.topic       ?? n.group_id ?? '',
-          key:         n.key         ?? n.name     ?? '',
-          entity_type: n.entity_type ?? 'unknown',
-          summary:     n.summary     ?? n.name     ?? '',
-          confidence:  n.confidence  ?? null,
-          score:       n.score       ?? n.distance ?? null,
-          author:      n.author      ?? null,
-          updated_at:  n.created_at  ?? n.updated_at ?? null,
-        })),
-        source: 'graphiti',
-      })
-    }
-
-    // Graphiti returned nothing — fall back to PostgreSQL full-text search
-    const pool = req.app.locals.pool
+    const pool       = req.app.locals.pool
     const qProjectId = await resolveQProjectId(req, res)
     if (!qProjectId) return
 
     const pattern = `%${query}%`
-    const domainFilter = domain ? 'AND topic = $3' : ''
-    const params = domain ? [qProjectId, pattern, domain] : [qProjectId, pattern]
+    const pgParams = domain ? [qProjectId, pattern, domain] : [qProjectId, pattern]
+    const domainFilter = domain ? `AND topic = $3` : ''
 
-    const { rows } = await pool.query(
-      `SELECT topic, key, summary, status, confidence, author, created_at
-       FROM knowledge_versions
-       WHERE q_project_id = $1
-         AND (summary ILIKE $2 OR key ILIKE $2 OR topic ILIKE $2)
-         AND status != 'DEPRECATED'
-         ${domainFilter}
-       ORDER BY confidence DESC, created_at DESC
-       LIMIT ${limit}`,
-      params,
-    )
+    // Run Graphiti semantic search and postgres keyword search in parallel.
+    // allSettled ensures a Graphiti failure never suppresses postgres results.
+    const [graphitiOutcome, pgOutcome] = await Promise.allSettled([
+      searchNodes(domain ? `[${domain}] ${query}` : query, { groupId, limit }),
+      pool.query(
+        `SELECT topic, key, entity_type, summary, tags, status, confidence, author, created_at
+         FROM knowledge_versions
+         WHERE q_project_id = $1
+           AND (summary ILIKE $2 OR key ILIKE $2 OR topic ILIKE $2
+                OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE t ILIKE $2))
+           AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
+           ${domainFilter}
+         ORDER BY confidence DESC, created_at DESC
+         LIMIT ${limit}`,
+        pgParams,
+      ),
+    ])
 
-    res.json({
-      results: rows.map((r) => ({
-        topic:       r.topic,
-        key:         r.key,
-        entity_type: 'unknown',
-        summary:     r.summary ?? '',
-        confidence:  r.confidence ?? null,
-        score:       null,
-        author:      r.author ?? null,
-        updated_at:  r.created_at ?? null,
-      })),
-      source: 'postgres',
+    const graphitiNodes =
+      graphitiOutcome.status === 'fulfilled'
+        ? (graphitiOutcome.value?.nodes ?? graphitiOutcome.value?.results ?? [])
+        : []
+
+    const pgRows =
+      pgOutcome.status === 'fulfilled' ? pgOutcome.value.rows : []
+
+    // Build Graphiti results and track seen topic:key pairs for deduplication
+    const seen = new Set()
+    const results = graphitiNodes.map((n) => {
+      const topicKey = `${n.topic ?? n.group_id ?? ''}:${n.key ?? n.name ?? ''}`
+      seen.add(topicKey)
+      return {
+        topic:       n.topic       ?? n.group_id ?? '',
+        key:         n.key         ?? n.name     ?? '',
+        entity_type: n.entity_type ?? 'unknown',
+        summary:     n.summary     ?? n.name     ?? '',
+        tags:        n.tags        ?? [],
+        confidence:  n.confidence  ?? null,
+        score:       n.score       ?? n.distance ?? null,
+        author:      n.author      ?? null,
+        updated_at:  n.created_at  ?? n.updated_at ?? null,
+      }
     })
+
+    // Append postgres matches not already covered by Graphiti
+    for (const r of pgRows) {
+      const topicKey = `${r.topic}:${r.key}`
+      if (!seen.has(topicKey)) {
+        seen.add(topicKey)
+        results.push({
+          topic:       r.topic,
+          key:         r.key,
+          entity_type: r.entity_type ?? 'unknown',
+          summary:     r.summary ?? '',
+          tags:        r.tags ?? [],
+          confidence:  r.confidence ?? null,
+          score:       null,
+          author:      r.author ?? null,
+          updated_at:  r.created_at ?? null,
+        })
+      }
+    }
+
+    const source = graphitiNodes.length > 0 && pgRows.length > 0
+      ? 'graphiti+postgres'
+      : graphitiNodes.length > 0 ? 'graphiti' : 'postgres'
+
+    res.json({ results, source })
   } catch (err) {
     next(err)
   }
@@ -764,6 +835,269 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
       clock_reset:         true,
       next_bump_allowed:   new Date(Date.now() + BUMP_COOLDOWN_MS).toISOString(),
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/knowledge ────────────────────────────────────────────────────────
+
+/**
+ * Create a new ACTIVE knowledge entry (principal_architect only).
+ *
+ * Server-side fields (never taken from req.body):
+ *   author, author_type, triggered_by, content_hash, q_project_id
+ *
+ * @route POST /api/knowledge
+ */
+router.post('/knowledge', jsonSmall, peWriteLimit, async (req, res, next) => {
+  if (!requirePrincipalArchitect(req, res)) return
+
+  const body = req.body ?? {}
+  const { topic, key, content, entity_type, tags, confidence } = body
+
+  // Build fields object without undefined values so validateKnowledgeInput's
+  // presence checks ('tags' in fields, 'confidence' in fields) behave correctly.
+  const validationFields = { topic, key, content, entity_type }
+  if ('tags' in body) validationFields.tags = tags
+  if ('confidence' in body) validationFields.confidence = confidence
+
+  try {
+    validateKnowledgeInput(validationFields)
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: 'validation_error', field: err.field, message: err.message })
+    }
+    throw err
+  }
+
+  try {
+    const pool = req.app.locals.pool
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const qKeyId      = await getOrCreateKey(pool, qProjectId, topic, key)
+    const nextVer     = await getNextVersionNumber(pool, qKeyId)
+    const versionId   = `${qKeyId}_v${nextVer}`
+    const contentHash = createHash('sha256').update(content).digest('hex')
+    const author      = req.user.sub
+    const authorRole  = req.user.role
+
+    const record = {
+      version_id:   versionId,
+      q_key_id:     qKeyId,
+      q_project_id: qProjectId,
+      topic,
+      key,
+      summary:      content,
+      entity_type,
+      tags:         tags ?? [],
+      confidence:   confidence ?? 0.7,
+      author,
+      author_role:  authorRole,
+      author_type:  'human',
+      triggered_by: 'dashboard',
+      content_hash: contentHash,
+      version:      nextVer,
+      status:       'ACTIVE',
+    }
+
+    const inserted = await insertVersion(pool, record)
+
+    await writeAuditEntry(pool, {
+      operation:    'WRITE',
+      tool:         'dashboard-create',
+      author,
+      author_role:  authorRole,
+      q_project_id: qProjectId,
+      content_hash: contentHash,
+      governance_json: { topic, key, entity_type, confidence: record.confidence },
+      outcome_json:    { status: 'ACTIVE', version: nextVer, version_id: versionId },
+      version_impact:  { versions_created: [versionId], versions_superseded: [] },
+    })
+
+    res.status(201).json(inserted)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/knowledge/:topic/:key/promote ────────────────────────────────────
+
+/**
+ * Promote a DRAFT version to ACTIVE (principal_architect only).
+ *
+ * @route POST /api/knowledge/:topic/:key/promote
+ */
+router.post('/knowledge/:topic/:key/promote', jsonSmall, peWriteLimit, async (req, res, next) => {
+  if (!requirePrincipalArchitect(req, res)) return
+
+  const { topic, key } = req.params
+  const { note } = req.body ?? {}
+
+  // Validate note inline: required, 10–500 chars, no HTML
+  if (typeof note !== 'string' || note.trim().length === 0) {
+    return res.status(400).json({ error: 'validation_error', field: 'note', message: 'note is required for this operation (min 10 chars)' })
+  }
+  if (note.length < 10) {
+    return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at least 10 characters (got ${note.length})` })
+  }
+  if (note.length > 500) {
+    return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at most 500 characters (got ${note.length})` })
+  }
+  if (note.includes('<') || note.includes('>')) {
+    return res.status(400).json({ error: 'validation_error', field: 'note', message: 'note must not contain < or >' })
+  }
+
+  try {
+    const pool = req.app.locals.pool
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const qKeyId = await getOrCreateKey(pool, qProjectId, topic, key)
+    const draft  = await getLatestDraftVersion(pool, qKeyId)
+
+    if (!draft) {
+      return res.status(404).json({ error: 'no_draft', message: `No DRAFT version found for ${topic}:${key}` })
+    }
+
+    const draftVersionId = `${qKeyId}_v${draft.version}`
+    const forwardLink = {
+      version: draft.version,
+      author:  req.user.sub,
+      at:      new Date().toISOString(),
+      note,
+    }
+
+    await transitionVersionStatus(pool, draftVersionId, 'ACTIVE', forwardLink)
+
+    await writeAuditEntry(pool, {
+      operation:    'WRITE',
+      tool:         'dashboard-promote',
+      author:       req.user.sub,
+      author_role:  req.user.role,
+      q_project_id: qProjectId,
+      governance_json: { topic, key, note, draft_version: draft.version },
+      outcome_json:    { status: 'ACTIVE', version: draft.version, version_id: draftVersionId },
+      version_impact:  { versions_created: [], versions_superseded: [] },
+    })
+
+    res.json({ promoted: true, version: draft.version, version_id: draftVersionId, topic, key })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── POST /api/knowledge/:topic/:key/supersede ──────────────────────────────────
+
+/**
+ * Replace the current ACTIVE version with a new version (atomic transaction).
+ * principal_architect only.
+ *
+ * The old ACTIVE version is atomically transitioned to SUPERSEDED while the new
+ * version is inserted as ACTIVE — both operations run in a single pg transaction
+ * to guarantee consistency.
+ *
+ * @route POST /api/knowledge/:topic/:key/supersede
+ */
+router.post('/knowledge/:topic/:key/supersede', jsonSmall, peWriteLimit, async (req, res, next) => {
+  if (!requirePrincipalArchitect(req, res)) return
+
+  const { topic, key } = req.params
+  const body = req.body ?? {}
+  const { content, entity_type, tags, confidence, reason } = body
+
+  // Build fields object without undefined values so validateKnowledgeInput's
+  // presence checks ('tags' in fields, 'confidence' in fields, 'reason' in fields)
+  // behave correctly. topic/key always come from URL params.
+  const validationFields = { topic, key, content, entity_type }
+  if ('tags' in body) validationFields.tags = tags
+  if ('confidence' in body) validationFields.confidence = confidence
+  if ('reason' in body) validationFields.reason = reason
+
+  try {
+    validateKnowledgeInput(validationFields, { requireReason: true })
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: 'validation_error', field: err.field, message: err.message })
+    }
+    throw err
+  }
+
+  try {
+    const pool = req.app.locals.pool
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const qKeyId  = await getOrCreateKey(pool, qProjectId, topic, key)
+    const current = await getCurrentVersion(pool, qKeyId)
+
+    if (!current) {
+      return res.status(404).json({ error: 'no_active', message: `No ACTIVE version found for ${topic}:${key}` })
+    }
+
+    const nextVer      = await getNextVersionNumber(pool, qKeyId)
+    const newVersionId = `${qKeyId}_v${nextVer}`
+    const oldVersionId = `${qKeyId}_v${current.version}`
+    const contentHash  = createHash('sha256').update(content).digest('hex')
+    const author       = req.user.sub
+    const authorRole   = req.user.role
+
+    const client = await pool.connect()
+    let newVersion
+    try {
+      await client.query('BEGIN')
+
+      newVersion = await insertVersion(client, {
+        version_id:         newVersionId,
+        q_key_id:           qKeyId,
+        q_project_id:       qProjectId,
+        topic,
+        key,
+        summary:            content,
+        entity_type,
+        tags:               tags ?? [],
+        confidence:         confidence ?? 0.7,
+        author,
+        author_role:        authorRole,
+        author_type:        'human',
+        triggered_by:       'dashboard',
+        content_hash:       contentHash,
+        version:            nextVer,
+        status:             'ACTIVE',
+        supersedes_version: current.version,
+        supersedes_reason:  reason,
+      })
+
+      const forwardLink = {
+        version: nextVer,
+        author,
+        at:      new Date().toISOString(),
+        reason,
+      }
+      await transitionVersionStatus(client, oldVersionId, 'SUPERSEDED', forwardLink)
+
+      await client.query('COMMIT')
+    } catch (txErr) {
+      try { await client.query('ROLLBACK') } catch { /* ignore */ }
+      throw txErr
+    } finally {
+      client.release()
+    }
+
+    await writeAuditEntry(pool, {
+      operation:    'WRITE',
+      tool:         'dashboard-supersede',
+      author,
+      author_role:  authorRole,
+      q_project_id: qProjectId,
+      content_hash: contentHash,
+      governance_json: { topic, key, reason, entity_type, confidence: confidence ?? 0.7 },
+      outcome_json:    { status: 'ACTIVE', new_version: nextVer, superseded_version: current.version },
+      version_impact:  { versions_created: [newVersionId], versions_superseded: [oldVersionId] },
+    })
+
+    res.json({ new_version: newVersion, superseded_version: current.version })
   } catch (err) {
     next(err)
   }
