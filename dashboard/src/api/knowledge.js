@@ -79,5 +79,6 @@ export function useKnowledgeWrite(onSuccess) {
 
 function invalidate(queryClient) {
   queryClient.invalidateQueries({ queryKey: ['knowledge'] })
+  queryClient.invalidateQueries({ queryKey: ['knowledge-detail'] })
   queryClient.invalidateQueries({ queryKey: ['stats'] })
 }
