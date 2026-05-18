@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "description": "Quorum monorepo — governed engineering memory for Claude Code and AI agents",
   "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "workspaces": [
     "gateway",
