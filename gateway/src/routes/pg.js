@@ -42,6 +42,7 @@
 
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
+import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
 import {
   getProjectByGroupId,
   getOrCreateKey,
@@ -300,6 +301,23 @@ router.post('/versions/supersede', async (req, res) => {
     return res.status(400).json({ error: 'topic_key_required', message: 'new_version.topic and new_version.key required' })
   }
 
+  try {
+    validateKnowledgeInput({
+      topic:       newVersion.topic,
+      key:         newVersion.key,
+      content:     newVersion.summary,   // same field mapping: summary → content
+      entity_type: newVersion.entity_type,
+      ...('tags'        in newVersion && { tags:       newVersion.tags }),
+      ...('confidence'  in newVersion && { confidence: newVersion.confidence }),
+      ...(supersedesReason != null    && { reason:     supersedesReason }),
+    }, { requireReason: true })
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: 'validation_error', field: err.field, message: err.message })
+    }
+    throw err
+  }
+
   const qKeyId = await resolveKey(pool, qProjectId, topic, key)
   const version = newVersion.version
   const versionId = `${qKeyId}_v${version}`
@@ -350,6 +368,22 @@ router.post('/versions', async (req, res) => {
 
   if (!topic || !key) {
     return res.status(400).json({ error: 'topic_key_required', message: 'topic and key required' })
+  }
+
+  try {
+    validateKnowledgeInput({
+      topic:       req.body.topic,
+      key:         req.body.key,
+      content:     req.body.summary,   // MCP sends 'summary'; map to 'content' for validate
+      entity_type: req.body.entity_type,
+      ...('tags'       in req.body && { tags:       req.body.tags }),
+      ...('confidence' in req.body && { confidence: req.body.confidence }),
+    })
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json({ error: 'validation_error', field: err.field, message: err.message })
+    }
+    throw err
   }
 
   const qKeyId = await resolveKey(pool, qProjectId, topic, key)
