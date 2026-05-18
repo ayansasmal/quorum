@@ -337,3 +337,33 @@ On any successful write, invalidate `['knowledge']` and `['stats']` TanStack Que
 - `POST /api/knowledge/:topic/:key/supersede` — 404 when no ACTIVE, atomicity (no partial state), 403 for non-PE
 - `POST /pg/versions` — confirm validation now fires (regression: previously unvalidated)
 - MCP Zod schemas — unit test that over-length content and HTML chars are rejected before gateway call
+
+---
+
+## 12. Documentation Updates (both repos)
+
+Must be completed after implementation, before merging.
+
+### `engram` repo
+
+| File | What to update |
+|------|---------------|
+| `CLAUDE.md` | Add dashboard write surface under Current State; note `principal_architect` write capability |
+| `docs/ARCHITECTURE.md` | Add dashboard write paths to the key flows section; update dashboard capabilities list |
+| `docs/FRONTEND.md` | Document new components (`KnowledgeForm`, `ConfirmDialog`); update Knowledge page description |
+| `docs/TESTING.md` | Add `validate.js` unit tests and new route tests to test strategy |
+| `docs/MANUAL-TESTS.md` | Add manual test cases for PE create / promote / supersede flows + confirmation dialogs |
+| `docs/adr/0001-knowledge-lifecycle-state-machine.md` | Add dashboard as a third write source alongside MCP and review flow |
+| `docs/adr/0002-constitutional-invariants.md` | Note `author_type: 'human'` is now written; document validation constraints as a constitutional rule |
+| `docs/adr/0003-governance-and-authority-model.md` | Document `principal_architect` direct-ACTIVE privilege |
+| `gateway/CLAUDE.md` | Document 3 new routes; add `validate.js` to shared modules table |
+
+### `quorum-mcp` repo
+
+| File | What to update |
+|------|---------------|
+| `CLAUDE.md` | Note `validate.js` is now a shared module requiring sync with gateway |
+| `README.md` | Add content constraints to the knowledge authoring section |
+| `skill/SKILL.md` | Update `remember()` usage section with constraint callout |
+| `skill/references/knowledge-guidelines.md` | Add Content Constraints section (per §7 of this spec) |
+| `skill/references/tool-reference.md` | Update `remember` / `reflect` parameter docs with max lengths and format rules |
