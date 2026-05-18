@@ -40,8 +40,8 @@ src/
     sync.js               — POST /sync/configs (S3→DDB sync, EventBridge-compatible; dual auth)
     bump.js               — POST /api/bump/:topic/:key (confidence endorsement, 7-day cooldown)
     projects.js           — Project listing (legacy /auth/projects + /auth/switch return 410)
-    dashboard.js          — Dashboard BFF routes (/api/stats, /api/graph, /api/knowledge, /api/search, /api/pending)
-                            POST /api/knowledge (create — all roles; PE→ACTIVE, others→DRAFT), POST /api/knowledge/:topic/:key/promote (DRAFT→ACTIVE, PE only), POST /api/knowledge/:topic/:key/supersede (atomic supersede, PE only). validateKnowledgeInput + audit chain on all three. Rate-limited 10/min/IP, 4KB payload cap.
+    dashboard.js          — Dashboard BFF routes (/api/stats, /api/graph, /api/knowledge, /api/search, /api/pending, /api/drafts)
+                            POST /api/knowledge (create — all roles; PE→ACTIVE, others→DRAFT; confidence floored at base_confidence; PE 409s on duplicate ACTIVE, non-PE can DRAFT alongside an existing ACTIVE), GET /api/drafts (DRAFT entries awaiting PE review), POST /api/knowledge/:topic/:key/promote (DRAFT→ACTIVE, PE only), POST /api/knowledge/:topic/:key/supersede (atomic supersede, PE only). validateKnowledgeInput + audit chain on all three. Rate-limited 10/min/IP, 4KB payload cap.
     user.js               — GET /user/profile/:username (Redis → DDB)
     admin.js              — Platform admin management (/admin/config, /admin/users)
     governance.js         — LLM conflict detection via OpenAI
