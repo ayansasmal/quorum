@@ -8,7 +8,7 @@
  */
 
 /** @type {readonly string[]} */
-const VALID_ENTITY_TYPES = ['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement']
+export const VALID_ENTITY_TYPES = ['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement']
 
 const SLUG_RE = /^[a-z0-9-]+$/
 
@@ -27,7 +27,6 @@ export class ValidationError extends Error {
     super(`ValidationError[${field}]: ${message}`)
     this.name = 'ValidationError'
     this.field = field
-    this.message = message
   }
 }
 
@@ -154,7 +153,7 @@ export function validateKnowledgeInput(fields = {}, opts = {}) {
   }
 
   // 7. reason — required when opts.requireReason, otherwise validated only if present
-  const reasonPresent = 'reason' in fields && fields.reason !== undefined
+  const reasonPresent = 'reason' in fields && fields.reason != null
   if (opts.requireReason && !reasonPresent) {
     fail('reason', 'reason is required for this operation (min 10 chars)')
   }

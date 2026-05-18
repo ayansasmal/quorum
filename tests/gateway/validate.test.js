@@ -19,21 +19,20 @@ const MINIMAL = {
 // ── ValidationError class ─────────────────────────────────────────────────────
 
 describe('ValidationError', () => {
-  it('carries field, message, and name', () => {
+  it('carries field, name, and composite message', () => {
     const err = new ValidationError('content', 'too long')
     expect(err.name).toBe('ValidationError')
     expect(err.field).toBe('content')
-    expect(err.message).toBe('too long')
+    expect(err.message).toBe('ValidationError[content]: too long')
     expect(err instanceof Error).toBe(true)
     expect(err instanceof ValidationError).toBe(true)
   })
 
-  it('message is the short description passed to constructor', () => {
+  it('message is the full composite string set by super()', () => {
     const err = new ValidationError('topic', 'invalid chars')
-    // The spec assigns this.message = message (the short string),
-    // so err.message is the human-readable field message.
-    expect(err.message).toBe('invalid chars')
-    // The full detail lives in the Error super() call — accessible via stack / cause chain.
+    // super() sets the full composite — this.message is never overwritten.
+    expect(err.message).toBe('ValidationError[topic]: invalid chars')
+    expect(err.field).toBe('topic')
     expect(String(err)).toContain('ValidationError')
   })
 })
@@ -63,6 +62,18 @@ describe('validateKnowledgeInput: valid inputs', () => {
     expect(() =>
       validateKnowledgeInput({ ...MINIMAL, content: 'a'.repeat(500) }),
     ).not.toThrow()
+  })
+
+  it('throws on empty object — content is required', () => {
+    const err = (() => {
+      try {
+        validateKnowledgeInput({})
+      } catch (e) {
+        return e
+      }
+    })()
+    expect(err).toBeInstanceOf(ValidationError)
+    expect(err.field).toBe('content')
   })
 })
 
@@ -211,6 +222,10 @@ describe('validateKnowledgeInput: tags', () => {
       validateKnowledgeInput({ ...MINIMAL, tags: ['a'.repeat(40)] }),
     ).not.toThrow()
   })
+
+  it('accepts an empty tags array', () => {
+    expect(() => validateKnowledgeInput({ ...MINIMAL, tags: [] })).not.toThrow()
+  })
 })
 
 // ── confidence validation ─────────────────────────────────────────────────────
@@ -240,6 +255,19 @@ describe('validateKnowledgeInput: reason', () => {
     expect(() =>
       validateKnowledgeInput(MINIMAL, { requireReason: true }),
     ).toThrow(ValidationError)
+  })
+
+  it('throws when requireReason is true and reason is null', () => {
+    const err = (() => {
+      try {
+        validateKnowledgeInput({ ...MINIMAL, reason: null }, { requireReason: true })
+      } catch (e) {
+        return e
+      }
+    })()
+    expect(err).toBeInstanceOf(ValidationError)
+    expect(err.field).toBe('reason')
+    expect(err.message).toContain('required')
   })
 
   it('throws when reason has 9 characters', () => {
