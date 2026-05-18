@@ -90,14 +90,12 @@ export default function Knowledge() {
           <option value="">All types</option>
           {ENTITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        {isPE && (
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="rounded-md bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-medium"
-          >
-            + Add entry
-          </button>
-        )}
+        <button
+          onClick={() => setShowCreateForm(true)}
+          className="rounded-md bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-medium"
+        >
+          + Add entry
+        </button>
       </div>
 
       {/* Success banner */}

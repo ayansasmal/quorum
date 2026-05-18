@@ -840,15 +840,14 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
 // ── POST /api/knowledge ────────────────────────────────────────────────────────
 
 /**
- * Create a new ACTIVE knowledge entry (principal_architect only).
+ * Create a knowledge entry. principal_architect → ACTIVE; all other roles → DRAFT.
  *
  * Server-side fields (never taken from req.body):
- *   author, author_type, triggered_by, content_hash, q_project_id
+ *   author, author_type, triggered_by, content_hash, q_project_id, status
  *
  * @route POST /api/knowledge
  */
 router.post('/knowledge', peWriteLimit, async (req, res, next) => {
-  if (!requirePrincipalArchitect(req, res)) return
 
   const bodyBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}), 'utf8')
   if (bodyBytes > 4096) {
@@ -910,7 +909,7 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
       triggered_by: 'dashboard',
       content_hash: contentHash,
       version:      nextVer,
-      status:       'ACTIVE',
+      status:       req.user.role === 'principal_architect' ? 'ACTIVE' : 'DRAFT',
     }
 
     const inserted = await insertVersion(pool, record)
@@ -923,7 +922,7 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
       q_project_id: qProjectId,
       content_hash: contentHash,
       governance_json: { topic, key, entity_type, confidence: record.confidence },
-      outcome_json:    { status: 'ACTIVE', version: nextVer, version_id: versionId },
+      outcome_json:    { status: record.status, version: nextVer, version_id: versionId },
       version_impact:  { versions_created: [versionId], versions_superseded: [] },
     })
 
