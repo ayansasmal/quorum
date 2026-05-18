@@ -13,7 +13,7 @@
  *   POST /api/bump/:topic/:key         — confidence endorsement (dashboard version)
  */
 
-import express, { Router } from 'express'
+import { Router } from 'express'
 import {
   getProjectByGroupId,
   getOrCreateKey,
@@ -36,9 +36,6 @@ import { validateKnowledgeInput, ValidationError } from '../shared/graph/validat
 import { createHash } from 'node:crypto'
 
 const router = Router()
-
-/** 4 KB body limit for PE knowledge write endpoints. */
-const jsonSmall = express.json({ limit: '4kb' })
 
 /**
  * Per-IP rate limiter for PE knowledge write endpoints (10 writes/min/IP).
@@ -850,8 +847,13 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
  *
  * @route POST /api/knowledge
  */
-router.post('/knowledge', jsonSmall, peWriteLimit, async (req, res, next) => {
+router.post('/knowledge', peWriteLimit, async (req, res, next) => {
   if (!requirePrincipalArchitect(req, res)) return
+
+  const bodyBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}), 'utf8')
+  if (bodyBytes > 4096) {
+    return res.status(413).json({ error: 'payload_too_large', message: 'Request body must be under 4 KB' })
+  }
 
   const body = req.body ?? {}
   const { topic, key, content, entity_type, tags, confidence } = body
@@ -877,6 +879,15 @@ router.post('/knowledge', jsonSmall, peWriteLimit, async (req, res, next) => {
     if (!qProjectId) return
 
     const qKeyId      = await getOrCreateKey(pool, qProjectId, topic, key)
+
+    const existing = await getCurrentVersion(pool, qKeyId)
+    if (existing) {
+      return res.status(409).json({
+        error:   'already_exists',
+        message: `An ACTIVE version already exists for ${topic}:${key}. Use supersede to update it.`,
+      })
+    }
+
     const nextVer     = await getNextVersionNumber(pool, qKeyId)
     const versionId   = `${qKeyId}_v${nextVer}`
     const contentHash = createHash('sha256').update(content).digest('hex')
@@ -929,18 +940,23 @@ router.post('/knowledge', jsonSmall, peWriteLimit, async (req, res, next) => {
  *
  * @route POST /api/knowledge/:topic/:key/promote
  */
-router.post('/knowledge/:topic/:key/promote', jsonSmall, peWriteLimit, async (req, res, next) => {
+router.post('/knowledge/:topic/:key/promote', peWriteLimit, async (req, res, next) => {
   if (!requirePrincipalArchitect(req, res)) return
+
+  const bodyBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}), 'utf8')
+  if (bodyBytes > 4096) {
+    return res.status(413).json({ error: 'payload_too_large', message: 'Request body must be under 4 KB' })
+  }
 
   const { topic, key } = req.params
   const { note } = req.body ?? {}
 
-  // Validate note inline: required, 10–500 chars, no HTML
-  if (typeof note !== 'string' || note.trim().length === 0) {
+  // Validate note using the same rules as the shared reason validator.
+  if (note == null || typeof note !== 'string' || note.trim().length === 0) {
     return res.status(400).json({ error: 'validation_error', field: 'note', message: 'note is required for this operation (min 10 chars)' })
   }
-  if (note.length < 10) {
-    return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at least 10 characters (got ${note.length})` })
+  if (note.trim().length < 10) {
+    return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at least 10 characters (got ${note.trim().length})` })
   }
   if (note.length > 500) {
     return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at most 500 characters (got ${note.length})` })
@@ -962,14 +978,20 @@ router.post('/knowledge/:topic/:key/promote', jsonSmall, peWriteLimit, async (re
     }
 
     const draftVersionId = `${qKeyId}_v${draft.version}`
-    const forwardLink = {
-      version: draft.version,
-      author:  req.user.sub,
-      at:      new Date().toISOString(),
-      note,
-    }
 
-    await transitionVersionStatus(pool, draftVersionId, 'ACTIVE', forwardLink)
+    const client = await pool.connect()
+    let promoted
+    try {
+      await client.query('BEGIN')
+      const forwardLink = { version: draft.version, author: req.user.sub, at: new Date().toISOString(), note }
+      promoted = await transitionVersionStatus(client, draftVersionId, 'ACTIVE', forwardLink)
+      await client.query('COMMIT')
+    } catch (txErr) {
+      try { await client.query('ROLLBACK') } catch { /* ignore */ }
+      throw txErr
+    } finally {
+      client.release()
+    }
 
     await writeAuditEntry(pool, {
       operation:    'WRITE',
@@ -1000,8 +1022,13 @@ router.post('/knowledge/:topic/:key/promote', jsonSmall, peWriteLimit, async (re
  *
  * @route POST /api/knowledge/:topic/:key/supersede
  */
-router.post('/knowledge/:topic/:key/supersede', jsonSmall, peWriteLimit, async (req, res, next) => {
+router.post('/knowledge/:topic/:key/supersede', peWriteLimit, async (req, res, next) => {
   if (!requirePrincipalArchitect(req, res)) return
+
+  const bodyBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}), 'utf8')
+  if (bodyBytes > 4096) {
+    return res.status(413).json({ error: 'payload_too_large', message: 'Request body must be under 4 KB' })
+  }
 
   const { topic, key } = req.params
   const body = req.body ?? {}

@@ -113,7 +113,7 @@ beforeEach(() => {
   fakePool.connect.mockResolvedValue(fakeClient)
 
   // Reset rate limiter state so each test starts with a clean window
-  if (peWriteLimit._windows) peWriteLimit._windows.clear()
+  peWriteLimit._windows = new Map()
 
   // Restore default mocks after clearAllMocks
   getOrCreateKey.mockResolvedValue('q_k1')
@@ -207,6 +207,8 @@ describe('POST /api/knowledge', () => {
   })
 
   it('returns 201 on valid input from a principal_architect', async () => {
+    getCurrentVersion.mockResolvedValue(null)
+
     const { status, body } = await post('/api/knowledge', validBody)
 
     expect(status).toBe(201)
@@ -214,6 +216,7 @@ describe('POST /api/knowledge', () => {
   })
 
   it('sets author_type to human (never from body)', async () => {
+    getCurrentVersion.mockResolvedValue(null)
     await post('/api/knowledge', validBody)
 
     expect(insertVersion).toHaveBeenCalledWith(
@@ -223,12 +226,34 @@ describe('POST /api/knowledge', () => {
   })
 
   it('writes an audit entry on success', async () => {
+    getCurrentVersion.mockResolvedValue(null)
     await post('/api/knowledge', validBody)
 
     expect(writeAuditEntry).toHaveBeenCalledWith(
       fakePool,
       expect.objectContaining({ operation: 'WRITE', tool: 'dashboard-create' }),
     )
+  })
+
+  it('returns 413 when body exceeds 4 KB', async () => {
+    const largeBody = {
+      ...validBody,
+      content: 'x'.repeat(5000),
+    }
+
+    const { status, body } = await post('/api/knowledge', largeBody)
+
+    expect(status).toBe(413)
+    expect(body.error).toBe('payload_too_large')
+  })
+
+  it('returns 409 when an ACTIVE version already exists', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 1, confidence: 0.7 })
+
+    const { status, body } = await post('/api/knowledge', validBody)
+
+    expect(status).toBe(409)
+    expect(body.error).toBe('already_exists')
   })
 })
 
@@ -283,15 +308,18 @@ describe('POST /api/knowledge/:topic/:key/promote', () => {
     })
   })
 
-  it('calls transitionVersionStatus with ACTIVE', async () => {
+  it('calls transitionVersionStatus with ACTIVE inside a transaction', async () => {
     await post('/api/knowledge/infra/retry-policy/promote', validNote)
 
     expect(transitionVersionStatus).toHaveBeenCalledWith(
-      fakePool,
+      fakeClient,
       'q_k1_v2',
       'ACTIVE',
       expect.objectContaining({ version: 2 }),
     )
+    const calls = fakeClient.query.mock.calls.map((c) => c[0])
+    expect(calls).toContain('BEGIN')
+    expect(calls).toContain('COMMIT')
   })
 })
 
