@@ -608,15 +608,16 @@ After running all scenarios, confirm:
 
 ---
 
-## PE Knowledge Write Flows
+## Knowledge Write Flows
 
-### Create new entry
-1. Log in as `principal_architect`
-2. Navigate to `/knowledge`
-3. Click "+ Add entry" — KnowledgeForm modal opens
-4. Fill all fields; submit → entry appears in list with ACTIVE status
-5. Try submitting with content > 500 chars → validation error shown inline
-6. Try submitting with HTML in content (`<b>test</b>`) → validation error shown
+### Create new entry (all roles)
+1. Log in as any authenticated user; navigate to `/knowledge`
+2. Click "+ Add entry" — KnowledgeForm modal opens
+3. Fill all fields; submit
+   - As `principal_architect` → entry appears in list with **ACTIVE** status
+   - As any other role → entry goes to **DRAFT** (visible at `/pending`, not in the browse list)
+4. Try submitting with content > 500 chars → validation error shown inline
+5. Try submitting with HTML in content (`<b>test</b>`) → validation error shown
 
 ### Promote DRAFT to Active
 1. Navigate to `/knowledge`, open the detail drawer on a DRAFT entry

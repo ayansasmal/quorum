@@ -46,7 +46,7 @@ The MCP server (`@as-quorum/mcp`, maintained in the `quorum-mcp` repo) hosts the
 - The dashboard connects through the gateway (GitHub OAuth → ES256 JWT → BFF API)
 - The MCP server routes all Graphiti calls through `/graphiti/*`; the gateway injects `group_id` from the JWT claim
 - Identity chain: JWT (gateway) → `QUORUM_AUTHOR` env → git email → anonymous; dashboard uses GitHub OAuth
-- **Dashboard write (PE only):** `POST /api/knowledge` / `promote` / `supersede` → role gate → `validateKnowledgeInput` → PostgreSQL (`insertVersion` or `atomicSupersede`) → Graphiti (via `/graphiti/*`) → `writeAuditEntry`. `author_type: 'human'`, `triggered_by: 'dashboard'`. Rate-limited 10/min/IP, 4 KB payload cap.
+- **Dashboard write:** `POST /api/knowledge` open to all roles (PE → `ACTIVE`, others → `DRAFT`); `promote` and `supersede` are PE-only. All three: `validateKnowledgeInput` → PostgreSQL (`insertVersion` or `atomicSupersede`) → Graphiti (via `/graphiti/*`) → `writeAuditEntry`. `author_type: 'human'`, `triggered_by: 'dashboard'`. Rate-limited 10/min/IP, 4 KB payload cap.
 
 ---
 
