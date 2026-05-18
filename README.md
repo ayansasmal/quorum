@@ -2,7 +2,15 @@
 
 > *Every AI dystopia film has the same root cause — humans removed themselves from the decision loop. Quorum puts them back in.*
 
-**Quorum** is an open-source governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+**Quorum** is a governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+
+---
+
+## Who is this for?
+
+**Engineering teams using Claude Code or multi-agent AI.** If your agents make architectural decisions, write code, or give advice — and if those decisions need to be consistent, auditable, and human-approved — Quorum is the governance layer that makes that possible.
+
+See [docs/WHY.md](docs/WHY.md) for business cases and real-world narratives.
 
 ---
 
@@ -59,13 +67,16 @@ Quorum checks existing knowledge graph
 
 ```
 Claude Code / AI Agents
-        │ MCP
+        │ MCP (stdio)
         ▼
 ┌─────────────────────┐
-│  Quorum MCP Server  │
+│  quorum-mcp         │  ← npm install -g @as-quorum/mcp
 │  (Node.js)          │
-├─────────────────────┤
-│  Governance Layer   │  ← The differentiator
+└──────────┬──────────┘
+           │ HTTP + JWT
+┌──────────▼──────────┐
+│  Quorum Gateway     │  ← this repo (self-hosted)
+│  Governance Layer   │
 │  Conflict detection │
 │  Authority weights  │
 │  Provenance track   │
@@ -77,8 +88,8 @@ Claude Code / AI Agents
 └──────────┬──────────┘
            │
 ┌──────────▼──────────┐
-│  FalkorDB / Neo4j   │  ← Graph storage
-│  / AWS Neptune      │
+│  FalkorDB           │  ← Graph storage
+│  PostgreSQL         │  ← Audit chain (SHA256, append-only)
 └─────────────────────┘
 ```
 
@@ -86,19 +97,36 @@ Claude Code / AI Agents
 
 ## Quick Start
 
+**Step 1 — Self-host the gateway** (requires Docker):
+
 ```bash
-git clone https://github.com/yourusername/quorum
+git clone https://github.com/ayansasmal/quorum
 cd quorum
-cp .env.example .env   # add your LLM API key
+cp .env.example .env     # add OPENAI_API_KEY (used by Graphiti)
+./scripts/setup.sh docker
+```
 
-docker-compose up -d
+**Step 2 — Install the MCP server on each engineer's machine:**
 
-# Add to Claude Code
-claude mcp add quorum -- node /path/to/quorum/src/server.js
+```bash
+npm install -g @as-quorum/mcp
+quorum install   # installs skill, hooks, and registers MCP with Claude Code
+```
 
-# Verify
+**Step 3 — Connect a project:**
+
+```bash
+cd your-project
+quorum init      # creates .quorum file with the project group_id
+```
+
+**Step 4 — Verify:**
+
+```bash
 claude "What does Quorum know about auth?"
 ```
+
+> For full setup, troubleshooting, and production deployment: [QUICKSTART.md](docs/QUICKSTART.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ---
 
@@ -121,6 +149,7 @@ claude "What does Quorum know about auth?"
 | Tool | Description |
 |---|---|
 | `review(action, topic, key, reviewer, note)` | Approve / reject / request changes on DRAFT knowledge |
+| `pending()` | Surface unresolved conflicts and DRAFTs awaiting human review |
 
 **Integrations (v0.4):**
 
@@ -168,8 +197,8 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 - **v0.1** — Core MCP server + Graphiti integration + conflict detection
 - **v0.2** — Full governance (authority weighting, human-in-the-loop, confidence scoring)
-- **v0.3** — Self-evolving Claude Code skill
-- **v0.4** — Export (Markdown + Confluence) + multi-team namespacing
+- **v0.3** — Self-evolving Claude Code skill + dashboard knowledge write + DRAFT review queue ✅
+- **v0.4** — PR ingestion + Atlassian integration (Jira + Confluence)
 - **v1.0** — Production ready
 - **Future** — Confluence ingestion, Draw.io parsing, cross-org federation
 
@@ -177,4 +206,4 @@ Quorum applies the same principle to engineering knowledge. Not a system that *p
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Apache 2.0 licensed.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Elastic License 2.0.
