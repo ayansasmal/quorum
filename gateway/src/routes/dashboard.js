@@ -593,6 +593,36 @@ router.get('/search', async (req, res, next) => {
   }
 })
 
+// ── GET /api/drafts ───────────────────────────────────────────────────────────
+
+/**
+ * Return all DRAFT knowledge versions for the current project, ordered oldest-first.
+ * Used by the Pending page to surface non-PE DRAFT entries awaiting PE review.
+ *
+ * Separate from /pg/pending (which returns conflict decisions) — DRAFTs are
+ * governance-pending entries, not conflict-queue entries.
+ */
+router.get('/drafts', async (req, res, next) => {
+  try {
+    const pool        = req.app.locals.pool
+    const qProjectId  = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const { rows } = await pool.query(
+      `SELECT version_id, topic, key, entity_type, confidence, author, author_role,
+              tags, summary AS content, created_at, status
+       FROM knowledge_versions
+       WHERE q_project_id = $1 AND status = 'DRAFT'
+       ORDER BY created_at ASC`,
+      [qProjectId],
+    )
+
+    res.json({ drafts: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── POST /api/review/:conflictId ───────────────────────────────────────────────
 
 /**
@@ -842,8 +872,15 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
 /**
  * Create a knowledge entry. principal_architect → ACTIVE; all other roles → DRAFT.
  *
+ * PE cannot create a duplicate ACTIVE entry — they must use the supersede route instead.
+ * Non-PE can create a DRAFT even when an ACTIVE version already exists for the same key
+ * (the DRAFT is a proposal for the PE to review and promote).
+ *
+ * Confidence is floored at req.user.base_confidence (role default: 0.7) to mirror the
+ * MCP storeFirst() behaviour and enforce authority-weighted minimums.
+ *
  * Server-side fields (never taken from req.body):
- *   author, author_type, triggered_by, content_hash, q_project_id, status
+ *   author, author_type, triggered_by, content_hash, q_project_id, status, confidence floor
  *
  * @route POST /api/knowledge
  */
@@ -879,8 +916,10 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
 
     const qKeyId      = await getOrCreateKey(pool, qProjectId, topic, key)
 
+    // PE cannot create a duplicate ACTIVE entry — they must supersede instead.
+    // Non-PE creates DRAFTs, which can coexist alongside an existing ACTIVE version.
     const existing = await getCurrentVersion(pool, qKeyId)
-    if (existing) {
+    if (existing && req.user.role === 'principal_architect') {
       return res.status(409).json({
         error:   'already_exists',
         message: `An ACTIVE version already exists for ${topic}:${key}. Use supersede to update it.`,
@@ -893,6 +932,9 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
     const author      = req.user.sub
     const authorRole  = req.user.role
 
+    // Apply role-based confidence floor — mirrors MCP storeFirst() behaviour.
+    const floor = req.user.base_confidence ?? 0.7
+
     const record = {
       version_id:   versionId,
       q_key_id:     qKeyId,
@@ -902,7 +944,7 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
       summary:      content,
       entity_type,
       tags:         tags ?? [],
-      confidence:   confidence ?? 0.7,
+      confidence:   Math.max(confidence ?? floor, floor),
       author,
       author_role:  authorRole,
       author_type:  'human',
