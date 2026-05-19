@@ -23,6 +23,21 @@ const router = Router()
 // All governance endpoints require a valid JWT
 router.use(verifyJwt)
 
+// ── Input sanitizer ────────────────────────────────────────────────────────────
+
+/**
+ * Sanitize a user-controlled string before interpolating it into an LLM prompt.
+ * Normalises smart quotes, escapes backtick fences, and caps length to 2000 chars.
+ * Returns an empty string for non-string inputs.
+ *
+ * @param {unknown} s
+ * @returns {string}
+ */
+function sanitizeForPrompt(s) {
+  if (typeof s !== 'string') return ''
+  return s.replace(/["""]/g, '"').replace(/```/g, "'''").slice(0, 2000)
+}
+
 // ── Prompt builders ────────────────────────────────────────────────────────────
 
 /**
@@ -59,10 +74,10 @@ CONSTRAINTS:
 - Reply with only valid JSON.`,
 
     user: `Knowledge A (existing):
-"${existing}"
+"${sanitizeForPrompt(existing)}"
 
 Knowledge B (incoming):
-"${incoming}"
+"${sanitizeForPrompt(incoming)}"
 
 Decide whether B contradicts A. Return the JSON object as specified.`,
   }
@@ -81,7 +96,7 @@ Decide whether B contradicts A. Return the JSON object as specified.`,
  */
 function buildEnrichPrompt(existing, incoming, conflictReason, possibleSplit, splitSuggestion) {
   const splitNote = possibleSplit && splitSuggestion
-    ? `Split suggestion: ${splitSuggestion}`
+    ? `Split suggestion: ${sanitizeForPrompt(splitSuggestion)}`
     : ''
 
   return {
@@ -112,13 +127,13 @@ CONSTRAINTS:
 - Reply with only valid JSON.`,
 
     user: `Existing knowledge:
-"${existing}"
+"${sanitizeForPrompt(existing)}"
 
 Incoming knowledge:
-"${incoming}"
+"${sanitizeForPrompt(incoming)}"
 
 Conflict reason:
-"${conflictReason}"
+"${sanitizeForPrompt(conflictReason)}"
 ${splitNote}
 Produce the JSON reviewer brief as specified.`,
   }
@@ -135,10 +150,10 @@ Produce the JSON reviewer brief as specified.`,
  */
 function buildExtractPrompt(taskSummary, decisionsMade, patternsUsed) {
   const decisionsBlock = decisionsMade.length > 0
-    ? `\nDecisions made:\n${decisionsMade.map((d) => `- ${d}`).join('\n')}`
+    ? `\nDecisions made:\n${decisionsMade.map((d) => `- ${sanitizeForPrompt(d)}`).join('\n')}`
     : ''
   const patternsBlock = patternsUsed.length > 0
-    ? `\nPatterns used:\n${patternsUsed.map((p) => `- ${p}`).join('\n')}`
+    ? `\nPatterns used:\n${patternsUsed.map((p) => `- ${sanitizeForPrompt(p)}`).join('\n')}`
     : ''
 
   return {
@@ -179,7 +194,7 @@ CONSTRAINTS:
 - Reply with only valid JSON.`,
 
     user: `Task summary:
-"${taskSummary}"${decisionsBlock}${patternsBlock}
+"${sanitizeForPrompt(taskSummary)}"${decisionsBlock}${patternsBlock}
 Extract reusable engineering knowledge per the rules. Return the JSON object as specified.`,
   }
 }

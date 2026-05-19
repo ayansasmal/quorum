@@ -74,19 +74,6 @@ router.post('/:topic/:key', verifyJwt, projectMiddleware, async (req, res, next)
       return next(Errors.notFound(`No ACTIVE knowledge at ${topic}:${key} in this project`))
     }
 
-    // Cooldown check — 7 days per author
-    const bumpLogs = await getBumpLog(pool, { qKeyId, author: caller, limit: 1 })
-    const lastBump = bumpLogs[0] ?? null
-    if (lastBump) {
-      const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
-      if (elapsed < COOLDOWN_MS) {
-        const daysLeft = ((COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000)).toFixed(1)
-        return next(Errors.conflict(
-          `Bump cooldown active — ${daysLeft} day(s) remaining. You bumped this entry ${Math.floor(elapsed / (24 * 60 * 60 * 1000))} day(s) ago.`,
-        ))
-      }
-    }
-
     // Calculate role-weighted delta, capped at starting_confidence
     const weight        = ROLE_WEIGHT[callerRole] ?? ROLE_WEIGHT.engineer
     const delta         = BASE_DELTA * weight
@@ -94,24 +81,53 @@ router.post('/:topic/:key', verifyJwt, projectMiddleware, async (req, res, next)
     const startingConf  = existing.starting_confidence ?? currentConf
     const newConfidence = Math.min(startingConf, currentConf + delta)
 
-    // Write bump_log + update confidence + reset last_accessed_at
-    await Promise.all([
-      recordBump(pool, { qKeyId, author: caller, role: callerRole, delta }),
-      updateConfidence(pool, existing.version_id, newConfidence),
-    ])
+    // Wrap cooldown read, insert, and confidence update in a single transaction
+    // to prevent concurrent double-bumps from the same author.
+    const client = await pool.connect()
+    let responsePayload
+    try {
+      await client.query('BEGIN')
 
-    res.json({
-      topic,
-      key,
-      project_id:       projectId,
-      bumped_by:        caller,
-      role:             callerRole,
-      delta_applied:    parseFloat(delta.toFixed(4)),
-      confidence_before: parseFloat(currentConf.toFixed(4)),
-      confidence_after:  parseFloat(newConfidence.toFixed(4)),
-      starting_confidence: parseFloat(startingConf.toFixed(4)),
-      cooldown_resets_at: new Date(Date.now() + COOLDOWN_MS).toISOString(),
-    })
+      // Cooldown check — 7 days per author (inside the transaction to prevent races)
+      const bumpLogs = await getBumpLog(client, { qKeyId, author: caller, limit: 1 })
+      const lastBump = bumpLogs[0] ?? null
+      if (lastBump) {
+        const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
+        if (elapsed < COOLDOWN_MS) {
+          await client.query('ROLLBACK')
+          const daysLeft = ((COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000)).toFixed(1)
+          return next(Errors.conflict(
+            `Bump cooldown active — ${daysLeft} day(s) remaining. You bumped this entry ${Math.floor(elapsed / (24 * 60 * 60 * 1000))} day(s) ago.`,
+          ))
+        }
+      }
+
+      // INSERT bump_log row (ON CONFLICT DO NOTHING as a secondary guard)
+      await recordBump(client, { qKeyId, author: caller, role: callerRole, delta })
+      await updateConfidence(client, existing.version_id, newConfidence)
+
+      await client.query('COMMIT')
+
+      responsePayload = {
+        topic,
+        key,
+        project_id:          projectId,
+        bumped_by:           caller,
+        role:                callerRole,
+        delta_applied:       parseFloat(delta.toFixed(4)),
+        confidence_before:   parseFloat(currentConf.toFixed(4)),
+        confidence_after:    parseFloat(newConfidence.toFixed(4)),
+        starting_confidence: parseFloat(startingConf.toFixed(4)),
+        cooldown_resets_at:  new Date(Date.now() + COOLDOWN_MS).toISOString(),
+      }
+    } catch (txErr) {
+      try { await client.query('ROLLBACK') } catch { /* ignore */ }
+      throw txErr
+    } finally {
+      client.release()
+    }
+
+    res.json(responsePayload)
   } catch (err) {
     next(err)
   }
