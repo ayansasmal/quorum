@@ -69,9 +69,14 @@ async function makeToken(sub = 'alice') {
     .sign(privateKey)
 }
 
+const mockClient = {
+  query:   vi.fn().mockResolvedValue({}),
+  release: vi.fn(),
+}
+
 const app = express()
 app.use(express.json())
-app.locals.pool = { query: vi.fn() }
+app.locals.pool = { query: vi.fn(), connect: vi.fn().mockResolvedValue(mockClient) }
 app.use('/bump', bumpRoutes)
 // Error handler mirroring server.js
 app.use((err, _req, res, _next) => {
@@ -96,6 +101,8 @@ beforeEach(() => {
   getProjectByGroupId.mockResolvedValue('q_p1')
   getOrCreateKey.mockResolvedValue('q_k1')
   getBumpLog.mockResolvedValue([])
+  mockClient.query.mockResolvedValue({})
+  app.locals.pool.connect.mockResolvedValue(mockClient)
 })
 
 /**

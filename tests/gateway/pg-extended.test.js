@@ -11,12 +11,15 @@ import express from 'express'
 
 // ── Mocks (hoisted) ───────────────────────────────────────────────────────────
 
+// Mutable so individual tests can elevate to principal_architect where the route requires it.
+let mockUserRole = 'engineer'
+
 vi.mock('../../gateway/src/middleware/verify-jwt.js', () => ({
   verifyJwt: (req, _res, next) => {
     req.user = {
       sub:        'alice',
       project:    'q_p1',   // already a q_p* id — skips slow-path DB lookup
-      role:       'engineer',
+      role:       mockUserRole,
       is_admin:   false,
       qProjectId: 'q_p1',
     }
@@ -114,6 +117,7 @@ afterAll(() => server.close())
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockUserRole = 'engineer'
   fakePool.query.mockReset()
   fakePool.connect.mockResolvedValue(fakeClient)
   fakeClient.query.mockReset()
@@ -370,7 +374,8 @@ describe('PATCH /pg/versions/:topic/:key/:version', () => {
     expect(status).toBe(400)
   })
 
-  it('transitions the version status', async () => {
+  it('transitions the version status (principal_architect required for ACTIVE)', async () => {
+    mockUserRole = 'principal_architect'
     const updated = { version_id: 'q_k1_v1', status: 'ACTIVE' }
     transitionVersionStatus.mockResolvedValue(updated)
     const { status, body } = await patch('/pg/versions/auth/jwt-rotation/1', {
@@ -378,6 +383,13 @@ describe('PATCH /pg/versions/:topic/:key/:version', () => {
     })
     expect(status).toBe(200)
     expect(body.version_id).toBe('q_k1_v1')
+  })
+
+  it('returns 403 when engineer tries to transition to ACTIVE', async () => {
+    const { status } = await patch('/pg/versions/auth/jwt-rotation/1', {
+      newStatus: 'ACTIVE',
+    })
+    expect(status).toBe(403)
   })
 })
 
