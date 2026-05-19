@@ -636,6 +636,9 @@ router.get('/drafts', async (req, res, next) => {
  * pg client transaction so they are atomic.
  */
 router.post('/review/:conflictId', async (req, res, next) => {
+  // Only principal_architect can review (approve / reject / request_changes)
+  if (!requirePrincipalArchitect(req, res)) return
+
   const pool       = req.app.locals.pool
   const reviewer   = req.user.sub
   const reviewerRole = req.user.role ?? 'engineer'
@@ -824,44 +827,59 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
       return res.status(404).json({ error: 'not_found', message: `No ACTIVE knowledge at ${topic}:${key}` })
     }
 
-    const bumpLogs = await getBumpLog(pool, { qKeyId, author: caller, limit: 1 })
-    const lastBump = bumpLogs[0] ?? null
-    if (lastBump) {
-      const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
-      if (elapsed < BUMP_COOLDOWN_MS) {
-        const nextAllowed = new Date(new Date(lastBump.bumped_at).getTime() + BUMP_COOLDOWN_MS).toISOString()
-        return res.status(429).json({
-          error:              'cooldown_active',
-          message:            `Bump cooldown active — next allowed at ${nextAllowed}`,
-          next_bump_allowed:  nextAllowed,
-        })
-      }
-    }
-
     const weight       = BUMP_ROLE_WEIGHT[callerRole] ?? BUMP_ROLE_WEIGHT.engineer
     const delta        = BUMP_BASE_DELTA * weight
     const currentConf  = existing.confidence        ?? 0.7
     const startingConf = existing.starting_confidence ?? currentConf
     const newConf      = Math.min(startingConf, currentConf + delta)
 
-    await Promise.all([
-      recordBump(pool, { qKeyId, author: caller, role: callerRole, delta }),
-      updateConfidence(pool, existing.version_id, newConf),
-    ])
+    // Wrap cooldown read + insert + confidence update in a transaction to
+    // prevent concurrent double-bumps from the same author.
+    const client = await pool.connect()
+    let payload
+    try {
+      await client.query('BEGIN')
 
-    res.json({
-      topic,
-      key,
-      project_id:          groupId,
-      bumped_by:           caller,
-      role:                callerRole,
-      delta_applied:       parseFloat(delta.toFixed(4)),
-      confidence_before:   parseFloat(currentConf.toFixed(4)),
-      confidence_after:    parseFloat(newConf.toFixed(4)),
-      starting_confidence: parseFloat(startingConf.toFixed(4)),
-      clock_reset:         true,
-      next_bump_allowed:   new Date(Date.now() + BUMP_COOLDOWN_MS).toISOString(),
-    })
+      const bumpLogs = await getBumpLog(client, { qKeyId, author: caller, limit: 1 })
+      const lastBump = bumpLogs[0] ?? null
+      if (lastBump) {
+        const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
+        if (elapsed < BUMP_COOLDOWN_MS) {
+          await client.query('ROLLBACK')
+          const nextAllowed = new Date(new Date(lastBump.bumped_at).getTime() + BUMP_COOLDOWN_MS).toISOString()
+          return res.status(429).json({
+            error:              'cooldown_active',
+            message:            `Bump cooldown active — next allowed at ${nextAllowed}`,
+            next_bump_allowed:  nextAllowed,
+          })
+        }
+      }
+
+      await recordBump(client, { qKeyId, author: caller, role: callerRole, delta })
+      await updateConfidence(client, existing.version_id, newConf)
+      await client.query('COMMIT')
+
+      payload = {
+        topic,
+        key,
+        project_id:          groupId,
+        bumped_by:           caller,
+        role:                callerRole,
+        delta_applied:       parseFloat(delta.toFixed(4)),
+        confidence_before:   parseFloat(currentConf.toFixed(4)),
+        confidence_after:    parseFloat(newConf.toFixed(4)),
+        starting_confidence: parseFloat(startingConf.toFixed(4)),
+        clock_reset:         true,
+        next_bump_allowed:   new Date(Date.now() + BUMP_COOLDOWN_MS).toISOString(),
+      }
+    } catch (txErr) {
+      try { await client.query('ROLLBACK') } catch { /* ignore */ }
+      throw txErr
+    } finally {
+      client.release()
+    }
+
+    res.json(payload)
   } catch (err) {
     next(err)
   }

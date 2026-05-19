@@ -65,7 +65,12 @@ import adminRoutes from './routes/admin.js'
 import { loadAdminConfig } from './config-cache.js'
 import { startInvalidationSubscriber } from './redis.js'
 import { verifyJwt }   from './middleware/verify-jwt.js'
-import { engineerLimit, projectLimit } from './middleware/rate-limit.js'
+import { engineerLimit, projectLimit, authLimit } from './middleware/rate-limit.js'
+
+// ── Startup guard: rate-limit middleware must be defined ──────────────────────
+if (!engineerLimit || !projectLimit) {
+  throw new Error('[Gateway] FATAL: rate-limit middleware (engineerLimit / projectLimit) failed to initialise')
+}
 
 const PORT = parseInt(process.env.QUORUM_GATEWAY_PORT ?? '3001', 10)
 
@@ -100,8 +105,8 @@ app.locals.pool = pool
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
-app.use('/auth',                              oauthRoutes)  // GET /auth/github (initiates OAuth flow)
-app.use('/auth',                              authRoutes)   // POST /auth/token
+app.use('/auth',      authLimit,               oauthRoutes)  // GET /auth/github (initiates OAuth flow)
+app.use('/auth',      authLimit,               authRoutes)   // POST /auth/token
 app.get('/.well-known/oauth-authorization-server', metadataHandler)  // RFC8414 MCP OAuth metadata
 app.use('/oauth',                             mcpOauthRouter)  // MCP OAuth 2.1 Authorization Server
 app.use('/.well-known/jwks.json',            jwksRoutes)
@@ -219,12 +224,6 @@ app.get('/health', async (_req, res) => {
       redis:      componentStatus(redis),
       s3:         componentStatus(s3),
     },
-    config: {
-      s3_bucket:    S3_BUCKET,
-      s3_endpoint:  S3_ENDPOINT ?? 'aws (real)',
-      graphiti_url: GRAPHITI_URL,
-      redis_url:    process.env.REDIS_URL ?? 'redis://redis:6379',
-    },
     timestamp: new Date().toISOString(),
   })
 })
@@ -241,8 +240,9 @@ app.use((_req, res) => {
 app.use((err, _req, res, _next) => {
   const status = err.status ?? 500
   const code   = err.code   ?? 'INTERNAL_ERROR'
-  if (status >= 500) console.error('[Gateway] Unhandled error:', err.message)
-  res.status(status).json({ error: code.toLowerCase(), message: err.message })
+  if (status >= 500) console.error('[Gateway] Unhandled error:', err.message, err.stack)
+  const message = status >= 500 ? 'Internal server error' : err.message
+  res.status(status).json({ error: code.toLowerCase(), message })
 })
 
 // ── Startup ────────────────────────────────────────────────────────────────────
