@@ -2046,6 +2046,119 @@ paths:
         '404':
           description: No ACTIVE version exists for this topic:key in the project
 
+  /api/knowledge/deprecate/bulk:
+    post:
+      summary: Bulk deprecate ACTIVE knowledge entries (principal_architect only)
+      description: >
+        Transitions multiple ACTIVE knowledge entries to DEPRECATED status in a single call.
+        Partial success is allowed — entries that cannot be deprecated (not found, already
+        deprecated) are listed in the `errors` array while successfully deprecated entries
+        are listed in `deprecated`. Requires `principal_architect` role.
+
+        **Route ordering note:** this path is registered before `/api/knowledge/{topic}/{key}/...`
+        in Express to prevent "deprecate" being matched as the `:topic` parameter.
+      operationId: bulkDeprecateKnowledge
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries, reason]
+              properties:
+                entries:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [topic, key]
+                    properties:
+                      topic: { type: string }
+                      key:   { type: string }
+                reason:
+                  type: string
+                  minLength: 10
+                  description: Why these entries are being deprecated (≥10 chars — Constitutional Rule 3)
+      responses:
+        '200':
+          description: Bulk operation result (partial success allowed)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deprecated, errors]
+                properties:
+                  deprecated:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic: { type: string }
+                        key:   { type: string }
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        topic:   { type: string }
+                        key:     { type: string }
+                        message: { type: string }
+        '400': { description: Missing/empty entries array or reason too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Caller is not principal_architect, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/knowledge/{topic}/{key}/deprecate:
+    post:
+      summary: Deprecate a single ACTIVE knowledge entry (principal_architect only)
+      description: >
+        Transitions an ACTIVE knowledge entry to DEPRECATED status. Never deletes — the version
+        row is preserved with `status = DEPRECATED` (Constitutional Rule 1 — no hard delete).
+        Requires `principal_architect` role and a reason of at least 10 characters
+        (Constitutional Rule 3). Writes an audit entry with `tool: dashboard-deprecate`,
+        `author_type: human`, `triggered_by: dashboard`.
+      operationId: deprecateKnowledgeEntry
+      tags: [Dashboard]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 10
+                  description: Why this entry is being deprecated (≥10 chars — Constitutional Rule 3)
+      responses:
+        '200':
+          description: Entry deprecated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deprecated, topic, key]
+                properties:
+                  deprecated: { type: boolean }
+                  topic:      { type: string }
+                  key:        { type: string }
+        '400': { description: Reason too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Caller is not principal_architect, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: No ACTIVE version exists for this topic:key, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
   /api/search:
     get:
       summary: Search knowledge graph (Graphiti first, PostgreSQL ILIKE fallback)
