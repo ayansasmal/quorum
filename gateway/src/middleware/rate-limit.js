@@ -68,14 +68,19 @@ function createLimiter({ windowMs, max, keyFn, errorCode, errorMessage }) {
  * Per-engineer rate limiter (GAP-14).
  * Key: JWT subject (github username). 300 req/min.
  * Applied to all authenticated gateway routes.
+ *
+ * NOTE: verifyJwt sets req.user (not req.auth) — keyFn reads req.user.sub.
  */
 export const engineerLimit = createLimiter({
   windowMs: 60_000,
   max: 300,
-  keyFn: (req) => req.user?.sub ?? null,
+  keyFn: (req) => req.user?.sub ?? req.ip,
   errorCode: 'ENGINEER_RATE_LIMIT',
   errorMessage: 'Rate limit exceeded — 300 requests/minute per engineer. Slow down your agent.',
 })
+
+// Alias kept for any future callers that import under the old name.
+export const apiLimit = engineerLimit
 
 /**
  * Per-project rate limiter (GAP-31).
@@ -91,4 +96,19 @@ export const projectLimit = createLimiter({
   keyFn: (req) => req.user?.project ?? req.projectId ?? null,
   errorCode: 'PROJECT_RATE_LIMIT',
   errorMessage: 'Project rate limit exceeded — too many concurrent requests from this project. Back off and retry.',
+})
+
+// Alias kept for any future callers that import under the old name.
+export const graphitiLimit = projectLimit
+
+/**
+ * Auth-specific rate limiter — applied to /auth routes to throttle
+ * credential-stuffing and token-endpoint abuse (100 req/min per IP).
+ */
+export const authLimit = createLimiter({
+  windowMs: 60_000,
+  max: 100,
+  keyFn: (req) => req.ip,
+  errorCode: 'AUTH_RATE_LIMIT',
+  errorMessage: 'Too many auth requests — please slow down.',
 })

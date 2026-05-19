@@ -636,6 +636,9 @@ router.get('/drafts', async (req, res, next) => {
  * pg client transaction so they are atomic.
  */
 router.post('/review/:conflictId', async (req, res, next) => {
+  // Only principal_architect can review (approve / reject / request_changes)
+  if (!requirePrincipalArchitect(req, res)) return
+
   const pool       = req.app.locals.pool
   const reviewer   = req.user.sub
   const reviewerRole = req.user.role ?? 'engineer'

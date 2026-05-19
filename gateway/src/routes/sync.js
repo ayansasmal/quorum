@@ -16,6 +16,7 @@
  */
 
 import { Router } from 'express'
+import crypto from 'node:crypto'
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 import { QuorumConfigSchema } from '../shared/config/schema.js'
 import { syncProjectMembers } from '../ddb.js'
@@ -59,7 +60,12 @@ export function getS3() {
  */
 function authSync(req) {
   const syncSecret = process.env.QUORUM_SYNC_SECRET
-  if (syncSecret && req.headers['x-quorum-sync-token'] === syncSecret) return true
+  if (syncSecret) {
+    const headerBuf = Buffer.from(req.headers['x-quorum-sync-token'] ?? '')
+    const secretBuf = Buffer.from(syncSecret)
+    const valid = headerBuf.length === secretBuf.length && crypto.timingSafeEqual(headerBuf, secretBuf)
+    if (valid) return true
+  }
   if (req.user?.role === 'principal_architect') return true
   return false
 }

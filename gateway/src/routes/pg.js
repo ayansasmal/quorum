@@ -134,7 +134,7 @@ async function resolveKey(pool, qProjectId, topic, key) {
  * GET /pg/search?q=<query>&domain=<topic>&limit=<n>
  * @returns {{ results: Array<object>, total: number, source: 'postgres-ilike' }}
  */
-router.get('/search', async (req, res) => {
+router.get('/search', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { q, domain, limit = 10 } = req.query
 
@@ -142,28 +142,32 @@ router.get('/search', async (req, res) => {
     return res.status(400).json({ error: 'missing_param', message: 'q required' })
   }
 
-  const pattern = `%${q}%`
-  const params = [req.user.qProjectId, pattern]
-  let domainClause = ''
-  if (domain) {
-    params.push(domain)
-    domainClause = `AND topic = $${params.length}`
+  try {
+    const pattern = `%${q}%`
+    const params = [req.user.qProjectId, pattern]
+    let domainClause = ''
+    if (domain) {
+      params.push(domain)
+      domainClause = `AND topic = $${params.length}`
+    }
+    params.push(parseInt(limit, 10) || 10)
+
+    const { rows } = await pool.query(
+      `SELECT topic, key, summary, status, confidence, author, updated_at
+       FROM knowledge_versions
+       WHERE q_project_id = $1
+         AND (key ILIKE $2 OR topic ILIKE $2 OR summary ILIKE $2)
+         AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
+         ${domainClause}
+       ORDER BY confidence DESC, updated_at DESC
+       LIMIT $${params.length}`,
+      params,
+    )
+
+    res.json({ results: rows, total: rows.length, source: 'postgres-ilike' })
+  } catch (err) {
+    next(err)
   }
-  params.push(parseInt(limit, 10) || 10)
-
-  const { rows } = await pool.query(
-    `SELECT topic, key, summary, status, confidence, author, updated_at
-     FROM knowledge_versions
-     WHERE q_project_id = $1
-       AND (key ILIKE $2 OR topic ILIKE $2 OR summary ILIKE $2)
-       AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
-       ${domainClause}
-     ORDER BY confidence DESC, updated_at DESC
-     LIMIT $${params.length}`,
-    params,
-  )
-
-  res.json({ results: rows, total: rows.length, source: 'postgres-ilike' })
 })
 
 // ── Knowledge versions ─────────────────────────────────────────────────────────
@@ -173,88 +177,108 @@ router.get('/search', async (req, res) => {
 // that Express would match as /:topic/:key if the wildcard route were first.
 
 // GET /pg/versions/by-status/:status — versions with a given status (?topic=)
-router.get('/versions/by-status/:status', async (req, res) => {
+router.get('/versions/by-status/:status', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { status } = req.params
   const { topic } = req.query
-  const rows = await getVersionsByStatus(pool, status, req.user.qProjectId, topic)
-  res.json(rows)
+  try {
+    const rows = await getVersionsByStatus(pool, status, req.user.qProjectId, topic)
+    res.json(rows)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /pg/versions/by-tag/:tag — versions with this tag (project-scoped)
-router.get('/versions/by-tag/:tag', async (req, res) => {
+router.get('/versions/by-tag/:tag', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { tag } = req.params
-
-  const versions = await getVersionsByTag(pool, tag, req.user.qProjectId)
-  res.json(versions)
+  try {
+    const versions = await getVersionsByTag(pool, tag, req.user.qProjectId)
+    res.json(versions)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /pg/versions/:topic/:key — current ACTIVE version (project-scoped)
-router.get('/versions/:topic/:key', async (req, res) => {
+router.get('/versions/:topic/:key', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
-
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const version = await getCurrentVersion(pool, qKeyId)
-  res.json(version)
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const version = await getCurrentVersion(pool, qKeyId)
+    res.json(version)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /pg/versions/:topic/:key/history — all versions
-router.get('/versions/:topic/:key/history', async (req, res) => {
+router.get('/versions/:topic/:key/history', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
-
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const history = await getVersionHistory(pool, qKeyId)
-  res.json(history)
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const history = await getVersionHistory(pool, qKeyId)
+    res.json(history)
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/:topic/:key/at?date=ISO — point-in-time version
-router.get('/versions/:topic/:key/at', async (req, res) => {
+router.get('/versions/:topic/:key/at', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
   const { date } = req.query
 
   if (!date) return res.status(400).json({ error: 'date query param required' })
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const version = await getVersionAtDate(pool, qKeyId, date)
-  res.json(version)
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const version = await getVersionAtDate(pool, qKeyId, date)
+    res.json(version)
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/:topic/:key/next-number
-router.get('/versions/:topic/:key/next-number', async (req, res) => {
+router.get('/versions/:topic/:key/next-number', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
-
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const next = await getNextVersionNumber(pool, qKeyId)
-  res.json({ next_version: next })
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const nextNum = await getNextVersionNumber(pool, qKeyId)
+    res.json({ next_version: nextNum })
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/drafts — all DRAFT versions (project-scoped, optional ?topic=)
-router.get('/versions/drafts', async (req, res) => {
+router.get('/versions/drafts', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic } = req.query
-  const rows = await getDraftVersions(pool, { qProjectId: req.user.qProjectId, topic })
-  res.json(rows)
+  try {
+    const rows = await getDraftVersions(pool, { qProjectId: req.user.qProjectId, topic })
+    res.json(rows)
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/status-counts — version counts grouped by status (?topic=)
-router.get('/versions/status-counts', async (req, res) => {
+router.get('/versions/status-counts', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic } = req.query
-  const counts = await getVersionStatusCounts(pool, req.user.qProjectId, topic)
-  res.json(counts)
+  try {
+    const counts = await getVersionStatusCounts(pool, req.user.qProjectId, topic)
+    res.json(counts)
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/latest-draft/:topic/:key — latest DRAFT version for topic:key
-router.get('/versions/latest-draft/:topic/:key', async (req, res) => {
+router.get('/versions/latest-draft/:topic/:key', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const version = await getLatestDraftVersion(pool, qKeyId)
-  res.json(version)
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const version = await getLatestDraftVersion(pool, qKeyId)
+    res.json(version)
+  } catch (err) { next(err) }
 })
 
 // GET /pg/versions/:topic/:key/:version — specific version
@@ -390,15 +414,30 @@ router.post('/versions', async (req, res) => {
   const version = req.body.version ?? await getNextVersionNumber(pool, qKeyId)
   const versionId = `${qKeyId}_v${version}`
 
+  // Whitelist allowed fields from req.body — never accept status, author,
+  // author_role, chain_position, entry_hash, previous_hash, q_project_id, or q_key_id
+  // from the client. author and author_role are always pinned to the JWT claims.
   const record = {
-    ...req.body,
-    version_id: versionId,
-    q_key_id: qKeyId,
+    content:      req.body.content      ?? undefined,
+    summary:      req.body.summary      ?? req.body.content ?? undefined,
+    topic:        req.body.topic,
+    key:          req.body.key,
+    domain:       req.body.domain       ?? undefined,
+    tags:         req.body.tags         ?? undefined,
+    confidence:   req.body.confidence   ?? undefined,
+    agent_id:     req.body.agent_id     ?? null,
+    session_id:   req.body.session_id   ?? null,
+    author_type:  req.body.author_type  ?? 'agent',
+    triggered_by: req.body.triggered_by ?? undefined,
+    entity_type:  req.body.entity_type  ?? undefined,
+    // Server-side — always override from JWT, never from body
+    author:       req.user.sub,
+    author_role:  req.user.role,
+    // Resolved server-side
+    version_id:   versionId,
+    q_key_id:     qKeyId,
     q_project_id: qProjectId,
     version,
-    agent_id:    req.body.agent_id    ?? null,
-    session_id:  req.body.session_id  ?? null,
-    author_type: req.body.author_type ?? 'agent',
   }
 
   const inserted = await insertVersion(pool, record)
@@ -406,17 +445,43 @@ router.post('/versions', async (req, res) => {
 })
 
 // PATCH /pg/versions/:topic/:key/:version — transition status
-router.patch('/versions/:topic/:key/:version', async (req, res) => {
+const VALID_VERSION_STATUSES = ['ACTIVE', 'DRAFT', 'SUPERSEDED', 'DEPRECATED', 'PENDING_CONFLICT_CHECK']
+
+router.patch('/versions/:topic/:key/:version', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key, version } = req.params
   const { newStatus, forwardLink } = req.body ?? {}
 
   if (!newStatus) return res.status(400).json({ error: 'newStatus required' })
 
-  const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
-  const versionId = `${qKeyId}_v${parseInt(version, 10)}`
-  const updated = await transitionVersionStatus(pool, versionId, newStatus, forwardLink ?? null)
-  res.json(updated)
+  // Validate newStatus is a legal enum value
+  if (!VALID_VERSION_STATUSES.includes(newStatus)) {
+    return res.status(400).json({
+      error: 'invalid_status',
+      message: `newStatus must be one of: ${VALID_VERSION_STATUSES.join(', ')}`,
+    })
+  }
+
+  // Only principal_architect or is_admin can transition a version to ACTIVE
+  if (newStatus === 'ACTIVE') {
+    const isPA    = req.user.role === 'principal_architect'
+    const isAdmin = req.user.is_admin === true
+    if (!isPA && !isAdmin) {
+      return res.status(403).json({
+        error:   'forbidden',
+        message: 'principal_architect role required to set status ACTIVE',
+      })
+    }
+  }
+
+  try {
+    const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
+    const versionId = `${qKeyId}_v${parseInt(version, 10)}`
+    const updated = await transitionVersionStatus(pool, versionId, newStatus, forwardLink ?? null)
+    res.json(updated)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // ── Version-audit links ────────────────────────────────────────────────────────
@@ -431,11 +496,31 @@ router.post('/audit-links', async (req, res) => {
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
 // POST /pg/audit — write audit entry
-router.post('/audit', async (req, res) => {
+router.post('/audit', async (req, res, next) => {
   const pool = req.app.locals.pool
-  const entry = { ...req.body, q_project_id: req.user.qProjectId }
-  const written = await writeAuditEntry(pool, entry)
-  res.status(201).json(written)
+  // Whitelist allowed fields — strip chain_position, entry_hash, previous_hash,
+  // and any other fields that could be used to forge audit chain integrity.
+  // author and author_role are always pinned to the JWT claims.
+  const entry = {
+    operation:       req.body.operation       ?? undefined,
+    tool:            req.body.tool            ?? undefined,
+    content_hash:    req.body.content_hash    ?? undefined,
+    governance_json: req.body.governance_json ?? undefined,
+    outcome_json:    req.body.outcome_json    ?? undefined,
+    version_impact:  req.body.version_impact  ?? undefined,
+    session_id:      req.body.session_id      ?? undefined,
+    version_id:      req.body.version_id      ?? undefined,
+    // Server-side — always override from JWT, never from body
+    author:          req.user.sub,
+    author_role:     req.user.role,
+    q_project_id:    req.user.qProjectId,
+  }
+  try {
+    const written = await writeAuditEntry(pool, entry)
+    res.status(201).json(written)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /pg/audit — all entries (project-scoped)
@@ -623,8 +708,10 @@ router.get('/pending/:conflictId', async (req, res) => {
 // ── Error handler for this router ─────────────────────────────────────────────
 
 router.use((err, _req, res, _next) => {
-  console.error('[Gateway/pg] Error:', err.message)
-  res.status(500).json({ error: 'internal_error', message: err.message })
+  const status = err.status ?? 500
+  console.error('[Gateway/pg] Error:', err.message, err.stack)
+  const message = status >= 500 ? 'Internal server error' : err.message
+  res.status(status).json({ error: err.code?.toLowerCase() ?? 'internal_error', message })
 })
 
 export default router
