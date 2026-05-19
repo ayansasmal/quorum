@@ -65,15 +65,55 @@ export function supersedeKnowledge(topic, key, fields) {
 }
 
 /**
+ * Deprecate a single ACTIVE knowledge entry (principal_architect only).
+ * @param {string} topic
+ * @param {string} key
+ * @param {string} reason - Required, min 10 chars
+ */
+export function deprecateKnowledge(topic, key, reason) {
+  return apiFetch(
+    `/api/knowledge/${encodeURIComponent(topic)}/${encodeURIComponent(key)}/deprecate`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+  )
+}
+
+/**
+ * Deprecate multiple ACTIVE knowledge entries in a single request.
+ * @param {Array<{topic: string, key: string}>} entries
+ * @param {string} reason - Shared reason for all entries
+ */
+export function deprecateKnowledgeBulk(entries, reason) {
+  return apiFetch('/api/knowledge/deprecate/bulk', {
+    method: 'POST',
+    body:   JSON.stringify({ entries, reason }),
+  })
+}
+
+/**
+ * Endorse an ACTIVE knowledge entry (bump its confidence).
+ * @param {string} topic
+ * @param {string} key
+ */
+export function bumpKnowledge(topic, key) {
+  return apiFetch(
+    `/api/bump/${encodeURIComponent(topic)}/${encodeURIComponent(key)}`,
+    { method: 'POST', body: JSON.stringify({}) },
+  )
+}
+
+/**
  * TanStack Query mutation hook that invalidates knowledge + stats caches on success.
  * @param {(data: unknown) => void} onSuccess
  */
 export function useKnowledgeWrite(onSuccess) {
   const queryClient = useQueryClient()
   return {
-    create:   useMutation({ mutationFn: createKnowledge,   onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
-    promote:  useMutation({ mutationFn: ({ topic, key, note }) => promoteKnowledge(topic, key, note), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
-    supersede: useMutation({ mutationFn: ({ topic, key, ...fields }) => supersedeKnowledge(topic, key, fields), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    create:        useMutation({ mutationFn: createKnowledge,   onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    promote:       useMutation({ mutationFn: ({ topic, key, note }) => promoteKnowledge(topic, key, note), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    supersede:     useMutation({ mutationFn: ({ topic, key, ...fields }) => supersedeKnowledge(topic, key, fields), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    deprecate:     useMutation({ mutationFn: ({ topic, key, reason }) => deprecateKnowledge(topic, key, reason), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    deprecateBulk: useMutation({ mutationFn: ({ entries, reason }) => deprecateKnowledgeBulk(entries, reason), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
+    bump:          useMutation({ mutationFn: ({ topic, key }) => bumpKnowledge(topic, key), onSuccess: (d) => { invalidate(queryClient); onSuccess?.(d) } }),
   }
 }
 

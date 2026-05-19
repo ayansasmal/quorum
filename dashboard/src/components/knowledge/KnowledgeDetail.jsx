@@ -6,13 +6,15 @@ import { useAuth } from '../../context/AuthContext.jsx'
 import { useKnowledgeWrite } from '../../api/knowledge.js'
 import KnowledgeForm from './KnowledgeForm.jsx'
 import ConfirmDialog from './ConfirmDialog.jsx'
+import DeprecateDialog from './DeprecateDialog.jsx'
 import ConfidenceBar from '../stats/ConfidenceBar.jsx'
 import VersionTimeline from './VersionTimeline.jsx'
 import { entityBadge, fmtDate } from '../../lib/utils.js'
 
 export default function KnowledgeDetail({ row, onClose }) {
-  const [showEdit,    setShowEdit]    = useState(false)
-  const [showPromote, setShowPromote] = useState(false)
+  const [showEdit,       setShowEdit]       = useState(false)
+  const [showPromote,    setShowPromote]    = useState(false)
+  const [showDeprecate,  setShowDeprecate]  = useState(false)
 
   const { currentProjectData } = useAuth()
   const isPE = currentProjectData?.role === 'principal_architect'
@@ -157,8 +159,35 @@ export default function KnowledgeDetail({ row, onClose }) {
                   error={write.supersede.error?.message ?? null}
                 />
               </div>
+
+              {/* Deprecate instead — escape hatch in the edit modal footer */}
+              <div className="px-6 pb-4 shrink-0 flex justify-center border-t border-gray-100 dark:border-gray-800 pt-3">
+                <button
+                  type="button"
+                  onClick={() => { write.supersede.reset(); setShowEdit(false); setShowDeprecate(true) }}
+                  className="text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 hover:underline"
+                >
+                  Deprecate this entry instead
+                </button>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* Deprecate dialog */}
+        {showDeprecate && (
+          <DeprecateDialog
+            entries={[{ topic: row.topic, key: row.key }]}
+            onConfirm={async (reason) => {
+              await write.deprecate.mutateAsync({ topic: row.topic, key: row.key, reason })
+              write.deprecate.reset()
+              setShowDeprecate(false)
+              onClose()
+            }}
+            onCancel={() => { write.deprecate.reset(); setShowDeprecate(false) }}
+            isSubmitting={write.deprecate.isPending}
+            error={write.deprecate.error?.message ?? null}
+          />
         )}
 
         {/* Promote confirm dialog */}
