@@ -9,13 +9,17 @@ const SLUG_RE = /^[a-z0-9-]+$/
 
 /** Base Tailwind classes shared by all text inputs and textareas. */
 const INPUT_BASE =
-  'rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full'
+  'rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full transition-colors'
 
 /** Label classes for all form field labels. */
-const LABEL_CLASS = 'block text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-1'
+const LABEL_CLASS = 'block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2'
+
+/** Read-only field display (locked in supersede mode). */
+const LOCKED_FIELD =
+  'rounded-lg bg-gray-100 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm font-mono text-gray-500 dark:text-gray-400 w-full select-all cursor-default'
 
 /** Inline error text classes. */
-const ERROR_CLASS = 'text-xs text-red-400 mt-1'
+const ERROR_CLASS = 'text-xs text-red-400 mt-1.5'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,12 +253,12 @@ export default function KnowledgeForm({
   // -------------------------------------------------------------------------
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-5">
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
       {/* API-level error banner */}
       {error && (
         <div
           role="alert"
-          className="rounded-md bg-red-900/30 border border-red-700 px-4 py-3 text-sm text-red-400"
+          className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-600 dark:text-red-400"
         >
           {error}
         </div>
@@ -266,7 +270,7 @@ export default function KnowledgeForm({
           Topic
         </label>
         {isSupersede ? (
-          <p id="kf-topic" className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+          <p id="kf-topic" className={LOCKED_FIELD}>
             {initialValues.topic}
           </p>
         ) : (
@@ -295,7 +299,7 @@ export default function KnowledgeForm({
           Key
         </label>
         {isSupersede ? (
-          <p id="kf-key" className="text-sm font-mono text-gray-500 dark:text-gray-400 px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700">
+          <p id="kf-key" className={LOCKED_FIELD}>
             {initialValues.key}
           </p>
         ) : (
@@ -394,19 +398,19 @@ export default function KnowledgeForm({
         />
         {/* Tag chips */}
         {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2" role="list" aria-label="Selected tags">
+          <div className="flex flex-wrap gap-2 mt-2.5" role="list" aria-label="Selected tags">
             {tags.map((tag) => (
               <span
                 key={tag}
                 role="listitem"
-                className="inline-flex items-center gap-1 rounded-full bg-gray-200 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 px-2 py-0.5 text-xs text-gray-700 dark:text-gray-300"
+                className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-900/25 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
               >
                 {tag}
                 <button
                   type="button"
                   onClick={() => removeTag(tag)}
                   aria-label={`Remove tag ${tag}`}
-                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-100 focus:outline-none"
+                  className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-200 focus:outline-none rounded-full"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -423,39 +427,41 @@ export default function KnowledgeForm({
 
       {/* Confidence */}
       <div>
-        <div className="flex items-center justify-between mb-1">
-          <label htmlFor="kf-confidence" className={LABEL_CLASS.replace('mb-1', '')}>
+        <div className="flex items-center justify-between mb-2">
+          <label htmlFor="kf-confidence" className={LABEL_CLASS.replace('mb-2', 'mb-0')}>
             Confidence
           </label>
-          <span className="text-xs font-semibold tabular-nums text-blue-500 dark:text-blue-400">
+          <span className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">
             {confidencePct}
           </span>
         </div>
-        <input
-          id="kf-confidence"
-          type="range"
-          min={0.5}
-          max={1.0}
-          step={0.05}
-          value={confidence}
-          onChange={(e) => setConfidence(parseFloat(e.target.value))}
-          aria-valuemin={0.5}
-          aria-valuemax={1.0}
-          aria-valuenow={confidence}
-          aria-valuetext={confidencePct}
-          className="w-full accent-blue-600"
-        />
-        <div className="flex justify-between text-xs text-gray-400 mt-0.5">
-          <span>50%</span>
-          <span>100%</span>
+        <div className="px-0.5">
+          <input
+            id="kf-confidence"
+            type="range"
+            min={0.5}
+            max={1.0}
+            step={0.05}
+            value={confidence}
+            onChange={(e) => setConfidence(parseFloat(e.target.value))}
+            aria-valuemin={0.5}
+            aria-valuemax={1.0}
+            aria-valuenow={confidence}
+            aria-valuetext={confidencePct}
+            className="w-full accent-blue-600 cursor-pointer"
+          />
+          <div className="flex justify-between text-xs text-gray-400 dark:text-gray-500 mt-1">
+            <span>50%</span>
+            <span>100%</span>
+          </div>
         </div>
       </div>
 
       {/* Reason — supersede mode only */}
       {isSupersede && (
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label htmlFor="kf-reason" className={LABEL_CLASS.replace('mb-1', '')}>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="kf-reason" className={LABEL_CLASS.replace('mb-2', 'mb-0')}>
               Reason for superseding
             </label>
             <span className="text-xs tabular-nums text-gray-400 dark:text-gray-500">
@@ -482,19 +488,19 @@ export default function KnowledgeForm({
       )}
 
       {/* Actions */}
-      <div className="flex items-center justify-end gap-3 pt-2">
+      <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800">
         <button
           type="button"
           onClick={onCancel}
           disabled={isSubmitting}
-          className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-4 py-2 disabled:opacity-50"
+          className="text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-transparent border border-gray-300 dark:border-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={isSubmitting}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-md disabled:opacity-50 transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg disabled:opacity-50 transition-colors shadow-sm"
         >
           {isSubmitting ? 'Saving…' : submitLabel}
         </button>
