@@ -671,7 +671,8 @@ router.post('/pending', async (req, res, next) => {
 })
 
 // PATCH /pg/pending/:conflictId — update pending decision (resolve / stale)
-// conflict_id (q_c{n}) is globally unique — no project scope needed.
+// Scoped to caller's project — engineers from another project cannot update a
+// conflict they don't own even if they know the conflict_id.
 router.patch('/pending/:conflictId', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { conflictId } = req.params
@@ -684,7 +685,7 @@ router.patch('/pending/:conflictId', async (req, res, next) => {
     'merged_content', 'stale_warning', 'current_active_version', 'more_pending_same_key',
   ]
   const setClauses = []
-  const params = [conflictId]
+  const params = [conflictId, req.user.qProjectId]
 
   for (const col of allowed) {
     if (Object.prototype.hasOwnProperty.call(updates, col)) {
@@ -699,7 +700,7 @@ router.patch('/pending/:conflictId', async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `UPDATE pending_decisions SET ${setClauses.join(', ')}
-       WHERE conflict_id = $1
+       WHERE conflict_id = $1 AND q_project_id = $2
        RETURNING *`,
       params,
     )
