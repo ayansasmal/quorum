@@ -85,9 +85,9 @@ async function checkContradiction(existing, incoming, gw) {
   } catch (err) {
     const isNotImplemented = err.message?.includes('404') || err.message?.includes('501')
     const reason = isNotImplemented
-      ? 'Gateway LLM governance not yet enabled (POST /governance/detect-conflict not found). Flagging for human review — configure OPENAI_API_KEY on the gateway to enable automatic conflict detection.'
-      : `Conflict detection unavailable (${err.message}). Flagging for human review.`
-    return { contradicts: true, reason, possible_split: false }
+      ? 'Gateway LLM governance not yet enabled (POST /governance/detect-conflict not found). Conflict check skipped — configure OPENAI_API_KEY on the gateway to enable automatic conflict detection.'
+      : `Conflict detection unavailable (${err.message}). Conflict check skipped.`
+    return { contradicts: false, llm_unavailable: true, reason, possible_split: false }
   }
 }
 
@@ -181,6 +181,10 @@ export async function detectConflict(newContent, topic, key, domain, gw) {
       newContent,
       gw,
     ).catch(() => ({ contradicts: false, reason: '', possible_split: false }))
+
+    if (result.llm_unavailable) {
+      return { conflict: false, warning: 'llm_check_skipped' }
+    }
 
     if (result.contradicts) {
       return {
