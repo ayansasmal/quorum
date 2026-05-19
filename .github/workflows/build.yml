@@ -126,7 +126,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          dockerfile: Dockerfile.graphiti
+          file: Dockerfile.graphiti
           push: false
           cache-from: type=gha,scope=graphiti
           cache-to: type=gha,mode=max,scope=graphiti
