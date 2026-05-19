@@ -1189,4 +1189,168 @@ router.post('/knowledge/:topic/:key/supersede', peWriteLimit, async (req, res, n
   }
 })
 
+// ── POST /api/knowledge/deprecate/bulk ─────────────────────────────────────────
+// Registered BEFORE /knowledge/:topic/:key/deprecate to prevent Express matching
+// the literal string "deprecate" as :topic.
+
+/**
+ * Bulk-deprecate ACTIVE knowledge entries (principal_architect only).
+ * Processes each entry in its own transaction; partial success is allowed.
+ *
+ * @route POST /api/knowledge/deprecate/bulk
+ */
+router.post('/knowledge/deprecate/bulk', peWriteLimit, async (req, res, next) => {
+  if (!requirePrincipalArchitect(req, res)) return
+
+  const { entries, reason } = req.body ?? {}
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return res.status(400).json({ error: 'invalid_request', message: 'entries must be a non-empty array' })
+  }
+
+  try {
+    enforceReasonRequired(reason, 'deprecate')
+  } catch (err) {
+    return res.status(400).json({ error: 'reason_required', message: err.message })
+  }
+
+  const pool        = req.app.locals.pool
+  const author      = req.user.sub
+  const authorRole  = req.user.role
+  let qProjectId
+  try {
+    qProjectId = await resolveQProjectId(req, res)
+  } catch (err) {
+    return next(err)
+  }
+  if (!qProjectId) return
+
+  const deprecated = []
+  const errors     = []
+
+  for (const { topic, key } of entries) {
+    if (!topic || !key) {
+      errors.push({ topic, key, message: 'topic and key are required' })
+      continue
+    }
+
+    try {
+      const qKeyId  = await getOrCreateKey(pool, qProjectId, topic, key)
+      const current = await getCurrentVersion(pool, qKeyId)
+
+      if (!current) {
+        errors.push({ topic, key, message: `No ACTIVE version found for ${topic}:${key}` })
+        continue
+      }
+
+      const versionId = `${qKeyId}_v${current.version}`
+      const client    = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        await transitionVersionStatus(client, versionId, 'DEPRECATED', {
+          reason,
+          author,
+          at: new Date().toISOString(),
+        })
+        await client.query('COMMIT')
+      } catch (txErr) {
+        try { await client.query('ROLLBACK') } catch { /* ignore */ }
+        errors.push({ topic, key, message: txErr.message })
+        continue
+      } finally {
+        client.release()
+      }
+
+      await writeAuditEntry(pool, {
+        operation:    'WRITE',
+        tool:         'dashboard-deprecate',
+        author,
+        author_role:  authorRole,
+        author_type:  'human',
+        triggered_by: 'dashboard',
+        q_project_id: qProjectId,
+        governance_json: { topic, key, reason },
+        outcome_json:    { status: 'DEPRECATED', version: current.version, version_id: versionId },
+        version_impact:  { versions_created: [], versions_superseded: [versionId] },
+      })
+
+      deprecated.push({ topic, key })
+    } catch (err) {
+      errors.push({ topic, key, message: err.message })
+    }
+  }
+
+  res.json({ deprecated, errors })
+})
+
+// ── POST /api/knowledge/:topic/:key/deprecate ──────────────────────────────────
+
+/**
+ * Deprecate a single ACTIVE knowledge entry (principal_architect only).
+ * Atomically transitions the current ACTIVE version to DEPRECATED.
+ *
+ * @route POST /api/knowledge/:topic/:key/deprecate
+ */
+router.post('/knowledge/:topic/:key/deprecate', peWriteLimit, async (req, res, next) => {
+  if (!requirePrincipalArchitect(req, res)) return
+
+  const { topic, key } = req.params
+  const { reason }     = req.body ?? {}
+
+  try {
+    enforceReasonRequired(reason, 'deprecate')
+  } catch (err) {
+    return res.status(400).json({ error: 'reason_required', message: err.message })
+  }
+
+  try {
+    const pool        = req.app.locals.pool
+    const author      = req.user.sub
+    const authorRole  = req.user.role
+    const qProjectId  = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const qKeyId  = await getOrCreateKey(pool, qProjectId, topic, key)
+    const current = await getCurrentVersion(pool, qKeyId)
+
+    if (!current) {
+      return res.status(404).json({ error: 'not_found', message: `No ACTIVE version found for ${topic}:${key}` })
+    }
+
+    const versionId = `${qKeyId}_v${current.version}`
+    const client    = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await transitionVersionStatus(client, versionId, 'DEPRECATED', {
+        reason,
+        author,
+        at: new Date().toISOString(),
+      })
+      await client.query('COMMIT')
+    } catch (txErr) {
+      try { await client.query('ROLLBACK') } catch { /* ignore */ }
+      throw txErr
+    } finally {
+      client.release()
+    }
+
+    await writeAuditEntry(pool, {
+      operation:    'WRITE',
+      tool:         'dashboard-deprecate',
+      author,
+      author_role:  authorRole,
+      author_type:  'human',
+      triggered_by: 'dashboard',
+      q_project_id: qProjectId,
+      governance_json: { topic, key, reason },
+      outcome_json:    { status: 'DEPRECATED', version: current.version, version_id: versionId },
+      version_impact:  { versions_created: [], versions_superseded: [versionId] },
+    })
+
+    res.json({ deprecated: true, topic, key })
+  } catch (err) {
+    next(err)
+  }
+})
+
 export default router

@@ -72,6 +72,7 @@ import {
 } from '../../gateway/src/shared/graph/queries.js'
 import { writeAuditEntry } from '../../gateway/src/shared/audit/secondary.js'
 import { verifyJwt } from '../../gateway/src/middleware/verify-jwt.js'
+import { enforceReasonRequired } from '../../gateway/src/shared/governance/constitutional.js'
 import dashboardRoutes, { peWriteLimit } from '../../gateway/src/routes/dashboard.js'
 
 // ── Test server ────────────────────────────────────────────────────────────────
@@ -126,6 +127,15 @@ beforeEach(() => {
 
   // Reset user to default PA
   mockUser = { sub: 'alice', project: 'q_p1', role: 'principal_architect', is_admin: false }
+
+  // Give enforceReasonRequired real-ish behaviour so deprecate tests can check 400s
+  enforceReasonRequired.mockImplementation((reason) => {
+    if (!reason || String(reason).trim().length < 10) {
+      const err = new Error('Reason must be at least 10 characters and must not be a placeholder')
+      err.status = 400
+      throw err
+    }
+  })
 })
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -385,6 +395,182 @@ describe('POST /api/knowledge/:topic/:key/supersede', () => {
     expect(writeAuditEntry).toHaveBeenCalledWith(
       fakePool,
       expect.objectContaining({ operation: 'WRITE', tool: 'dashboard-supersede' }),
+    )
+  })
+})
+
+// ── POST /api/knowledge/:topic/:key/deprecate ──────────────────────────────────
+
+describe('POST /api/knowledge/:topic/:key/deprecate', () => {
+  const validReason = { reason: 'No longer valid — replaced by new auth policy v2.' }
+
+  it('returns 403 when caller is not principal_architect', async () => {
+    mockUser = { sub: 'bob', project: 'q_p1', role: 'engineer', is_admin: false }
+
+    const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    expect(status).toBe(403)
+    expect(body.error).toBe('forbidden')
+  })
+
+  it('returns 400 when reason is missing', async () => {
+    const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', {})
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('reason_required')
+  })
+
+  it('returns 400 when reason is less than 10 chars', async () => {
+    const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', { reason: 'too short' })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('reason_required')
+  })
+
+  it('returns 404 when no ACTIVE version exists', async () => {
+    getCurrentVersion.mockResolvedValue(null)
+
+    const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    expect(status).toBe(404)
+    expect(body.error).toBe('not_found')
+  })
+
+  it('happy path returns { deprecated: true, topic, key }', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 3, confidence: 0.8 })
+
+    const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ deprecated: true, topic: 'auth', key: 'jwt-rotation' })
+  })
+
+  it('calls transitionVersionStatus with DEPRECATED status', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 3, confidence: 0.8 })
+
+    await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      fakeClient,
+      'q_k1_v3',
+      'DEPRECATED',
+      expect.objectContaining({ reason: validReason.reason }),
+    )
+  })
+
+  it('writes audit entry with tool dashboard-deprecate', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 3, confidence: 0.8 })
+
+    await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    expect(writeAuditEntry).toHaveBeenCalledWith(
+      fakePool,
+      expect.objectContaining({ operation: 'WRITE', tool: 'dashboard-deprecate' }),
+    )
+  })
+
+  it('performs atomic transaction: BEGIN + COMMIT', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 3, confidence: 0.8 })
+
+    await post('/api/knowledge/auth/jwt-rotation/deprecate', validReason)
+
+    const calls = fakeClient.query.mock.calls.map((c) => c[0])
+    expect(calls).toContain('BEGIN')
+    expect(calls).toContain('COMMIT')
+  })
+})
+
+// ── POST /api/knowledge/deprecate/bulk ─────────────────────────────────────────
+
+describe('POST /api/knowledge/deprecate/bulk', () => {
+  const validReason = 'Deprecating outdated policy entries — superseded by v2 guidelines.'
+
+  it('returns 403 when caller is not principal_architect', async () => {
+    mockUser = { sub: 'bob', project: 'q_p1', role: 'engineer', is_admin: false }
+
+    const { status } = await post('/api/knowledge/deprecate/bulk', {
+      entries: [{ topic: 'auth', key: 'jwt-rotation' }],
+      reason:  validReason,
+    })
+
+    expect(status).toBe(403)
+  })
+
+  it('returns 400 when entries is missing', async () => {
+    const { status, body } = await post('/api/knowledge/deprecate/bulk', { reason: validReason })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('invalid_request')
+  })
+
+  it('returns 400 when entries is an empty array', async () => {
+    const { status, body } = await post('/api/knowledge/deprecate/bulk', { entries: [], reason: validReason })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('invalid_request')
+  })
+
+  it('returns 400 when reason is too short', async () => {
+    const { status, body } = await post('/api/knowledge/deprecate/bulk', {
+      entries: [{ topic: 'auth', key: 'jwt-rotation' }],
+      reason:  'short',
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toBe('reason_required')
+  })
+
+  it('happy path — deprecates all entries and returns { deprecated, errors }', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 1, confidence: 0.8 })
+
+    const { status, body } = await post('/api/knowledge/deprecate/bulk', {
+      entries: [
+        { topic: 'auth', key: 'jwt-rotation' },
+        { topic: 'infra', key: 'retry-policy' },
+      ],
+      reason: validReason,
+    })
+
+    expect(status).toBe(200)
+    expect(body.deprecated).toHaveLength(2)
+    expect(body.errors).toHaveLength(0)
+  })
+
+  it('partial success — no-ACTIVE entry reported in errors, others committed', async () => {
+    getCurrentVersion
+      .mockResolvedValueOnce({ version: 1, confidence: 0.8 })
+      .mockResolvedValueOnce(null)
+
+    const { status, body } = await post('/api/knowledge/deprecate/bulk', {
+      entries: [
+        { topic: 'auth', key: 'jwt-rotation' },
+        { topic: 'infra', key: 'nonexistent' },
+      ],
+      reason: validReason,
+    })
+
+    expect(status).toBe(200)
+    expect(body.deprecated).toHaveLength(1)
+    expect(body.deprecated[0]).toMatchObject({ topic: 'auth', key: 'jwt-rotation' })
+    expect(body.errors).toHaveLength(1)
+    expect(body.errors[0].key).toBe('nonexistent')
+  })
+
+  it('writes audit entries for each successfully deprecated entry', async () => {
+    getCurrentVersion.mockResolvedValue({ version: 1, confidence: 0.8 })
+
+    await post('/api/knowledge/deprecate/bulk', {
+      entries: [
+        { topic: 'auth', key: 'jwt-rotation' },
+        { topic: 'infra', key: 'retry-policy' },
+      ],
+      reason: validReason,
+    })
+
+    expect(writeAuditEntry).toHaveBeenCalledTimes(2)
+    expect(writeAuditEntry).toHaveBeenCalledWith(
+      fakePool,
+      expect.objectContaining({ tool: 'dashboard-deprecate', operation: 'WRITE' }),
     )
   })
 })
