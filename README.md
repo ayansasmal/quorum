@@ -4,7 +4,15 @@
 
 [![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://github.com/ayansasmal/quorum-mcp) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](gateway/openapi.yaml)
 
-**Quorum** is an open-source governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+**Quorum** is a governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+
+---
+
+## Who is this for?
+
+**Engineering teams using Claude Code or multi-agent AI.** If your agents make architectural decisions, write code, or give advice — and if those decisions need to be consistent, auditable, and human-approved — Quorum is the governance layer that makes that possible.
+
+See [docs/WHY.md](docs/WHY.md) for business cases and real-world narratives.
 
 ---
 
@@ -73,6 +81,7 @@ graph TB
     GW --> DDB[(DynamoDB\nmembership index)]
 ```
 
+
 **Identity model (v0.3):** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and base_confidence are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates "who you are" from "what project you're working in."
 
 **Content durability:** all knowledge text is stored in the PostgreSQL `knowledge_versions.summary` column on every write. Graphiti/FalkorDB holds semantic graph embeddings and is the fallback — it is treated as eventually consistent and can be wiped without permanent content loss.
@@ -115,6 +124,8 @@ After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://l
 ```bash
 node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL + QUORUM_GITHUB_TOKEN)
 ```
+
+> For full setup, troubleshooting, and production deployment: [QUICKSTART.md](docs/QUICKSTART.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md)
 
 ---
 
@@ -211,4 +222,4 @@ docs/             ← ARCHITECTURE · TESTING · DEPLOYMENT · QUICKSTART · DIA
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Apache 2.0 licensed.
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Elastic License 2.0.

@@ -250,7 +250,7 @@ describe('detectConflict', () => {
     expect(result.split_suggestion).toBe('prod vs staging')
   })
 
-  it('treats 404/501 gw errors as "flag for human review" with contradicts: true', async () => {
+  it('treats 404/501 gw errors as llm_unavailable with contradicts: false (no false positives)', async () => {
     searchNodes.mockResolvedValue({
       nodes: [{ score: 0.95, summary: 'existing content', metadata: { key: 'db:pg-host' } }],
     })
@@ -261,9 +261,9 @@ describe('detectConflict', () => {
 
     const result = await detectConflict('new content', 'db', 'pg-host-staging', null, gw)
 
-    // After gw errors, checkContradiction returns contradicts:true — so we get a conflict
-    expect(result.conflict).toBe(true)
-    expect(result.reason).toMatch(/human review/i)
+    // GAP-01: LLM failure must NOT produce false conflicts — writes proceed, no human queue flood
+    expect(result.conflict).toBe(false)
+    expect(result.warning).toBe('llm_check_skipped')
   })
 
   it('handles node.similarity field instead of node.score', async () => {
