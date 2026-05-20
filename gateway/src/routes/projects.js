@@ -349,7 +349,7 @@ router.post('/:id/token/rotate', verifyJwt, async (req, res, next) => {
 
 /**
  * Archive a project (soft-delete).
- * Allowed for: principal_architect of the project OR platform admin (is_admin).
+ * Allowed for: project owner (created_by) OR platform admin (is_admin).
  * Sets project status to ARCHIVED and bulk-deprecates all ACTIVE knowledge versions.
  * Body: { reason } (required, ≥ 10 chars)
  */
@@ -366,16 +366,16 @@ router.delete('/:id', verifyJwt, async (req, res, next) => {
 
   try {
     const current = await pool.query(
-      `SELECT members FROM projects WHERE id = $1 AND status = $2`,
+      `SELECT members, created_by FROM projects WHERE id = $1 AND status = $2`,
       [id, 'ACTIVE'],
     )
     if (!current.rows[0]) {
       return next(Errors.notFound(`Project not found: ${id}`))
     }
 
-    const role = callerRole(current.rows[0].members, caller)
-    if (role !== 'principal_architect' && !isAdmin) {
-      return next(Errors.forbidden('Only a principal_architect or platform admin may archive a project'))
+    const isOwner = current.rows[0].created_by?.toLowerCase() === caller.toLowerCase()
+    if (!isOwner && !isAdmin) {
+      return next(Errors.forbidden('Only the project owner or a platform admin may archive a project'))
     }
 
     // Bulk soft-deprecate all ACTIVE knowledge versions in this project

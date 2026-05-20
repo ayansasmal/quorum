@@ -535,11 +535,11 @@ describe('DELETE /projects/:id', () => {
     expect(body.error).toBe('not_found')
   })
 
-  it('returns 403 when caller is not principal_architect', async () => {
-    mockProfile('alice')
-    const tok = await makeToken('alice')
+  it('returns 403 when caller is neither owner nor admin', async () => {
+    mockProfile('bob')
+    const tok = await makeToken('bob')
     mockPool.query.mockResolvedValueOnce({
-      rows: [{ members: [{ github_username: 'alice', role: 'engineer' }] }],
+      rows: [{ members: [{ github_username: 'bob', role: 'engineer' }], created_by: 'alice' }],
     })
 
     const { status, body } = await del('/projects/proj-1', { reason: 'project is being decommissioned' }, { Authorization: `Bearer ${tok}` })
@@ -547,12 +547,12 @@ describe('DELETE /projects/:id', () => {
     expect(body.error).toBe('forbidden')
   })
 
-  it('archives project and deprecates ACTIVE versions', async () => {
+  it('archives project and deprecates ACTIVE versions (owner)', async () => {
     mockProfile('alice')
     const tok = await makeToken('alice')
     mockPool.query
       .mockResolvedValueOnce({
-        rows: [{ members: [{ github_username: 'alice', role: 'principal_architect' }] }],
+        rows: [{ members: [], created_by: 'alice' }],
       })
       .mockResolvedValueOnce({ rowCount: 3, rows: [{ id: 'v1' }, { id: 'v2' }, { id: 'v3' }] }) // UPDATE knowledge_versions
       .mockResolvedValueOnce({ rows: [] }) // UPDATE projects SET status=ARCHIVED
@@ -571,7 +571,7 @@ describe('DELETE /projects/:id', () => {
     const tok = await makeToken('superadmin', true)
     mockPool.query
       .mockResolvedValueOnce({
-        rows: [{ members: [{ github_username: 'alice', role: 'principal_architect' }] }],
+        rows: [{ members: [{ github_username: 'alice', role: 'principal_architect' }], created_by: 'alice' }],
       })
       .mockResolvedValueOnce({ rowCount: 2, rows: [{ id: 'v1' }, { id: 'v2' }] })
       .mockResolvedValueOnce({ rows: [] })
