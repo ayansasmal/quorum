@@ -146,7 +146,7 @@ components:
       description: A conflict queued for human review.
       properties:
         conflict_id:          { type: string }
-        decision_type:        { type: string, enum: [conflict] }
+        decision_type:        { type: string, enum: [conflict, deprecation_request], default: conflict }
         conflict_topic:       { type: string }
         conflict_key:         { type: string }
         status:               { type: string, enum: [pending, resolved, stale] }
@@ -1324,7 +1324,12 @@ paths:
 
   /pg/pending:
     get:
-      summary: List pending decisions
+      summary: List pending decisions (all types)
+      description: |
+        Returns all pending_decisions rows for the project regardless of `decision_type`.
+        Consumers must filter client-side: `decision_type='conflict'` for conflict queue,
+        `decision_type='deprecation_request'` for deprecation request queue.
+        Rows without a `decision_type` predate the column and should be treated as `conflict`.
       operationId: getPendingDecisions
       tags: [Pending]
       parameters:
@@ -1338,7 +1343,7 @@ paths:
           description: When false (default), returns only status='pending' decisions. When true, returns all statuses.
       responses:
         '200':
-          description: Array of pending decisions
+          description: Array of pending decisions (mixed decision_type values)
           content:
             application/json:
               schema:
@@ -2190,6 +2195,12 @@ paths:
   /api/review/{conflictId}:
     post:
       summary: Approve, reject, or request changes on a pending decision
+      description: |
+        Handles both conflict decisions (`decision_type=conflict`) and deprecation
+        requests (`decision_type=deprecation_request`). The response shape differs by type:
+        - **conflict**: returns `conflict_id`, `version`, `stale_warning`
+        - **deprecation_request**: returns `request_id`; `approve` runs the full
+          deprecation transition atomically; `request_changes` is not valid for this type.
       operationId: reviewDecision
       tags: [Dashboard]
       parameters:
@@ -2205,28 +2216,29 @@ paths:
               type: object
               required: [action, note]
               properties:
-                action: { type: string, enum: [approve, reject, request_changes] }
+                action: { type: string, enum: [approve, reject, request_changes], description: "request_changes is invalid for deprecation_request type" }
                 note:   { type: string, minLength: 10, description: Mandatory review note (≥10 chars) }
       responses:
         '200':
-          description: Review outcome
+          description: Review outcome (shape varies by decision_type — see description)
           content:
             application/json:
               schema:
                 type: object
-                required: [status, conflict_id, reviewer, note]
                 properties:
                   status:        { type: string, enum: [approved, rejected, changes_requested] }
-                  conflict_id:   { type: string }
+                  conflict_id:   { type: string, description: "Present for conflict type" }
+                  request_id:    { type: string, description: "Present for deprecation_request type" }
                   topic:         { type: string }
                   key:           { type: string }
-                  version:       { type: integer, nullable: true }
+                  version:       { type: integer, nullable: true, description: "New version number; conflict type only" }
                   reviewer:      { type: string }
                   note:          { type: string }
-                  stale_warning: { type: string, nullable: true }
-        '400': { description: Invalid action or note too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
-        '403': { description: Self-approval blocked or wrong project, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
-        '404': { description: Conflict ID not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+                  stale_warning: { type: string, nullable: true, description: "conflict type only" }
+        '400': { description: Invalid action (including request_changes on deprecation_request) or note too short, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: Self-approval blocked, not PE role, or wrong project, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Conflict/request ID not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Knowledge entry not found or already deprecated (approve path auto-rejects), content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
   /api/bump/{topic}/{key}:
     post:
