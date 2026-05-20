@@ -144,6 +144,7 @@ export default function Knowledge() {
           No knowledge found.
         </p>
       ) : (
+        <>
         {/* Bulk action bar — shown when PE has selected rows */}
         {isPE && checkedRows.size > 0 && (
           <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm">
@@ -289,6 +290,7 @@ export default function Knowledge() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Pagination (browse mode only) */}
