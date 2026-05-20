@@ -31,6 +31,9 @@ function themeTokens(isDark) {
     hubBg:             isDark ? '#0f172a' : '#eff6ff',
     hubBorder:         isDark ? '#38bdf8' : '#0284c7',
     hubLabel:          isDark ? '#38bdf8' : '#0284c7',
+    topicBg:           isDark ? '#1e1b4b' : '#f5f3ff',
+    topicBorder:       isDark ? '#818cf8' : '#6366f1',
+    topicLabel:        isDark ? '#a5b4fc' : '#4338ca',
     edgeDefault:       isDark ? '#6b7280' : '#334155',   // slate-700 in light
     edgeSupersede:     isDark ? '#9ca3af' : '#475569',   // slate-600 in light
     // BELONGS_TO edges are the dominant structural edges (leaf → hub).
@@ -104,6 +107,23 @@ export default function KnowledgeGraph({ elements }) {
             'font-size':        13,
             'font-weight':      'bold',
             'color':            t.hubLabel,
+            'text-valign':      'center',
+            'text-halign':      'center',
+          },
+        },
+        {
+          selector: 'node[node_type = "topic"]',
+          style: {
+            'background-color': t.topicBg,
+            'border-width':     2,
+            'border-color':     t.topicBorder,
+            'width':            45,
+            'height':           45,
+            'shape':            'round-rectangle',
+            'label':            (ele) => ele.data('label'),
+            'font-size':        10,
+            'font-weight':      'bold',
+            'color':            t.topicLabel,
             'text-valign':      'center',
             'text-halign':      'center',
           },

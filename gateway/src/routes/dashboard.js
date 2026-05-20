@@ -321,33 +321,66 @@ router.get('/graph', async (req, res, next) => {
     const hubLabel = domain ?? req.user.project ?? qProjectId
     const hubNode  = { data: { id: hubId, label: hubLabel, node_type: 'hub' } }
 
-    // Spoke edges: every knowledge node → hub
-    const spokeEdges = rows.map((r) => ({
+    const keyNodes = rows.map((r) => ({
       data: {
-        id:     `spoke:${r.topic}:${r.key}:${r.version}`,
-        source: `${r.topic}:${r.key}:${r.version}`,
-        target: hubId,
-        type:   'BELONGS_TO',
+        id:          `${r.topic}:${r.key}:${r.version}`,
+        topic:       r.topic,
+        key:         r.key,
+        entity_type: r.entity_type,
+        confidence:  r.confidence,
+        author:      r.author,
+        summary:     r.summary || `${r.topic}:${r.key}`,
+        status:      r.status,
+        tags:        r.tags ?? [],
       },
     }))
 
+    let topicNodes = []
+    let spokeEdges = []
+
+    if (domain) {
+      // Domain-filtered view: hub IS the topic — connect keys directly to hub
+      spokeEdges = rows.map((r) => ({
+        data: {
+          id:     `spoke:${r.topic}:${r.key}:${r.version}`,
+          source: `${r.topic}:${r.key}:${r.version}`,
+          target: hubId,
+          type:   'BELONGS_TO',
+        },
+      }))
+    } else {
+      // Full project view: hub → topic → key (3 levels)
+      const uniqueTopics = [...new Set(rows.map((r) => r.topic))]
+
+      topicNodes = uniqueTopics.map((t) => ({
+        data: { id: `topic:${t}`, label: t, node_type: 'topic' },
+      }))
+
+      // topic → hub
+      const topicHubEdges = uniqueTopics.map((t) => ({
+        data: {
+          id:     `spoke:topic:${t}`,
+          source: `topic:${t}`,
+          target: hubId,
+          type:   'BELONGS_TO',
+        },
+      }))
+
+      // key → topic
+      const keyTopicEdges = rows.map((r) => ({
+        data: {
+          id:     `spoke:${r.topic}:${r.key}:${r.version}`,
+          source: `${r.topic}:${r.key}:${r.version}`,
+          target: `topic:${r.topic}`,
+          type:   'BELONGS_TO',
+        },
+      }))
+
+      spokeEdges = [...topicHubEdges, ...keyTopicEdges]
+    }
+
     res.json({
-      nodes: [
-        hubNode,
-        ...rows.map((r) => ({
-          data: {
-            id:          `${r.topic}:${r.key}:${r.version}`,
-            topic:       r.topic,
-            key:         r.key,
-            entity_type: r.entity_type,
-            confidence:  r.confidence,
-            author:      r.author,
-            summary:     r.summary || `${r.topic}:${r.key}`,
-            status:      r.status,
-            tags:        r.tags ?? [],
-          },
-        })),
-      ],
+      nodes: [hubNode, ...topicNodes, ...keyNodes],
       edges: [...edges, ...spokeEdges],
     })
   } catch (err) {
