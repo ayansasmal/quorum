@@ -122,6 +122,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 | `triggered_by` always set | Schema enforcement — never null |
 | Atomic ACTIVE transition | Old version → SUPERSEDED and new → ACTIVE in one transaction |
 | Bidirectional audit↔version | Every version record carries `created_by_audit`; every audit entry carries `version_id` |
+| No project offboarding via MCP | `DELETE /projects/:id` is dashboard-only; MCP must never expose an archive/offboard tool — project lifecycle decisions require a human in the loop |
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 

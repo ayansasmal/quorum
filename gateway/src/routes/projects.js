@@ -352,6 +352,10 @@ router.post('/:id/token/rotate', verifyJwt, async (req, res, next) => {
  * Allowed for: project owner (created_by) OR platform admin (is_admin).
  * Sets project status to ARCHIVED and bulk-deprecates all ACTIVE knowledge versions.
  * Body: { reason } (required, ≥ 10 chars)
+ *
+ * GOVERNANCE: This endpoint is intentionally dashboard-only. The MCP server
+ * must never expose an archive/offboard tool. Project lifecycle decisions
+ * require a human in the loop — they cannot be delegated to an agent.
  */
 router.delete('/:id', verifyJwt, async (req, res, next) => {
   const { id }     = req.params
