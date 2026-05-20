@@ -216,22 +216,11 @@ Success criteria met:
 **Goal: The graph grows without manual effort**
 
 ```
-Claude Code Skill (SKILL.md)
-  → Full PACE framework in skill behaviour
-  → Session start: pending review check + domain context load (ACTIVE only)
-  → During task: real-time recall with attribution tags
-  → Post-task: systematic reflection with mode self-declaration
-  → Session end: concise activity summary
-
-Claude Authority Modes — Self-Declaration Required
-  → Mode 1 — Echoing human decision (confidence: 0.75)
-      Engineer explicitly decided. Claude is the scribe.
-  → Mode 2 — Extracting a pattern (confidence: 0.55)
-      Claude inferred reusable pattern. Needs validation.
-  → Mode 3 — Generalising from one case (confidence: 0.35)
-      Claude speculating. Explicitly marked. Likely needs review.
-  → Mode stored on every write — auditable
-  → Claude NEVER presents Mode 3 as Mode 1
+Note: PACE framework (Prepare/Assess/Contextualise/Evaluate) is fully
+implemented via SKILL.md + Claude hooks. Session start protocol, pending
+checks, conflict surfacing, and post-task reflect() are all shipped in v0.3.
+All writes carry full provenance via the audit chain — no additional mode
+field needed.
 
 Decision Quality Feedback Loop
   → Outcomes tracked per decision over time
@@ -464,5 +453,5 @@ These must remain true across every version, every PR, every contributor:
 6. **Governance is architecture** — invariants are code, not config, not policy
 7. **Dissent is preserved** — overruled concerns stored permanently, never deleted
 8. **Draft knowledge never used** — Claude never injects unreviewed knowledge into context
-9. **Mode declared on write** — echoing / extracting / generalising, always stored
+9. **Provenance on every write** — author, timestamp, session_id, agent_id, triggered_by always stored; auditable via the audit chain
 10. **Constitution changes require community** — no single person changes Layer 1 unilaterally
