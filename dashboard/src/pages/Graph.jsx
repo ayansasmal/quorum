@@ -15,11 +15,7 @@ export default function Graph() {
     <div className="flex flex-col gap-4 h-[calc(100vh-7rem)]">
       <GraphControls domain={domain} onDomainChange={setDomain} domains={domains} />
 
-      {!domain ? (
-        <div className="flex flex-1 items-center justify-center text-gray-600 text-sm rounded-lg border border-gray-200 dark:border-gray-800">
-          Select a domain to load the graph.
-        </div>
-      ) : isLoading ? (
+      {isLoading ? (
         <div className="flex flex-1 items-center justify-center text-gray-600 text-sm">
           Loading graph…
         </div>
@@ -36,7 +32,7 @@ export default function Graph() {
       )}
 
       {/* Legend */}
-      {domain && data && (
+      {data && (
         <div className="flex flex-wrap gap-4 text-[11px] text-gray-500">
           {[
             { label: 'Decision',    color: 'bg-blue-500'   },
