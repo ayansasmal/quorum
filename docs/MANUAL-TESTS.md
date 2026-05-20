@@ -605,6 +605,10 @@ After running all scenarios, confirm:
 | Scenario 5: all reflect entries start as DRAFT | DRAFT, triggered_by: reflect | | |
 | Scenario 6: forget() creates DEPRECATED version | v2 DEPRECATED in history | | |
 | Scenario 6: no rows deleted from knowledge_versions | 2 rows in psql | | |
+| Deprecation request: non-PE forget() queues request | `status: "deprecation_requested"` | | |
+| Deprecation request: PE approve → DEPRECATED | entry DEPRECATED in psql | | |
+| Deprecation request: PE reject → entry stays ACTIVE | entry ACTIVE in psql | | |
+| Deprecation request: stale_warning appears after version advance | amber badge on row | | |
 
 ---
 
@@ -647,6 +651,94 @@ After running all scenarios, confirm:
 3. ConfirmDialog opens with note field → note must be ≥ 10 chars
 4. Confirm → entry status becomes ACTIVE; drawer header now shows "Edit" instead of "Promote"
 5. As non-PE user: verify "Promote" button is NOT visible
+
+### Edit (supersede) Active entry
+1. Click `⋯` on an ACTIVE row → "Edit" option appears
+2. KnowledgeForm opens pre-filled with existing values
+3. Modify content → submit → new version created; old version SUPERSEDED
+4. Version history in drawer shows two entries
+5. As non-PE user: verify `⋯` button is NOT visible
+
+### Deprecation request workflow (non-PE → queue → PE approve/reject)
+
+**Pre-condition:** Two users — a `principal_architect` (PE) and a non-PE engineer (e.g. `senior_engineer`). One ACTIVE knowledge entry exists.
+
+**Step 1 — Non-PE submits deprecation via MCP `forget()`**
+1. In the non-PE engineer's Claude Code session, call:
+   ```
+   forget(
+     topic: "auth",
+     key:   "oauth-flow",
+     reason: "Replaced by the new PKCE-only flow — legacy flow removed in v2"
+   )
+   ```
+2. Expected response: `{ status: "deprecation_requested", request_id: "q_c...", message: "Deprecation request queued..." }`
+3. NOT expected: `{ status: "forbidden" }` or `{ status: "deprecated" }`
+
+**Step 2 — Non-PE sees the queued request**
+1. Non-PE calls `pending()` in their session
+2. Expected: response includes `deprecation_requests: [{ request_id, topic, key, requestor, reason, current_version }]`
+3. The `decisions` array does NOT contain a `deprecation_request`-type entry (correct filtering)
+
+**Step 3 — Deduplication check**
+1. Non-PE calls `forget()` on the same topic:key again with the same or different reason
+2. Expected: `{ status: "already_requested", request_id: "q_c..." }` — second request is blocked
+
+**Step 4 — Dashboard shows the pending request (non-PE view)**
+1. Non-PE navigates to `/pending`
+2. "Deprecation requests" section visible with the queued row
+3. Row shows: domain, key, requestor name, reason text, current version
+4. No Approve/Reject buttons visible — informational only
+5. Footer note: "These deprecation requests are awaiting review by a principal architect."
+
+**Step 5 — PE reviews and approves via MCP**
+1. In the PE session, call `pending()` → `deprecation_requests` section appears with `request_id`
+2. Call:
+   ```
+   review(
+     request_id: "<the request_id from step 1>",
+     action: "approve",
+     note: "Confirmed — PKCE migration complete, legacy flow removed in deploy #342"
+   )
+   ```
+3. Expected: `{ status: "approved", topic: "auth", key: "oauth-flow" }`
+4. The ACTIVE entry is now DEPRECATED — verify:
+   ```sql
+   SELECT version, status FROM knowledge_versions
+   WHERE topic='auth' AND key='oauth-flow' ORDER BY version;
+   -- expect: version 1 → DEPRECATED
+   ```
+
+**Step 6 — Dashboard Pending page clears after approval**
+1. Navigate to `/pending` (any user)
+2. The processed request no longer appears in "Deprecation requests" section
+3. If no other pending items exist, the queue-clear state is shown
+
+**Step 7 — Reject path**
+1. Create another ACTIVE entry and submit a new `forget()` request as non-PE
+2. PE navigates to `/pending` dashboard → "Deprecation requests" section shows the row with Approve/Reject buttons
+3. Click "Reject" → ConfirmDialog opens with note field (≥ 10 chars required)
+4. Enter a note and confirm → request is resolved as rejected
+5. The ACTIVE entry remains ACTIVE — verify in Knowledge browser
+6. `pending()` no longer shows the request
+
+**Step 8 — Staleness detection**
+1. Create an ACTIVE entry and submit a `forget()` request as non-PE
+2. Before the PE reviews it, have the PE supersede the ACTIVE entry (creating a new version)
+3. Navigate to `/pending` → the deprecation request row should now show an amber staleness badge, e.g. "Active version advanced from v1 to v2..."
+4. PE can still approve or reject — the stale_warning is informational
+
+**Checklist additions:**
+| Check | Expected | Actual | Pass? |
+|-------|----------|--------|-------|
+| Non-PE forget() returns deprecation_requested | `status: "deprecation_requested"` | | |
+| Duplicate forget() returns already_requested | `status: "already_requested"` | | |
+| pending() includes deprecation_requests[] section | non-empty array | | |
+| Dashboard Pending page shows "Deprecation requests" section | section visible | | |
+| Non-PE sees no Approve/Reject buttons | buttons absent | | |
+| PE approve → entry transitions to DEPRECATED | DEPRECATED in psql | | |
+| PE reject → entry remains ACTIVE | ACTIVE in psql | | |
+| Staleness badge appears after version advances | amber badge visible | | |
 
 ### Edit (supersede) Active entry
 1. Click `⋯` on an ACTIVE row → "Edit" option appears

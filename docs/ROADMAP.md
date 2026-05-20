@@ -201,6 +201,7 @@ Success criteria:
 ✅ PostgreSQL ILIKE fallback in GET /api/search — resilience when Graphiti empty
 ✅ POST /api/bump/:topic/:key — confidence endorsement with 7-day cooldown, role-weighted delta
 ✅ TDD gates for verify-jwt, slim JWT shape, X-Quorum-Project header threading
+✅ Deprecation request workflow — non-PE forget() queues pending_decisions(decision_type=deprecation_request); pending() surfaces deprecation_requests[]; review(request_id) approve/reject; dashboard Pending page shows PE-only approve/reject with stale_warning badges
 ```
 
 Success criteria met:

@@ -229,21 +229,39 @@ The centrepiece. Visualises the entire knowledge graph for the active project/do
 
 The reviewer workflow. Replaces "asking Claude for `pending()`" with an actionable UI.
 
-**What it shows:**
-- List of all pending decisions, sorted by age (oldest first)
+**What it shows (three sections):**
+
+*Conflict decisions:*
+- List of all pending conflict decisions, sorted by age (oldest first)
 - Each card shows: topic:key, conflict reason, existing vs incoming content side-by-side, similarity score, possible_split signal, staleness warning (if ACTIVE version has advanced since DRAFT was created)
 - Enrichment panel (generated lazily on first open — see COST-03)
 
-**Actions per decision:**
+*Draft entries:*
+- DRAFT knowledge entries awaiting PE promotion
+- Table: domain, key, entity type, confidence, author, created date
+- PE-only Promote button (via `POST /api/knowledge/:topic/:key/promote`)
+
+*Deprecation requests (`decision_type=deprecation_request`):*
+- Non-PE engineers who called `forget()` on an ACTIVE entry appear here
+- Table: domain, key, requestor, reason, current version, stale_warning badge (amber)
+- PE-only Approve/Reject buttons; approval runs the full ACTIVE→DEPRECATED transition atomically
+
+**Actions per conflict decision:**
 - **Approve** → `POST /api/review/:id { action: "approve", note: "..." }` — note required
 - **Reject** → `POST /api/review/:id { action: "reject", note: "..." }` — note required
 - **Request changes** → `POST /api/review/:id { action: "request_changes", note: "..." }` — stays as DRAFT, note sent back
 - **Split** → UI prompts for two new topic:keys with scoped content → creates two separate entries
 - **Merge** → UI opens editor for a combined entry → single superseding write
 
+**Actions per deprecation request:**
+- **Approve** → `POST /api/review/:id { action: "approve", note: "..." }` — runs ACTIVE→DEPRECATED atomically
+- **Reject** → `POST /api/review/:id { action: "reject", note: "..." }` — resolves request, entry stays ACTIVE
+- `request_changes` is not valid for deprecation requests (gateway returns 400)
+
 **Constitutional enforcement at UI level:**
 - Reviewer cannot approve their own DRAFTs (UI disables action if `req.user.sub === draft.author`)
 - Note field is required — submit button disabled until non-empty
+- Approve/Reject buttons on deprecation requests are PE-only (non-PE sees read-only view)
 
 ---
 
@@ -486,7 +504,7 @@ Response: { confidence: 0.62, delta_applied: 0.035, clock_reset: true, next_bump
 
 ### `POST /api/review/:conflictId`
 
-**The orchestration endpoint.** Performs the full review flow atomically.
+**The orchestration endpoint.** Branches on `decision_type` — handles both conflict DRAFTs and deprecation requests.
 
 ```
 Request body:
@@ -495,7 +513,7 @@ Request body:
   note: string  // required, min 10 chars
 }
 
-Server-side steps (single pg transaction):
+decision_type=conflict — Server-side steps (single pg transaction):
   1. Validate: reviewer !== author (constitutional rule 4)
   2. If approve:
      a. PATCH pending_decisions: status → RESOLVED, resolution → "approved"
@@ -509,6 +527,16 @@ Server-side steps (single pg transaction):
   4. If request_changes:
      a. PATCH pending_decisions: add note to stale_warning field, stays PENDING
      b. Write audit entry: triggered_by = "review_changes_requested"
+
+decision_type=deprecation_request — PE only; request_changes returns 400:
+  1. If approve (atomic transaction):
+     a. Staleness guard: getCurrentVersion → if null, auto-reject
+     b. transitionVersionStatus(ACTIVE → DEPRECATED)
+     c. resolvePendingDecision(status: "resolved", resolution: "approved")
+     d. Write audit entry: tool = "dashboard-review-deprecation"
+  2. If reject:
+     a. resolvePendingDecision(status: "resolved", resolution: "rejected")
+     b. Write audit entry: tool = "dashboard-review-deprecation"
 ```
 
 ### `GET /api/search?q=X&domain=Y&limit=10`

@@ -86,7 +86,7 @@ The Gateway (`gateway/src/server.js`) is an Express service on port 3001 that fr
 | GET | `/api/graph` | Dashboard BFF — node + edge payload for Cytoscape rendering |
 | GET | `/api/knowledge` | Dashboard BFF — paginated knowledge browser |
 | GET | `/api/search` | Dashboard BFF — semantic search proxied to Graphiti |
-| POST | `/api/review/:id` | Dashboard BFF — approve / reject / request_changes on a DRAFT entry |
+| POST | `/api/review/:id` | Dashboard BFF — approve / reject / request_changes on a conflict DRAFT, or approve / reject a deprecation request (`decision_type=deprecation_request`) |
 | POST | `/api/bump/:topic/:key` | Dashboard BFF — manual confidence bump from a logged-in user |
 | GET | `/health` | Composite health probe — checks PostgreSQL, Graphiti, FalkorDB (TCP), and S3 (HeadBucket) |
 
@@ -324,7 +324,8 @@ search()    →  POST /mcp {tool: "search_memory_nodes"}  (semantic)
 
 reflect()   →  POST /mcp {tool: "add_memory"}           (batch store learnings)
 
-forget()    →  (soft deprecation — new SUPERSEDED version, no Graphiti delete)
+forget()    →  PE/admin: soft deprecation (ACTIVE → DEPRECATED, no Graphiti delete)
+            →  non-PE:  queues a deprecation_request in pending_decisions; PE approves/rejects via review()
 ```
 
 Every call carries the `Mcp-Session-Id` header from the `initialize` handshake.
