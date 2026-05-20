@@ -61,3 +61,22 @@ export function useAdminUsers() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
   })
 }
+
+export function useAdminProjects() {
+  return useQuery({
+    queryKey:  ['admin', 'projects'],
+    queryFn:   () => apiFetch('/admin/projects'),
+    staleTime: 30_000,
+  })
+}
+
+export function useArchiveProject() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }) => apiFetch(`/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body:   JSON.stringify({ reason }),
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'projects'] }),
+  })
+}

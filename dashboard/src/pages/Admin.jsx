@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useAdminConfig, useAdminUsers } from '../api/governance.js'
+import { useAdminConfig, useAdminUsers, useAdminProjects, useArchiveProject } from '../api/governance.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import ConfirmDialog from '../components/knowledge/ConfirmDialog.jsx'
 
 /**
  * Admin page — platform admin management.
@@ -9,12 +10,16 @@ import { useAuth } from '../context/AuthContext.jsx'
 export default function Admin() {
   const { user } = useAuth()
   const { data: adminConfig, isLoading, error } = useAdminConfig()
-  const adminUsers = useAdminUsers()
+  const { data: projectsData }                  = useAdminProjects()
+  const adminUsers    = useAdminUsers()
+  const archiveProject = useArchiveProject()
 
-  const [addUsername, setAddUsername]   = useState('')
-  const [addReason,   setAddReason]     = useState('')
-  const [removeMsg,   setRemoveMsg]     = useState({})  // { [username]: { ok, text } }
-  const [addMsg,      setAddMsg]        = useState(null)
+  const [addUsername,  setAddUsername]  = useState('')
+  const [addReason,    setAddReason]    = useState('')
+  const [removeMsg,    setRemoveMsg]    = useState({})  // { [username]: { ok, text } }
+  const [addMsg,       setAddMsg]       = useState(null)
+  const [archivingId,  setArchivingId]  = useState(null)  // project id pending confirmation
+  const [archiveError, setArchiveError] = useState(null)
 
   if (!user?.is_admin) {
     return (
@@ -61,6 +66,21 @@ export default function Admin() {
       setRemoveMsg((prev) => ({ ...prev, [username]: { ok: false, text: err.message } }))
     }
   }
+
+  /**
+   * @param {string} reason - Deprecation reason from ConfirmDialog
+   */
+  async function handleArchive(reason) {
+    setArchiveError(null)
+    try {
+      await archiveProject.mutateAsync({ id: archivingId, reason })
+      setArchivingId(null)
+    } catch (err) {
+      setArchiveError(err.message)
+    }
+  }
+
+  const projects = projectsData?.projects ?? []
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -132,6 +152,55 @@ export default function Admin() {
           </p>
         )}
       </Card>
+
+      {/* Projects */}
+      <Card title="Projects">
+        {projects.length === 0 ? (
+          <p className="text-xs text-gray-500">No projects found.</p>
+        ) : (
+          <div className="space-y-2">
+            {projects.map((p) => (
+              <div key={p.id} className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                    {p.name ?? p.slug}
+                  </span>
+                  <span className="ml-2 text-xs text-gray-400">{p.slug}</span>
+                  <span className="ml-3 text-xs text-gray-400">
+                    {p.member_count} member{p.member_count !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {p.status === 'ARCHIVED' ? (
+                    <span className="text-xs text-gray-400 italic">Archived</span>
+                  ) : (
+                    <button
+                      onClick={() => { setArchiveError(null); setArchivingId(p.id) }}
+                      className="text-xs text-gray-400 hover:text-red-400 transition-colors"
+                    >
+                      Deprecate
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <ConfirmDialog
+        open={!!archivingId}
+        title="Deprecate project"
+        body={`This will archive the project and deprecate all its ACTIVE knowledge entries. This cannot be undone.`}
+        confirmLabel="Deprecate"
+        destructive
+        noteLabel="Reason for deprecation"
+        noteRequired
+        onConfirm={handleArchive}
+        onCancel={() => { setArchivingId(null); setArchiveError(null) }}
+        isSubmitting={archiveProject.isPending}
+        error={archiveError}
+      />
 
     </div>
   )

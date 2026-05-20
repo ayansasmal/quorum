@@ -348,13 +348,21 @@ router.post('/:id/token/rotate', verifyJwt, async (req, res, next) => {
 // ── DELETE /projects/:id ──────────────────────────────────────────────────────
 
 /**
- * Archive a project (soft-delete). Requires principal_architect role (GAP-29).
+ * Archive a project (soft-delete).
+ * Allowed for: principal_architect of the project OR platform admin (is_admin).
  * Sets project status to ARCHIVED and bulk-deprecates all ACTIVE knowledge versions.
+ * Body: { reason } (required, ≥ 10 chars)
  */
 router.delete('/:id', verifyJwt, async (req, res, next) => {
-  const { id } = req.params
-  const caller = req.user.sub
-  const pool   = req.app.locals.pool
+  const { id }     = req.params
+  const { reason } = req.body ?? {}
+  const caller     = req.user.sub
+  const isAdmin    = req.user.is_admin
+  const pool       = req.app.locals.pool
+
+  if (!reason || reason.length < 10) {
+    return next(Errors.unprocessable('reason must be at least 10 characters'))
+  }
 
   try {
     const current = await pool.query(
@@ -366,11 +374,11 @@ router.delete('/:id', verifyJwt, async (req, res, next) => {
     }
 
     const role = callerRole(current.rows[0].members, caller)
-    if (role !== 'principal_architect') {
-      return next(Errors.forbidden('Only a principal_architect may archive a project'))
+    if (role !== 'principal_architect' && !isAdmin) {
+      return next(Errors.forbidden('Only a principal_architect or platform admin may archive a project'))
     }
 
-    // GAP-29: bulk soft-deprecate all ACTIVE knowledge versions in this project
+    // Bulk soft-deprecate all ACTIVE knowledge versions in this project
     const deprecateResult = await pool.query(
       `UPDATE knowledge_versions
        SET status = 'DEPRECATED'

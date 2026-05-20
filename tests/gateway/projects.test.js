@@ -106,7 +106,7 @@ function request(method, path, body, headers = {}) {
 const get    = (path, headers = {}) => request('GET',    path, null, headers)
 const post   = (path, body, headers = {}) => request('POST',   path, body, headers)
 const patch  = (path, body, headers = {}) => request('PATCH',  path, body, headers)
-const del    = (path, headers = {}) => request('DELETE', path, null, headers)
+const del    = (path, body = null, headers = {}) => request('DELETE', path, body, headers)
 
 // ── POST /projects ─────────────────────────────────────────────────────────────
 
@@ -509,12 +509,28 @@ describe('DELETE /projects/:id', () => {
     expect(status).toBe(401)
   })
 
+  it('returns 400 when reason is missing', async () => {
+    mockProfile('alice')
+    const tok = await makeToken('alice')
+    const { status, body } = await del('/projects/proj-1', {}, { Authorization: `Bearer ${tok}` })
+    expect(status).toBe(400)
+    expect(body.error).toBe('unprocessable')
+  })
+
+  it('returns 400 when reason is too short', async () => {
+    mockProfile('alice')
+    const tok = await makeToken('alice')
+    const { status, body } = await del('/projects/proj-1', { reason: 'short' }, { Authorization: `Bearer ${tok}` })
+    expect(status).toBe(400)
+    expect(body.error).toBe('unprocessable')
+  })
+
   it('returns 404 when project does not exist', async () => {
     mockProfile('alice')
     const tok = await makeToken('alice')
     mockPool.query.mockResolvedValueOnce({ rows: [] })
 
-    const { status, body } = await del('/projects/proj-missing', { Authorization: `Bearer ${tok}` })
+    const { status, body } = await del('/projects/proj-missing', { reason: 'project is being decommissioned' }, { Authorization: `Bearer ${tok}` })
     expect(status).toBe(404)
     expect(body.error).toBe('not_found')
   })
@@ -526,7 +542,7 @@ describe('DELETE /projects/:id', () => {
       rows: [{ members: [{ github_username: 'alice', role: 'engineer' }] }],
     })
 
-    const { status, body } = await del('/projects/proj-1', { Authorization: `Bearer ${tok}` })
+    const { status, body } = await del('/projects/proj-1', { reason: 'project is being decommissioned' }, { Authorization: `Bearer ${tok}` })
     expect(status).toBe(403)
     expect(body.error).toBe('forbidden')
   })
@@ -541,12 +557,29 @@ describe('DELETE /projects/:id', () => {
       .mockResolvedValueOnce({ rowCount: 3, rows: [{ id: 'v1' }, { id: 'v2' }, { id: 'v3' }] }) // UPDATE knowledge_versions
       .mockResolvedValueOnce({ rows: [] }) // UPDATE projects SET status=ARCHIVED
 
-    const { status, body } = await del('/projects/proj-1', { Authorization: `Bearer ${tok}` })
+    const { status, body } = await del('/projects/proj-1', { reason: 'project is being decommissioned' }, { Authorization: `Bearer ${tok}` })
 
     expect(status).toBe(200)
     expect(body.status).toBe('ARCHIVED')
     expect(body.versions_deprecated).toBe(3)
     expect(body.archived_by).toBe('alice')
     expect(invalidateProject).toHaveBeenCalledWith('proj-1')
+  })
+
+  it('allows platform admin to archive a project they are not a member of', async () => {
+    mockProfile('superadmin', true)
+    const tok = await makeToken('superadmin', true)
+    mockPool.query
+      .mockResolvedValueOnce({
+        rows: [{ members: [{ github_username: 'alice', role: 'principal_architect' }] }],
+      })
+      .mockResolvedValueOnce({ rowCount: 2, rows: [{ id: 'v1' }, { id: 'v2' }] })
+      .mockResolvedValueOnce({ rows: [] })
+
+    const { status, body } = await del('/projects/proj-1', { reason: 'admin-initiated decommission' }, { Authorization: `Bearer ${tok}` })
+
+    expect(status).toBe(200)
+    expect(body.status).toBe('ARCHIVED')
+    expect(body.archived_by).toBe('superadmin')
   })
 })
