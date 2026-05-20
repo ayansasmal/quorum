@@ -17,9 +17,10 @@ export default function Pending() {
   const [promoteTarget,   setPromoteTarget]   = useState(null)
   const [deprecationReview, setDeprecationReview] = useState(null) // { request, action }
 
-  const decisions           = pendingData?.decisions          ?? pendingData ?? []
-  const drafts              = draftsData?.drafts              ?? []
-  const deprecationRequests = pendingData?.deprecation_requests ?? []
+  const allPending          = Array.isArray(pendingData) ? pendingData : []
+  const decisions           = allPending.filter(r => (r.decision_type ?? 'conflict') === 'conflict')
+  const deprecationRequests = allPending.filter(r => r.decision_type === 'deprecation_request')
+  const drafts              = draftsData?.drafts ?? []
 
   const isEmpty = !decisions.length && !drafts.length && !deprecationRequests.length
   const isLoading = pendingLoading || draftsLoading
