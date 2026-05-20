@@ -40,10 +40,11 @@ const DB_ROWS_SINGLE_TOPIC = [
   { version_id: 'v2', topic: 'auth', key: 'jwt-shape',  version: 1, entity_type: 'Decision', confidence: 0.8, author: 'alice', summary: 'JWT shape', status: 'ACTIVE', supersedes_version: null, tags: [] },
 ]
 
-function makeMockPool(rows) {
+function makeMockPool(rows, groupId = 'eng-team') {
   return {
     query: vi.fn().mockImplementation((sql) => {
-      if (/COUNT/.test(sql)) return Promise.resolve({ rows: [{ cnt: rows.length }] })
+      if (/COUNT/.test(sql))       return Promise.resolve({ rows: [{ cnt: rows.length }] })
+      if (/q_projects/.test(sql))  return Promise.resolve({ rows: [{ group_id: groupId }] })
       return Promise.resolve({ rows })
     }),
   }
@@ -85,6 +86,14 @@ async function fetchGraph(pool, query = '') {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/graph — unfiltered (3-level hierarchy)', () => {
+  it('hub node label is the canonical group_id from q_projects', async () => {
+    const pool = makeMockPool(DB_ROWS_MULTI_TOPIC, 'my-eng-team')
+    const { body } = await fetchGraph(pool)
+    const hub = body.nodes.find((n) => n.data.node_type === 'hub')
+    expect(hub.data.label).toBe('my-eng-team')
+    expect(hub.data.group_id).toBe('my-eng-team')
+  })
+
   it('emits topic nodes for each unique topic', async () => {
     const pool = makeMockPool(DB_ROWS_MULTI_TOPIC)
     const { status, body } = await fetchGraph(pool)

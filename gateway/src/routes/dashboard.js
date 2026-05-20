@@ -220,6 +220,14 @@ router.get('/graph', async (req, res, next) => {
     const qProjectId = await resolveQProjectId(req, res)
     if (!qProjectId) return
 
+    // Resolve canonical group_id from DB — used as the hub node label so the
+    // graph always shows the authoritative project identity, not the header value.
+    const { rows: projectRows } = await pool.query(
+      'SELECT group_id FROM q_projects WHERE q_project_id = $1 LIMIT 1',
+      [qProjectId],
+    )
+    const groupId = projectRows[0]?.group_id ?? req.user.project ?? qProjectId
+
     // Guard: require domain filter if graph would be too large
     if (!domain) {
       const countResult = await pool.query(
@@ -318,8 +326,8 @@ router.get('/graph', async (req, res, next) => {
 
     // Central hub node — project or domain depending on filter
     const hubId    = domain ? `domain:${domain}` : `project:${qProjectId}`
-    const hubLabel = domain ?? req.user.project ?? qProjectId
-    const hubNode  = { data: { id: hubId, label: hubLabel, node_type: 'hub' } }
+    const hubLabel = domain ?? groupId
+    const hubNode  = { data: { id: hubId, label: hubLabel, node_type: 'hub', group_id: groupId } }
 
     const keyNodes = rows.map((r) => ({
       data: {
