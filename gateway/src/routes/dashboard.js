@@ -680,6 +680,81 @@ router.post('/review/:conflictId', async (req, res, next) => {
     const conflictTopic = keyRow.rows[0]?.topic ?? null
     const conflictKey   = keyRow.rows[0]?.key   ?? null
 
+    // ── Deprecation request branch ──────────────────────────────────────────────
+    if (decision.decision_type === 'deprecation_request') {
+      if (action === 'request_changes') {
+        return res.status(400).json({
+          error: 'invalid_action',
+          message: "request_changes is not valid for deprecation requests. Reject it and ask the requestor to re-submit forget() with a clearer reason.",
+        })
+      }
+
+      if (action === 'reject') {
+        await resolvePendingDecision(pool, conflictId, {
+          status: 'resolved', resolution: 'rejected',
+          note, resolvedBy: reviewer,
+        })
+        await writeAuditEntry(pool, {
+          operation:    'OUTCOME',
+          tool:         'dashboard-review-deprecation',
+          author:       reviewer,
+          author_role:  reviewerRole,
+          q_project_id: qProjectId,
+          author_type:  'human',
+          triggered_by: 'dashboard',
+          governance_json: { action, note, request_id: conflictId },
+          outcome_json:    { status: 'rejected', topic: conflictTopic, key: conflictKey },
+          version_impact:  { versions_created: [], versions_superseded: [] },
+        })
+        return res.json({ status: 'rejected', request_id: conflictId, topic: conflictTopic, key: conflictKey, reviewer, note })
+      }
+
+      // approve — run deprecation transaction
+      const currentEntry = await getCurrentVersion(pool, decision.q_key_id)
+      if (!currentEntry) {
+        await resolvePendingDecision(pool, conflictId, {
+          status: 'resolved', resolution: 'rejected',
+          note: 'Entry no longer ACTIVE at approval time.', resolvedBy: reviewer,
+        })
+        return res.status(404).json({ error: 'not_found', message: `${conflictTopic}:${conflictKey} is no longer ACTIVE.` })
+      }
+
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const currentVersionId = `${decision.q_key_id}_v${currentEntry.version}`
+        await transitionVersionStatus(client, currentVersionId, 'DEPRECATED', null)
+        await resolvePendingDecision(client, conflictId, {
+          status: 'resolved', resolution: 'approved',
+          note, resolvedBy: reviewer,
+        })
+        await client.query('COMMIT')
+      } catch (txErr) {
+        await client.query('ROLLBACK')
+        throw txErr
+      } finally {
+        client.release()
+      }
+
+      await writeAuditEntry(pool, {
+        operation:    'OUTCOME',
+        tool:         'dashboard-review-deprecation',
+        author:       reviewer,
+        author_role:  reviewerRole,
+        q_project_id: qProjectId,
+        author_type:  'human',
+        triggered_by: 'dashboard',
+        governance_json: { action, note, request_id: conflictId },
+        outcome_json:    { status: 'approved', topic: conflictTopic, key: conflictKey, version: currentEntry.version },
+        version_impact:  {
+          versions_created:    [],
+          versions_superseded: [`${decision.q_key_id}_v${currentEntry.version}`],
+        },
+      })
+      return res.json({ status: 'approved', request_id: conflictId, topic: conflictTopic, key: conflictKey, reviewer, note })
+    }
+    // ── End deprecation request branch ──────────────────────────────────────────
+
     // Get the DRAFT version to check authorship
     const draftVersion = await getLatestDraftVersion(pool, decision.q_key_id)
 

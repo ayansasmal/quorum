@@ -69,6 +69,8 @@ import {
   transitionVersionStatus,
   getLatestDraftVersion,
   getCurrentVersion,
+  getPendingDecisionById,
+  resolvePendingDecision,
 } from '../../gateway/src/shared/graph/queries.js'
 import { writeAuditEntry } from '../../gateway/src/shared/audit/secondary.js'
 import { verifyJwt } from '../../gateway/src/middleware/verify-jwt.js'
@@ -136,6 +138,10 @@ beforeEach(() => {
       throw err
     }
   })
+
+  // Default getPendingDecisionById returns null (override per test as needed)
+  getPendingDecisionById.mockResolvedValue(null)
+  resolvePendingDecision.mockResolvedValue(undefined)
 })
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -572,5 +578,86 @@ describe('POST /api/knowledge/deprecate/bulk', () => {
       fakePool,
       expect.objectContaining({ tool: 'dashboard-deprecate', operation: 'WRITE' }),
     )
+  })
+})
+
+describe('POST /api/review/:conflictId — deprecation request path', () => {
+  function makeDeprecationDecision(overrides = {}) {
+    return {
+      conflict_id:               'q_c12',
+      decision_type:             'deprecation_request',
+      status:                    'pending',
+      q_project_id:              'q_p1',
+      q_key_id:                  'q_k1',
+      conflict_reason:           'Replaced by new OAuth flow with PKCE',
+      active_version_at_creation: 3,
+      ...overrides,
+    }
+  }
+
+  it('returns 403 when non-PE tries to approve a deprecation request', async () => {
+    mockUser = { sub: 'junior', project: 'q_p1', role: 'senior_engineer', is_admin: false }
+    getPendingDecisionById.mockResolvedValue(makeDeprecationDecision())
+    fakePool.query.mockResolvedValue({ rows: [{ topic: 'auth', key: 'token-strategy' }] })
+
+    const res = await post('/api/review/q_c12', {
+      action: 'approve', note: 'Approved after reviewing the request',
+    })
+
+    expect(res.status).toBe(403)
+  })
+
+  it('returns 400 for request_changes action on a deprecation_request', async () => {
+    getPendingDecisionById.mockResolvedValue(makeDeprecationDecision())
+    fakePool.query.mockResolvedValue({ rows: [{ topic: 'auth', key: 'token-strategy' }] })
+
+    const res = await post('/api/review/q_c12', {
+      action: 'request_changes', note: 'Please clarify your reasoning here',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('invalid_action')
+  })
+
+  it('returns 200 and runs deprecation transaction on approve', async () => {
+    getPendingDecisionById.mockResolvedValue(makeDeprecationDecision())
+    fakePool.query.mockResolvedValue({ rows: [{ topic: 'auth', key: 'token-strategy' }] })
+    getCurrentVersion.mockResolvedValue({ version: 3, status: 'ACTIVE', confidence: 0.8 })
+
+    const res = await post('/api/review/q_c12', {
+      action: 'approve', note: 'Approved — entry is obsolete after the migration',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('approved')
+    expect(res.body.request_id).toBe('q_c12')
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      fakeClient, 'q_k1_v3', 'DEPRECATED', null,
+    )
+    expect(resolvePendingDecision).toHaveBeenCalledWith(
+      fakeClient, 'q_c12',
+      expect.objectContaining({ status: 'resolved', resolution: 'approved' }),
+    )
+    expect(writeAuditEntry).toHaveBeenCalledWith(
+      fakePool,
+      expect.objectContaining({ tool: 'dashboard-review-deprecation', author_type: 'human' }),
+    )
+  })
+
+  it('returns 200 and resolves row as rejected on reject', async () => {
+    getPendingDecisionById.mockResolvedValue(makeDeprecationDecision())
+    fakePool.query.mockResolvedValue({ rows: [{ topic: 'auth', key: 'token-strategy' }] })
+
+    const res = await post('/api/review/q_c12', {
+      action: 'reject', note: 'Entry still needed by the payments domain',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('rejected')
+    expect(resolvePendingDecision).toHaveBeenCalledWith(
+      fakePool, 'q_c12',
+      expect.objectContaining({ status: 'resolved', resolution: 'rejected' }),
+    )
+    expect(transitionVersionStatus).not.toHaveBeenCalled()
   })
 })
