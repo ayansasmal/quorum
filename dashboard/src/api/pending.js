@@ -32,6 +32,28 @@ export function useReview() {
   })
 }
 
+/**
+ * Mutation to approve or reject a pending deprecation request.
+ * Invalidates pending, knowledge, and stats queries on success.
+ *
+ * @returns {import('@tanstack/react-query').UseMutationResult}
+ */
+export function useReviewDeprecationRequest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ requestId, action, note }) =>
+      apiFetch(`/api/review/${encodeURIComponent(requestId)}`, {
+        method: 'POST',
+        body:   JSON.stringify({ action, note }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
 export function usePromoteDraft() {
   const qc = useQueryClient()
   return useMutation({

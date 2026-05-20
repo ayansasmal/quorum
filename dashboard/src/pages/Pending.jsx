@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { usePending, useDrafts, usePromoteDraft } from '../api/pending.js'
+import { usePending, useDrafts, usePromoteDraft, useReviewDeprecationRequest } from '../api/pending.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import DecisionCard from '../components/pending/DecisionCard.jsx'
 import ConfirmDialog from '../components/knowledge/ConfirmDialog.jsx'
@@ -9,16 +9,19 @@ import { entityBadge, fmtDate } from '../lib/utils.js'
 export default function Pending() {
   const { data: pendingData, isLoading: pendingLoading, error: pendingError } = usePending()
   const { data: draftsData,  isLoading: draftsLoading,  error: draftsError  } = useDrafts()
-  const promote     = usePromoteDraft()
+  const promote         = usePromoteDraft()
+  const reviewDepr      = useReviewDeprecationRequest()
   const { currentProjectData } = useAuth()
   const isPE        = currentProjectData?.role === 'principal_architect'
 
-  const [promoteTarget, setPromoteTarget] = useState(null)
+  const [promoteTarget,   setPromoteTarget]   = useState(null)
+  const [deprecationReview, setDeprecationReview] = useState(null) // { request, action }
 
-  const decisions = pendingData?.decisions ?? pendingData ?? []
-  const drafts    = draftsData?.drafts ?? []
+  const decisions           = pendingData?.decisions          ?? pendingData ?? []
+  const drafts              = draftsData?.drafts              ?? []
+  const deprecationRequests = pendingData?.deprecation_requests ?? []
 
-  const isEmpty = !decisions.length && !drafts.length
+  const isEmpty = !decisions.length && !drafts.length && !deprecationRequests.length
   const isLoading = pendingLoading || draftsLoading
   const error     = pendingError || draftsError
 
@@ -95,6 +98,76 @@ export default function Pending() {
         </section>
       )}
 
+      {/* ── Deprecation requests ───────────────────────────────────── */}
+      {deprecationRequests.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Deprecation requests
+            </h2>
+            <span className="text-xs text-gray-400">
+              {deprecationRequests.length} pending
+            </span>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="border-b border-gray-200 dark:border-gray-800">
+                <tr>
+                  {['Domain', 'Key', 'Requestor', 'Reason', 'Version', ...(isPE ? [''] : [])].map((h) => (
+                    <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-gray-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200/50 dark:divide-gray-800/50">
+                {deprecationRequests.map((req) => (
+                  <tr key={req.request_id} className="hover:bg-gray-100/40 dark:hover:bg-gray-800/40 align-top">
+                    <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{req.topic}</td>
+                    <td className="px-4 py-2.5 text-blue-400 font-mono text-xs">{req.key}</td>
+                    <td className="px-4 py-2.5 text-xs text-gray-500">{req.requestor}</td>
+                    <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-300 max-w-xs">
+                      <span className="line-clamp-2">{req.reason}</span>
+                      {req.stale_warning && (
+                        <span className="mt-1 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 text-[10px]">
+                          ⚠ {req.stale_warning}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-gray-500 font-mono">
+                      v{req.current_version ?? '?'}
+                    </td>
+                    {isPE && (
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setDeprecationReview({ request: req, action: 'approve' })}
+                            className="rounded px-2 py-1 text-xs font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 border border-green-200 dark:border-green-800"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => setDeprecationReview({ request: req, action: 'reject' })}
+                            className="rounded px-2 py-1 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {!isPE && (
+            <p className="text-xs text-gray-500">
+              These deprecation requests are awaiting review by a principal architect.
+            </p>
+          )}
+        </section>
+      )}
+
       {/* ── Conflict decisions ─────────────────────────────────────── */}
       {decisions.length > 0 && (
         <section className="space-y-3">
@@ -112,6 +185,34 @@ export default function Pending() {
               <DecisionCard key={d.conflict_id} decision={d} />
             ))}
         </section>
+      )}
+
+      {/* ── Deprecation request review dialog ─────────────────────── */}
+      {deprecationReview && (
+        <ConfirmDialog
+          open={Boolean(deprecationReview)}
+          title={deprecationReview.action === 'approve' ? 'Approve Deprecation?' : 'Reject Deprecation Request?'}
+          body={
+            deprecationReview.action === 'approve'
+              ? `Approve deprecation of ${deprecationReview.request.topic}:${deprecationReview.request.key}? The entry will be marked DEPRECATED immediately.`
+              : `Reject the deprecation request for ${deprecationReview.request.topic}:${deprecationReview.request.key}? The entry will remain ACTIVE.`
+          }
+          confirmLabel={deprecationReview.action === 'approve' ? 'Approve' : 'Reject'}
+          noteLabel="Reason (required)"
+          noteRequired={true}
+          onConfirm={async (note) => {
+            await reviewDepr.mutateAsync({
+              requestId: deprecationReview.request.request_id,
+              action:    deprecationReview.action,
+              note,
+            })
+            reviewDepr.reset()
+            setDeprecationReview(null)
+          }}
+          onCancel={() => { reviewDepr.reset(); setDeprecationReview(null) }}
+          isSubmitting={reviewDepr.isPending}
+          error={reviewDepr.error?.message ?? null}
+        />
       )}
 
       {/* ── Promote confirm dialog ─────────────────────────────────── */}
