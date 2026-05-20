@@ -35,7 +35,7 @@ router.use(verifyJwt)
  */
 function sanitizeForPrompt(s) {
   if (typeof s !== 'string') return ''
-  return s.replace(/["""]/g, '"').replace(/```/g, "'''").slice(0, 2000)
+  return s.replace(/[“”"]/g, '"').replace(/```/g, "'''").slice(0, 2000)
 }
 
 // ── Prompt builders ────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ function sanitizeForPrompt(s) {
  */
 function buildConflictPrompt(existing, incoming) {
   return {
-    system: `You are a conservative conflict detector for an engineering knowledge graph. You review two pieces of engineering knowledge and decide whether they contradict each other.
+    system: `You are a conservative conflict detector for an engineering and business knowledge graph. You review two pieces of knowledge and decide whether they contradict each other.
 
 RULES:
 - Base your analysis ONLY on the text provided. Do not infer unstated context, invent technical facts, or draw on information outside this prompt.
@@ -100,7 +100,7 @@ function buildEnrichPrompt(existing, incoming, conflictReason, possibleSplit, sp
     : ''
 
   return {
-    system: `You are an impartial reviewer brief generator for an engineering knowledge conflict. You produce a structured JSON brief that helps a human reviewer decide between two conflicting pieces of knowledge.
+    system: `You are an impartial reviewer brief generator for an engineering and business knowledge conflict. You produce a structured JSON brief that helps a human reviewer decide between two conflicting pieces of knowledge.
 
 RULES:
 - Base your analysis ONLY on the text provided. Do not infer unstated context, invent technical facts, or draw on information outside this prompt.
@@ -157,12 +157,12 @@ function buildExtractPrompt(taskSummary, decisionsMade, patternsUsed) {
     : ''
 
   return {
-    system: `You are a conservative knowledge extractor for an engineering knowledge graph. You extract reusable, team-specific engineering knowledge from a completed task summary.
+    system: `You are a conservative knowledge extractor for an engineering and business knowledge graph. You extract reusable, team-specific engineering and business knowledge from a completed task summary.
 
 RULES:
 - Base your extraction ONLY on the text provided. Do not infer unstated context, invent technical facts, or draw on information outside this prompt.
 - Over-extraction is worse than under-extraction. If in doubt, do not extract. Returning zero items is a valid and often correct answer.
-- Quality test: ask "If a senior engineer asked 'why did we do X?', would this entry be the answer?" If no, do not extract it.
+- Quality test: ask "If a senior engineer or product owner asked 'why did we do X?', would this entry be the answer?" If no, do not extract it.
 - Do NOT extract: generic programming concepts, language/framework basics, implementation details of a single function, debugging steps, temporary workarounds you intend to revert, obvious conclusions (e.g. "we used a for-loop"), restatements of the task itself.
 - Do NOT extract secrets, credentials, API keys, tokens, passwords, personally identifiable information (PII), or security-sensitive configuration values.
 - Extract a maximum of 3 items. Fewer is better when content is thin.
@@ -184,7 +184,7 @@ OUTPUT SCHEMA (return exactly this shape, no extra fields):
 CONSTRAINTS:
 - Return a JSON OBJECT with an "items" array. Do not return a bare array.
 - items length: 0 to 3 inclusive. Empty array {"items": []} is correct when nothing meets the quality bar.
-- topic: one of: auth | api | db | infra | testing | security | payments — or another short domain word if none fit.
+- topic: one of: auth | api | db | infra | testing | security | payments | product | compliance — or another short domain word if none fit.
 - key: kebab-case, specific enough to be unique (e.g. "jwt-refresh-on-expiry", NOT "auth-approach").
 - entity_type: one of: Decision | Pattern | Constraint | Runbook | Requirement.
 - confidence: 0.35 (generalising from one case) | 0.55 (extracting a pattern) | 0.75 (echoing an explicit decision).
@@ -195,7 +195,7 @@ CONSTRAINTS:
 
     user: `Task summary:
 "${sanitizeForPrompt(taskSummary)}"${decisionsBlock}${patternsBlock}
-Extract reusable engineering knowledge per the rules. Return the JSON object as specified.`,
+Extract reusable engineering and business knowledge per the rules. Return the JSON object as specified.`,
   }
 }
 
@@ -277,7 +277,7 @@ router.post('/enrich', async (req, res, next) => {
 // ── POST /governance/extract ───────────────────────────────────────────────────
 
 /**
- * Extract reusable engineering knowledge from a task summary.
+ * Extract reusable knowledge from a task summary.
  *
  * Request:  { task_summary, decisions_made?, patterns_used? }
  * Response: { items: ExtractedItem[] }

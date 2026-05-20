@@ -50,6 +50,14 @@
     "payments": {
       "conflict_threshold": 0.92,
       "required_reviewer_teams": ["security", "platform"]
+    },
+    "product": {
+      "conflict_threshold": 0.80,
+      "required_reviewer_teams": ["product"]
+    },
+    "compliance": {
+      "conflict_threshold": 0.92,
+      "required_reviewer_teams": ["legal", "security"]
     }
   },
   "thresholds": {
