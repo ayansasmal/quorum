@@ -1,25 +1,32 @@
-import { useState, useCallback } from 'react'
-import { X } from 'lucide-react'
+import { useState, useCallback } from 'react';
+import { X } from 'lucide-react';
 
 /** Allowed entity type options for the knowledge entry. */
-const ENTITY_TYPES = ['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement']
+const ENTITY_TYPES = [
+  'Decision',
+  'Pattern',
+  'Constraint',
+  'Runbook',
+  'Requirement',
+];
 
 /** Regex for topic / key / tag slug validation. */
-const SLUG_RE = /^[a-z0-9-]+$/
+const SLUG_RE = /^[a-z0-9-]+$/;
 
 /** Base Tailwind classes shared by all text inputs and textareas. */
 const INPUT_BASE =
-  'rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full transition-colors'
+  'rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full transition-colors';
 
 /** Label classes for all form field labels. */
-const LABEL_CLASS = 'block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2'
+const LABEL_CLASS =
+  'block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2';
 
 /** Read-only field display (locked in supersede mode). */
 const LOCKED_FIELD =
-  'rounded-lg bg-gray-100 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm font-mono text-gray-500 dark:text-gray-400 w-full select-all cursor-default'
+  'rounded-lg bg-gray-100 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 px-3.5 py-2.5 text-sm font-mono text-gray-500 dark:text-gray-400 w-full select-all cursor-default';
 
 /** Inline error text classes. */
-const ERROR_CLASS = 'text-xs text-red-400 mt-1.5'
+const ERROR_CLASS = 'text-xs text-red-400 mt-1.5';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,8 +42,8 @@ const ERROR_CLASS = 'text-xs text-red-400 mt-1.5'
 function parseTags(raw) {
   return raw
     .split(',')
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean)
+    .map(t => t.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 /**
@@ -46,7 +53,7 @@ function parseTags(raw) {
  * @returns {boolean} True if the tag matches `/^[a-z0-9-]+$/`.
  */
 function isValidTag(tag) {
-  return SLUG_RE.test(tag)
+  return SLUG_RE.test(tag);
 }
 
 // ---------------------------------------------------------------------------
@@ -81,25 +88,29 @@ export default function KnowledgeForm({
   isSubmitting = false,
   error = null,
 }) {
-  const isSupersede = mode === 'supersede'
+  const isSupersede = mode === 'supersede';
 
   // -------------------------------------------------------------------------
   // State
   // -------------------------------------------------------------------------
 
-  const [topic, setTopic] = useState(initialValues.topic ?? '')
-  const [key, setKey] = useState(initialValues.key ?? '')
-  const [content, setContent] = useState(initialValues.content ?? '')
-  const [entityType, setEntityType] = useState(initialValues.entity_type ?? 'Decision')
-  const [tags, setTags] = useState(Array.isArray(initialValues.tags) ? initialValues.tags : [])
-  const [tagInput, setTagInput] = useState('')
+  const [topic, setTopic] = useState(initialValues.topic ?? '');
+  const [key, setKey] = useState(initialValues.key ?? '');
+  const [content, setContent] = useState(initialValues.content ?? '');
+  const [entityType, setEntityType] = useState(
+    initialValues.entity_type ?? 'Decision',
+  );
+  const [tags, setTags] = useState(
+    Array.isArray(initialValues.tags) ? initialValues.tags : [],
+  );
+  const [tagInput, setTagInput] = useState('');
   const [confidence, setConfidence] = useState(
-    Math.max(0.5, Math.min(1.0, initialValues?.confidence ?? 0.85))
-  )
-  const [reason, setReason] = useState('')
+    Math.max(0.5, Math.min(1.0, initialValues?.confidence ?? 0.85)),
+  );
+  const [reason, setReason] = useState('');
 
   /** Per-field validation error messages. */
-  const [fieldErrors, setFieldErrors] = useState({})
+  const [fieldErrors, setFieldErrors] = useState({});
 
   // -------------------------------------------------------------------------
   // Tag management
@@ -110,23 +121,23 @@ export default function KnowledgeForm({
    * Called on blur and before submit.
    */
   const flushTagInput = useCallback(() => {
-    if (!tagInput.trim()) return
-    const incoming = parseTags(tagInput)
-    setTags((prev) => {
-      const merged = [...new Set([...prev, ...incoming])]
-      return merged.slice(0, 10)
-    })
-    setTagInput('')
-  }, [tagInput])
+    if (!tagInput.trim()) return;
+    const incoming = parseTags(tagInput);
+    setTags(prev => {
+      const merged = [...new Set([...prev, ...incoming])];
+      return merged.slice(0, 10);
+    });
+    setTagInput('');
+  }, [tagInput]);
 
   /**
    * Remove a tag chip by value.
    *
    * @param {string} tagToRemove - The tag string to remove from the array.
    */
-  const removeTag = useCallback((tagToRemove) => {
-    setTags((prev) => prev.filter((t) => t !== tagToRemove))
-  }, [])
+  const removeTag = useCallback(tagToRemove => {
+    setTags(prev => prev.filter(t => t !== tagToRemove));
+  }, []);
 
   // -------------------------------------------------------------------------
   // Validation
@@ -140,57 +151,61 @@ export default function KnowledgeForm({
    *   the async `setTags` race condition.
    * @returns {Object} An object containing any validation error messages keyed by field name.
    */
-  const validate = useCallback((overrideTags) => {
-    const effectiveTags = overrideTags ?? tags
+  const validate = useCallback(
+    overrideTags => {
+      const effectiveTags = overrideTags ?? tags;
 
-    const errs = {}
+      const errs = {};
 
-    if (!isSupersede) {
-      if (!topic) {
-        errs.topic = 'Topic is required.'
-      } else if (!SLUG_RE.test(topic)) {
-        errs.topic = 'Only lowercase letters, digits, and hyphens are allowed.'
-      } else if (topic.length > 60) {
-        errs.topic = 'Topic must be 60 characters or fewer.'
+      if (!isSupersede) {
+        if (!topic) {
+          errs.topic = 'Topic is required.';
+        } else if (!SLUG_RE.test(topic)) {
+          errs.topic =
+            'Only lowercase letters, digits, and hyphens are allowed.';
+        } else if (topic.length > 60) {
+          errs.topic = 'Topic must be 60 characters or fewer.';
+        }
+
+        if (!key) {
+          errs.key = 'Key is required.';
+        } else if (!SLUG_RE.test(key)) {
+          errs.key = 'Only lowercase letters, digits, and hyphens are allowed.';
+        } else if (key.length > 80) {
+          errs.key = 'Key must be 80 characters or fewer.';
+        }
       }
 
-      if (!key) {
-        errs.key = 'Key is required.'
-      } else if (!SLUG_RE.test(key)) {
-        errs.key = 'Only lowercase letters, digits, and hyphens are allowed.'
-      } else if (key.length > 80) {
-        errs.key = 'Key must be 80 characters or fewer.'
+      if (!content) {
+        errs.content = 'Content is required.';
+      } else if (/[<>]/.test(content)) {
+        errs.content = 'Content must not contain < or > characters.';
+      } else if (content.length > 500) {
+        errs.content = 'Content must be 500 characters or fewer.';
       }
-    }
 
-    if (!content) {
-      errs.content = 'Content is required.'
-    } else if (/[<>]/.test(content)) {
-      errs.content = 'Content must not contain < or > characters.'
-    } else if (content.length > 500) {
-      errs.content = 'Content must be 500 characters or fewer.'
-    }
-
-    const invalidTags = effectiveTags.filter((t) => !isValidTag(t))
-    if (invalidTags.length > 0) {
-      errs.tags = `Invalid tags: ${invalidTags.join(', ')}. Only lowercase letters, digits, and hyphens are allowed.`
-    } else if (effectiveTags.length > 10) {
-      errs.tags = 'A maximum of 10 tags is allowed.'
-    }
-
-    if (isSupersede) {
-      if (!reason) {
-        errs.reason = 'Reason is required when superseding an entry.'
-      } else if (reason.length < 10) {
-        errs.reason = 'Reason must be at least 10 characters.'
-      } else if (reason.length > 500) {
-        errs.reason = 'Reason must be 500 characters or fewer.'
+      const invalidTags = effectiveTags.filter(t => !isValidTag(t));
+      if (invalidTags.length > 0) {
+        errs.tags = `Invalid tags: ${invalidTags.join(', ')}. Only lowercase letters, digits, and hyphens are allowed.`;
+      } else if (effectiveTags.length > 10) {
+        errs.tags = 'A maximum of 10 tags is allowed.';
       }
-    }
 
-    setFieldErrors(errs)
-    return errs
-  }, [isSupersede, topic, key, content, tags, reason])
+      if (isSupersede) {
+        if (!reason) {
+          errs.reason = 'Reason is required when superseding an entry.';
+        } else if (reason.length < 10) {
+          errs.reason = 'Reason must be at least 10 characters.';
+        } else if (reason.length > 500) {
+          errs.reason = 'Reason must be 500 characters or fewer.';
+        }
+      }
+
+      setFieldErrors(errs);
+      return errs;
+    },
+    [isSupersede, topic, key, content, tags, reason],
+  );
 
   // -------------------------------------------------------------------------
   // Submit
@@ -201,26 +216,34 @@ export default function KnowledgeForm({
    *
    * @param {React.FormEvent<HTMLFormElement>} e - The native form submit event.
    */
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleSubmit = async e => {
+    e.preventDefault();
 
     // Prevent Enter-key triggered double-submits when already in flight.
-    if (isSubmitting) return
+    if (isSubmitting) return;
 
     // Compute the final resolved tag list synchronously before any state updates,
     // so validate() receives the correct value rather than stale `tags` state.
     const pendingTags = tagInput.trim()
-      ? [...new Set([...tags, ...tagInput.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)])]
-      : tags
-    const allTags = pendingTags.slice(0, 10)
+      ? [
+          ...new Set([
+            ...tags,
+            ...tagInput
+              .split(',')
+              .map(t => t.trim().toLowerCase())
+              .filter(Boolean),
+          ]),
+        ]
+      : tags;
+    const allTags = pendingTags.slice(0, 10);
 
     if (allTags.length !== tags.length || tagInput.trim()) {
-      setTags(allTags)
-      setTagInput('')
+      setTags(allTags);
+      setTagInput('');
     }
 
-    const errs = validate(allTags)
-    if (Object.keys(errs).length) return
+    const errs = validate(allTags);
+    if (Object.keys(errs).length) return;
 
     /** @type {Object} fields - Validated payload passed to the onSubmit callback. */
     const fields = {
@@ -230,23 +253,23 @@ export default function KnowledgeForm({
       entity_type: entityType,
       tags: allTags,
       confidence,
-    }
+    };
 
     if (isSupersede) {
-      fields.reason = reason
+      fields.reason = reason;
     }
 
-    await onSubmit(fields)
-  }
+    await onSubmit(fields);
+  };
 
   // -------------------------------------------------------------------------
   // Derived state
   // -------------------------------------------------------------------------
 
-  const contentLen = content.length
-  const contentOverLimit = contentLen > 450
-  const confidencePct = `${Math.round(confidence * 100)}%`
-  const submitLabel = isSupersede ? 'Save Changes' : 'Add Entry'
+  const contentLen = content.length;
+  const contentOverLimit = contentLen > 450;
+  const confidencePct = `${Math.round(confidence * 100)}%`;
+  const submitLabel = isSupersede ? 'Save Changes' : 'Add Entry';
 
   // -------------------------------------------------------------------------
   // Render
@@ -278,7 +301,7 @@ export default function KnowledgeForm({
             id="kf-topic"
             type="text"
             value={topic}
-            onChange={(e) => setTopic(e.target.value)}
+            onChange={e => setTopic(e.target.value)}
             maxLength={60}
             placeholder="e.g. auth"
             aria-describedby={fieldErrors.topic ? 'kf-topic-error' : undefined}
@@ -307,7 +330,7 @@ export default function KnowledgeForm({
             id="kf-key"
             type="text"
             value={key}
-            onChange={(e) => setKey(e.target.value)}
+            onChange={e => setKey(e.target.value)}
             maxLength={80}
             placeholder="e.g. token-strategy"
             aria-describedby={fieldErrors.key ? 'kf-key-error' : undefined}
@@ -325,7 +348,10 @@ export default function KnowledgeForm({
       {/* Content */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label htmlFor="kf-content" className={LABEL_CLASS.replace('mb-1', '')}>
+          <label
+            htmlFor="kf-content"
+            className={LABEL_CLASS.replace('mb-1', '')}
+          >
             Content
           </label>
           <span
@@ -339,12 +365,15 @@ export default function KnowledgeForm({
         <textarea
           id="kf-content"
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={e => setContent(e.target.value)}
           rows={5}
           placeholder="Describe this knowledge entry…"
-          aria-describedby={fieldErrors.content ? 'kf-content-error' : undefined}
+          aria-describedby={
+            fieldErrors.content ? 'kf-content-error' : undefined
+          }
           aria-invalid={!!fieldErrors.content}
           className={`${INPUT_BASE} resize-y`}
+          maxLength={500}
         />
         {fieldErrors.content && (
           <p id="kf-content-error" className={ERROR_CLASS}>
@@ -361,10 +390,10 @@ export default function KnowledgeForm({
         <select
           id="kf-entity-type"
           value={entityType}
-          onChange={(e) => setEntityType(e.target.value)}
+          onChange={e => setEntityType(e.target.value)}
           className={INPUT_BASE}
         >
-          {ENTITY_TYPES.map((t) => (
+          {ENTITY_TYPES.map(t => (
             <option key={t} value={t}>
               {t}
             </option>
@@ -376,18 +405,20 @@ export default function KnowledgeForm({
       <div>
         <label htmlFor="kf-tags" className={LABEL_CLASS}>
           Tags
-          <span className="normal-case ml-1 text-gray-400">(comma-separated, max 10)</span>
+          <span className="normal-case ml-1 text-gray-400">
+            (comma-separated, max 10)
+          </span>
         </label>
         <input
           id="kf-tags"
           type="text"
           value={tagInput}
-          onChange={(e) => setTagInput(e.target.value)}
+          onChange={e => setTagInput(e.target.value)}
           onBlur={flushTagInput}
-          onKeyDown={(e) => {
+          onKeyDown={e => {
             if (e.key === 'Enter') {
-              e.preventDefault()
-              flushTagInput()
+              e.preventDefault();
+              flushTagInput();
             }
           }}
           placeholder="e.g. auth, lambda"
@@ -398,8 +429,12 @@ export default function KnowledgeForm({
         />
         {/* Tag chips */}
         {tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2.5" role="list" aria-label="Selected tags">
-            {tags.map((tag) => (
+          <div
+            className="flex flex-wrap gap-2 mt-2.5"
+            role="list"
+            aria-label="Selected tags"
+          >
+            {tags.map(tag => (
               <span
                 key={tag}
                 role="listitem"
@@ -428,7 +463,10 @@ export default function KnowledgeForm({
       {/* Confidence */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <label htmlFor="kf-confidence" className={LABEL_CLASS.replace('mb-2', 'mb-0')}>
+          <label
+            htmlFor="kf-confidence"
+            className={LABEL_CLASS.replace('mb-2', 'mb-0')}
+          >
             Confidence
           </label>
           <span className="text-sm font-bold tabular-nums text-blue-600 dark:text-blue-400">
@@ -443,7 +481,7 @@ export default function KnowledgeForm({
             max={1.0}
             step={0.05}
             value={confidence}
-            onChange={(e) => setConfidence(parseFloat(e.target.value))}
+            onChange={e => setConfidence(parseFloat(e.target.value))}
             aria-valuemin={0.5}
             aria-valuemax={1.0}
             aria-valuenow={confidence}
@@ -461,7 +499,10 @@ export default function KnowledgeForm({
       {isSupersede && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label htmlFor="kf-reason" className={LABEL_CLASS.replace('mb-2', 'mb-0')}>
+            <label
+              htmlFor="kf-reason"
+              className={LABEL_CLASS.replace('mb-2', 'mb-0')}
+            >
               Reason for superseding
             </label>
             <span className="text-xs tabular-nums text-gray-400 dark:text-gray-500">
@@ -471,11 +512,13 @@ export default function KnowledgeForm({
           <textarea
             id="kf-reason"
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={e => setReason(e.target.value)}
             rows={3}
             maxLength={500}
             placeholder="Explain why this entry is being superseded (min 10 chars)…"
-            aria-describedby={fieldErrors.reason ? 'kf-reason-error' : undefined}
+            aria-describedby={
+              fieldErrors.reason ? 'kf-reason-error' : undefined
+            }
             aria-invalid={!!fieldErrors.reason}
             className={`${INPUT_BASE} resize-y`}
           />
@@ -506,5 +549,5 @@ export default function KnowledgeForm({
         </button>
       </div>
     </form>
-  )
+  );
 }
