@@ -73,7 +73,17 @@ graph TD
 - Knowledge deprecation: `POST /api/knowledge/:topic/:key/deprecate` (single) and `POST /api/knowledge/deprecate/bulk` — both PE-only, require reason ≥10 chars (`enforceReasonRequired`), transition ACTIVE→DEPRECATED atomically. Dashboard surfaces: per-row Trash2 icon, bulk checkbox + BulkActionBar, "Deprecate this entry instead" link inside the edit modal. Shared `DeprecateDialog` component used by all three. Route ordering: bulk must be registered before `:topic/:key` to prevent Express param collision.
 - Deprecation request workflow: non-PE engineers can call `forget()` on an ACTIVE entry — instead of `forbidden`, the request is queued in `pending_decisions` with `decision_type='deprecation_request'`. `pending()` MCP tool returns a `deprecation_requests` section alongside `decisions`. `review()` accepts `request_id` to approve (runs full ACTIVE→DEPRECATED transition atomically) or reject. Dashboard Pending page shows a "Deprecation requests" table section with PE-only Approve/Reject buttons and stale_warning badges. Deduplication: one pending request per author per key. Staleness detection: if active version advances after the request was created, the row is marked stale automatically.
 
-**Not yet built (v0.4+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
+**v0.4 Wave A (complete):** Constitutional + DB Foundation
+- Three new constitutional functions: `enforceGlobalWriteAuthority(identity, projectId, isGlobalProject)`, `enforceDeviationActionAuthority(actorRole, operation)`, `enforceValidDeferDeadline(deferUntil)` — both repos synced
+- `ConstitutionalViolation` rule union extended: `GLOBAL_WRITE_AUTHORITY | DEVIATION_ACTION_AUTHORITY | DEFER_DEADLINE`
+- `deviations`, `deviation_actions`, `project_scans` tables in PostgreSQL; `is_global BOOLEAN` on `q_projects`; full RLS + grants; `ALTER TABLE ADD COLUMN IF NOT EXISTS` for idempotency; synced to `helm/quorum/files/init-db.sql`
+- `DeviationStatus`, `DeviationActionType`, `VALID_DEFER_DAYS` in `graph/schema.js` — both repos synced
+- `QuorumConfigSchema` extended: `HierarchySchema`, `is_global`, `global_scope` (regex-validated), `is_public`, `globals` — both repos synced
+- `remember.js` global write guard lifted from soft-return to `enforceGlobalWriteAuthority`; `isGlobal` now config-driven (`getConfig()?.is_global === true`) not hardcoded project id
+- Executive roles added to `authority.js`: `director (0.75/tier3)`, `vp_engineering (0.75/tier3)`, `group_executive (0.70/tier3)` — both repos synced; blocked from deviation governance by `enforceDeviationActionAuthority`
+
+**Not yet built (v0.4 Waves B-G):** Federation cross-project reads, deviation write path, PE governance, conformance scoring, portfolio intelligence, documentation
+**Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
 
