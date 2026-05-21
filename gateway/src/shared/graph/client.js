@@ -43,7 +43,7 @@ const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
  * @param {string} id
  * @returns {string}
  */
-function normalizeGroupId(id) {
+export function normalizeGroupId(id) {
   return typeof id === 'string' ? id.replace(/-/g, '_') : id
 }
 
@@ -350,11 +350,12 @@ export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
-  const groupId = options.groupId ?? options.groupIds?.[0]
+  const ids = options.groupIds ?? (options.groupId ? [options.groupId] : null)
+  const normalizedIds = ids?.map(normalizeGroupId).filter(Boolean)
   return callGraphiti('search_nodes', {
     query,
     max_nodes: options.limit ?? 10,
-    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
+    ...(normalizedIds?.length ? { group_ids: normalizedIds } : {}),
   })
 }
 
@@ -369,10 +370,11 @@ export async function searchNodes(query, options = {}) {
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  const groupId = options.groupId ?? options.groupIds?.[0]
+  const ids = options.groupIds ?? (options.groupId ? [options.groupId] : null)
+  const normalizedIds = ids?.map(normalizeGroupId).filter(Boolean)
   return callGraphiti('search_memory_facts', {
     query,
-    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
+    ...(normalizedIds?.length ? { group_ids: normalizedIds } : {}),
   })
 }
 
