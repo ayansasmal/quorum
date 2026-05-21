@@ -33,12 +33,25 @@ CREATE TABLE IF NOT EXISTS q_projects (
   governance      JSONB NOT NULL DEFAULT '{}',
   -- { conflict_threshold, authority_threshold, notifications: { webhook_url } }
   config_version  INTEGER NOT NULL DEFAULT 0,  -- optimistic lock for config PATCH
+  -- Federation (v0.4): true if this project is a global standards catalog.
+  -- Global catalogs are discoverable by all authenticated users and may be
+  -- linked by project configs via the globals: [...] field.
+  -- Setting is_global = true requires multi-party approval (enforceMultiPartyConfig).
+  is_global       BOOLEAN NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_by      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_qp_group_id ON q_projects (group_id);
 CREATE INDEX IF NOT EXISTS idx_qp_members  ON q_projects USING GIN (members);
+
+-- Migration guard: add is_global to existing databases.
+-- CREATE TABLE IF NOT EXISTS only covers the column for fresh installs; this
+-- ALTER TABLE ADD COLUMN IF NOT EXISTS handles existing schemas idempotently.
+ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_global BOOLEAN NOT NULL DEFAULT FALSE;
+-- Partial index for GET /api/globals discovery — only indexes global catalog rows.
+-- Must be declared after ADD COLUMN IF NOT EXISTS so it works on existing schemas.
+CREATE INDEX IF NOT EXISTS idx_qp_is_global ON q_projects (is_global) WHERE is_global = TRUE;
 
 -- ── Knowledge entry registry ──────────────────────────────────────────────────
 -- One row per (project, topic, key) triple. Replaces the scattered triple
@@ -260,6 +273,91 @@ CREATE TABLE IF NOT EXISTS governance_config (
 
 CREATE INDEX IF NOT EXISTS idx_gc_loaded_at ON governance_config (loaded_at DESC);
 
+-- ── Project scan log (v0.4 conformance scan history) ─────────────────────────
+-- One row per scan run. Used to compute scan_count and last_scan_at for the
+-- conformance API. Kept separate from deviations.last_seen_at because:
+--   (a) a scan with zero new deviations still counts;
+--   (b) incremental scans update last_seen_at on individual deviations but
+--       do not represent a complete baseline scan.
+CREATE TABLE IF NOT EXISTS project_scans (
+  scan_id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  q_project_id         TEXT NOT NULL REFERENCES q_projects(q_project_id),
+  scan_type            TEXT NOT NULL CHECK (scan_type IN ('full', 'incremental')),
+  triggered_by         TEXT NOT NULL,   -- 'agent' | 'quorum:scan' | 'scheduled'
+  files_scanned        INTEGER,
+  deviations_new       INTEGER NOT NULL DEFAULT 0,
+  deviations_confirmed INTEGER NOT NULL DEFAULT 0,
+  deviations_resolved  INTEGER NOT NULL DEFAULT 0,
+  candidates_surfaced  INTEGER NOT NULL DEFAULT 0,
+  scanned_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ps_project_scanned ON project_scans (q_project_id, scanned_at DESC);
+
+-- ── Conformance deviations (v0.4) ─────────────────────────────────────────────
+-- A deviation records that a project's codebase deviates from a global catalog
+-- standard. Upserted on (q_project_id, catalog_id, topic, key) — running the
+-- same scan twice updates last_seen_at, not creates a duplicate row.
+--
+-- severity is computed server-side:
+--   severity = global_entry.confidence × authority_score(global_entry)
+--   PA_AUTHORED_FLOOR = 0.70 (applied when global entry author_role = 'principal_architect')
+-- Never accepted from client — callers supply topic:key; gateway computes severity.
+--
+-- Status is NOT stored — it is computed at query time from deviation_actions:
+--   no row         → OPEN
+--   latest 'accept' → ACCEPTED
+--   latest 'deny'  → DENIED
+--   latest 'defer' + defer_until > NOW() → DEFERRED
+--   latest 'defer' + defer_until <= NOW() → OVERDUE
+--   resolved_at IS NOT NULL → RESOLVED (takes precedence)
+CREATE TABLE IF NOT EXISTS deviations (
+  deviation_id  TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  q_project_id  TEXT NOT NULL REFERENCES q_projects(q_project_id),
+  catalog_id    TEXT NOT NULL,   -- group_id of the global catalog this deviates from
+  topic         VARCHAR(60) NOT NULL,
+  key           VARCHAR(80) NOT NULL,
+  description   TEXT NOT NULL,
+  evidence      JSONB,           -- { files: [], lines: [], excerpt: '' }
+  severity      DECIMAL(4,3) NOT NULL CHECK (severity BETWEEN 0 AND 1),
+  source        VARCHAR(50) NOT NULL DEFAULT 'agent',
+                                 -- 'agent' | 'code-review' | 'security-review'
+  entity_type   VARCHAR(50),     -- Decision | Pattern | Constraint | Runbook | Requirement
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at   TIMESTAMPTZ,     -- set when scan no longer surfaces this deviation
+  created_by    TEXT NOT NULL,
+  UNIQUE (q_project_id, catalog_id, topic, key)  -- idempotent upsert key
+);
+
+CREATE INDEX IF NOT EXISTS idx_dev_project          ON deviations (q_project_id);
+CREATE INDEX IF NOT EXISTS idx_dev_project_topic    ON deviations (q_project_id, topic, key);
+-- Partial index on unresolved deviations by severity — used by conformance scoring query.
+CREATE INDEX IF NOT EXISTS idx_dev_project_severity ON deviations (q_project_id, severity DESC)
+  WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_dev_catalog          ON deviations (catalog_id);
+
+-- ── Deviation governance actions (v0.4) ───────────────────────────────────────
+-- Append-only governance trail. One row per accept/deny/defer action taken by
+-- an architect-tier role. The latest row determines the deviation's status.
+--
+-- reason is enforced via enforceReasonRequired (Rule 3, min 10 chars).
+-- defer_until is enforced via enforceValidDeferDeadline (30/45/60/90 days only).
+-- actor_role is enforced via enforceDeviationActionAuthority (architect+ only).
+CREATE TABLE IF NOT EXISTS deviation_actions (
+  action_id    TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  deviation_id TEXT NOT NULL REFERENCES deviations(deviation_id),
+  action_type  VARCHAR(10) NOT NULL CHECK (action_type IN ('accept', 'deny', 'defer')),
+  actor        TEXT NOT NULL,
+  actor_role   TEXT NOT NULL,
+  reason       TEXT NOT NULL,   -- min 10 chars enforced by enforceReasonRequired
+  defer_until  TIMESTAMPTZ,     -- only for defer; must be 30/45/60/90 days from created_at
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_da_deviation ON deviation_actions (deviation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_da_actor     ON deviation_actions (actor);
+
 -- ── Seed: global namespace project (q_p0) ────────────────────────────────────
 -- Company-wide policy namespace. Readable by all projects.
 -- Writable by principal_architect role only. All writes enter DRAFT.
@@ -294,6 +392,9 @@ ALTER TABLE pending_decisions   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bump_log            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE author_domain_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE governance_config   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_scans       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deviations          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deviation_actions   ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS q_projects_insert_only          ON q_projects;
 DROP POLICY IF EXISTS q_keys_insert_only              ON q_keys;
@@ -304,6 +405,9 @@ DROP POLICY IF EXISTS pending_decisions_insert_only   ON pending_decisions;
 DROP POLICY IF EXISTS bump_log_insert_only            ON bump_log;
 DROP POLICY IF EXISTS author_domain_stats_insert_only ON author_domain_stats;
 DROP POLICY IF EXISTS governance_config_insert_only   ON governance_config;
+DROP POLICY IF EXISTS project_scans_insert_only       ON project_scans;
+DROP POLICY IF EXISTS deviations_insert_only          ON deviations;
+DROP POLICY IF EXISTS deviation_actions_insert_only   ON deviation_actions;
 
 CREATE POLICY q_projects_insert_only
   ON q_projects FOR INSERT TO quorum_app WITH CHECK (true);
@@ -323,6 +427,12 @@ CREATE POLICY author_domain_stats_insert_only
   ON author_domain_stats FOR INSERT TO quorum_app WITH CHECK (true);
 CREATE POLICY governance_config_insert_only
   ON governance_config FOR INSERT TO quorum_app WITH CHECK (true);
+CREATE POLICY project_scans_insert_only
+  ON project_scans FOR INSERT TO quorum_app WITH CHECK (true);
+CREATE POLICY deviations_insert_only
+  ON deviations FOR INSERT TO quorum_app WITH CHECK (true);
+CREATE POLICY deviation_actions_insert_only
+  ON deviation_actions FOR INSERT TO quorum_app WITH CHECK (true);
 
 -- ── Grants ────────────────────────────────────────────────────────────────────
 -- SELECT on every table (needed for chain verification, recall, history).
@@ -335,6 +445,9 @@ GRANT SELECT ON pending_decisions   TO quorum_app;
 GRANT SELECT ON bump_log            TO quorum_app;
 GRANT SELECT ON author_domain_stats TO quorum_app;
 GRANT SELECT ON governance_config   TO quorum_app;
+GRANT SELECT ON project_scans       TO quorum_app;
+GRANT SELECT ON deviations          TO quorum_app;
+GRANT SELECT ON deviation_actions   TO quorum_app;
 
 -- INSERT grants.
 GRANT INSERT ON q_projects          TO quorum_app;
@@ -346,12 +459,16 @@ GRANT INSERT ON pending_decisions   TO quorum_app;
 GRANT INSERT ON bump_log            TO quorum_app;
 GRANT INSERT ON author_domain_stats TO quorum_app;
 GRANT INSERT ON governance_config   TO quorum_app;
+GRANT INSERT ON project_scans       TO quorum_app;
+GRANT INSERT ON deviations          TO quorum_app;
+GRANT INSERT ON deviation_actions   TO quorum_app;
 
 -- Narrow UPDATE grants (enforced at app layer via transitionVersionStatus etc.).
 GRANT SELECT, UPDATE ON audit_chain_counter TO quorum_app;
 
--- q_projects: config updates (governance, members, domains) + config_version optimistic lock.
-GRANT UPDATE (members, domains, governance, display_name, owner, config_version)
+-- q_projects: config updates (governance, members, domains) + config_version optimistic lock
+--             + is_global flag (v0.4 federation).
+GRANT UPDATE (members, domains, governance, display_name, owner, config_version, is_global)
   ON q_projects TO quorum_app;
 
 -- knowledge_versions: status transitions + forward link + confidence + last_accessed + tags + entity/summary.
@@ -372,6 +489,11 @@ GRANT UPDATE (status, resolution, resolution_note, resolved_by, resolved_at,
 -- author_domain_stats: counter increments.
 GRANT UPDATE (approved_count, recalled_count, superseded_count, last_updated)
   ON author_domain_stats TO quorum_app;
+
+-- deviations: scan updates (last_seen, resolved) + mutable fields from deviate() upsert.
+-- deviation_actions has no UPDATE grant — it is append-only by design.
+GRANT UPDATE (last_seen_at, resolved_at, description, evidence, source, severity)
+  ON deviations TO quorum_app;
 
 -- ── Sequence grants ──────────────────────────────────────────────────────────
 GRANT USAGE, SELECT ON SEQUENCE q_project_seq                  TO quorum_app;
