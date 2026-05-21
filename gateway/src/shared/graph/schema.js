@@ -73,3 +73,45 @@ export const KnowledgeStatus = /** @type {const} */ ({
  * user knowledge groups so audit trail doesn't pollute search results.
  */
 export const AUDIT_GROUP_ID = '_quorum_audit'
+
+// ── v0.4: Deviation governance ────────────────────────────────────────────────
+
+/**
+ * Computed status of a deviation.
+ *
+ * Status is NOT stored in the deviations table — it is derived at query time
+ * from the latest row in deviation_actions plus the resolved_at timestamp:
+ *
+ *   no action row              → OPEN
+ *   latest action = 'accept'   → ACCEPTED
+ *   latest action = 'deny'     → DENIED
+ *   latest action = 'defer' + defer_until > NOW()  → DEFERRED
+ *   latest action = 'defer' + defer_until <= NOW() → OVERDUE
+ *   resolved_at IS NOT NULL    → RESOLVED (takes precedence over any action)
+ */
+export const DeviationStatus = /** @type {const} */ ({
+  OPEN:     'OPEN',
+  ACCEPTED: 'ACCEPTED',
+  DENIED:   'DENIED',
+  DEFERRED: 'DEFERRED',
+  OVERDUE:  'OVERDUE',
+  RESOLVED: 'RESOLVED',
+})
+
+/**
+ * Allowed action types that an architect-tier role may record against a deviation.
+ * Enforced at the constitutional layer via enforceDeviationActionAuthority().
+ */
+export const DeviationActionType = /** @type {const} */ ({
+  ACCEPT: 'accept',
+  DENY:   'deny',
+  DEFER:  'defer',
+})
+
+/**
+ * Valid defer deadline options in days from the current date.
+ * Enforced by enforceValidDeferDeadline() — arbitrary dates are not accepted.
+ * Fixed options create accountability checkpoints and prevent indefinite deferrals.
+ * @type {readonly [30, 45, 60, 90]}
+ */
+export const VALID_DEFER_DAYS = /** @type {const} */ ([30, 45, 60, 90])
