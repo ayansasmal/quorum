@@ -41,7 +41,7 @@ export const ENTITY_COLORS = {
   Pattern:     'text-green-400   bg-green-900/30  border-green-700',
   Constraint:  'text-amber-400   bg-amber-900/30  border-amber-700',
   Runbook:     'text-purple-400  bg-purple-900/30 border-purple-700',
-  Requirement: 'text-gray-400    bg-gray-800/50   border-gray-600',
+  Requirement: 'text-teal-400    bg-teal-900/30   border-teal-700',
   unknown:     'text-gray-500    bg-gray-800/30   border-gray-700',
 }
 

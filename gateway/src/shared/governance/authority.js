@@ -18,6 +18,11 @@
  *   When a caller-provided confidence is below the role's base_confidence floor,
  *   the floor is used instead. Spoofing is architecturally impossible — author
  *   is resolved server-side, never accepted from tool input.
+ *
+ * Business roles (added alongside engineering roles):
+ *   product_owner      — authority over product requirements and feature decisions
+ *   business_analyst   — captures and refines business requirements
+ *   compliance_officer — authority over compliance and regulatory constraints
  */
 
 import { getConfig } from '../config/loader.js'
@@ -27,11 +32,16 @@ const AUTHORITY_THRESHOLD = parseFloat(process.env.QUORUM_AUTHORITY_THRESHOLD ??
 
 /** Default role scores — overridable per project via governance.authority.role_scores */
 const DEFAULT_ROLE_SCORES = {
+  // Engineering roles
   engineer:             0.50,
   senior_engineer:      0.70,
   tech_lead:            0.70,
   architect:            0.80,
   principal_architect:  1.00,
+  // Business roles
+  business_analyst:     0.65,
+  product_owner:        0.85,
+  compliance_officer:   0.90,
 }
 
 /** Default formula weights — overridable via governance.authority.weights */
@@ -46,13 +56,23 @@ const DEFAULT_WEIGHTS = {
 /**
  * Role tiers used by the gate. An entry authored by a LOWER tier can never
  * auto-supersede one authored by a HIGHER tier.
+ *
+ * Engineering tiers:  engineer(1) < senior/tech_lead(2) < architect(3) < principal_architect(4)
+ * Business tiers:     business_analyst(2) < product_owner(3) / compliance_officer(3)
+ * Business roles are peer-tiered with engineering architects so that a product
+ * owner's requirement cannot be silently overridden by a junior engineer.
  */
 const ROLE_TIER = {
+  // Engineering roles
   engineer:             1,
   senior_engineer:      2,
   tech_lead:            2,
   architect:            3,
   principal_architect:  4,
+  // Business roles
+  business_analyst:     2,
+  product_owner:        3,
+  compliance_officer:   3,
 }
 
 /**

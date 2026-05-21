@@ -9,6 +9,8 @@
  *   - auth:token-strategy with 3 versions to demonstrate history CLI
  *   - 13 other knowledge nodes across auth, api, db, infra, testing
  *   - One deliberate contradiction pair for conflict detection demo
+ *   - 2 business knowledge nodes (product, compliance) demonstrating
+ *     that Quorum stores both engineering and business knowledge
  *
  * Idempotency:
  *   Skips gracefully if seed data already exists.
@@ -71,6 +73,8 @@ async function clearSeedData() {
     ['infra','retry-strategy'],
     ['testing','unit-strategy'],
     ['testing','integration-scope'],
+    ['product', 'guest-checkout-requirement'],
+    ['compliance', 'gdpr-data-residency'],
   ]
 
   for (const [topic, key] of seedTopicKeys) {
@@ -181,12 +185,13 @@ async function remember(qProjectId, params) {
 }
 
 async function seed() {
-  console.log('\n── Seeding Quorum knowledge ─────────────────────────────\n')
+  console.log('\n── Seeding Quorum knowledge ───────────────────────────────────────────────
+')
 
   if (await isAlreadySeeded()) {
     if (!FORCE) {
       console.log('  Already seeded — skipping. Pass --force to re-seed.\n')
-      console.log('── Seed skipped ──────────────────────────────────────────\n')
+      console.log('── Seed skipped ──────────────────────────────────────────────────────\n')
       return
     }
     console.log('  --force: clearing existing seed data...')
@@ -360,6 +365,34 @@ async function seed() {
     tags: ['testing', 'integration', 'postgresql', 'no-mocks'],
   })
 
+  // Business knowledge — product requirements and compliance constraints.
+  // These demonstrate that Quorum stores both engineering decisions and
+  // business requirements. Both use the same governance model: authored,
+  // versioned, conflict-detected, and authority-weighted.
+  console.log('\nproduct domain (business knowledge)...')
+
+  await remember(Q_PROJECT_ID, {
+    topic: 'product',
+    key: 'guest-checkout-requirement',
+    content: 'Guest checkout must remain available. Conversion research shows 40% of users abandon when forced to create an account before purchasing. Any removal or restriction of guest checkout requires product owner sign-off and a fresh conversion analysis before shipping.',
+    author: 'product-manager',
+    confidence: 0.85,
+    entity_type: 'Requirement',
+    tags: ['product', 'checkout', 'conversion', 'ux'],
+  })
+
+  console.log('compliance domain (business knowledge)...')
+
+  await remember(Q_PROJECT_ID, {
+    topic: 'compliance',
+    key: 'gdpr-data-residency',
+    content: 'All EU user data must be stored and processed exclusively in eu-west-1. Required for GDPR compliance with enterprise customers. Applies to: user profiles, order history, payment records. No cross-region replication of EU data to non-EU regions without explicit DPA amendment.',
+    author: 'legal-team',
+    confidence: 0.95,
+    entity_type: 'Requirement',
+    tags: ['compliance', 'gdpr', 'data-residency', 'eu', 'legal'],
+  })
+
   // Deliberate contradiction for conflict detection demo:
   // db:connection-pooling says pool size 10; this says 50 for batch services.
   console.log('\nAdding deliberate contradiction (conflict detection demo)...')
@@ -374,10 +407,11 @@ async function seed() {
     tags: ['db', 'postgresql', 'connection-pool', 'performance'],
   })
 
-  console.log('\n── Seed complete ─────────────────────────────────────────')
+  console.log('\n── Seed complete ─────────────────────────────────────────────────────')
   console.log('\nTo verify:')
   console.log('  node scripts/audit-cli.js stats')
-  console.log('  node scripts/audit-cli.js lineage auth token-strategy\n')
+  console.log('  node scripts/audit-cli.js lineage auth token-strategy')
+  console.log('  node scripts/audit-cli.js lineage compliance gdpr-data-residency\n')
 }
 
 seed()

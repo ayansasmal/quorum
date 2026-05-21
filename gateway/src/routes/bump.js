@@ -18,6 +18,9 @@
  *   tech_lead           → 0.70  (delta +0.035)
  *   architect           → 0.85  (delta +0.042)
  *   principal_architect → 1.00  (delta +0.050)
+ *   business_analyst    → 0.65  (delta +0.033)
+ *   product_owner       → 0.85  (delta +0.042)
+ *   compliance_officer  → 0.90  (delta +0.045)
  */
 
 import { Router } from 'express'
@@ -40,11 +43,16 @@ const BASE_DELTA    = 0.05
 
 /** Role weight used for the bump delta. Matches authority.js role weights. */
 const ROLE_WEIGHT = {
+  // Engineering roles
   engineer:            0.50,
   senior_engineer:     0.70,
   tech_lead:           0.70,
   architect:           0.85,
   principal_architect: 1.00,
+  // Business roles
+  business_analyst:    0.65,
+  product_owner:       0.85,
+  compliance_officer:  0.90,
 }
 
 /**

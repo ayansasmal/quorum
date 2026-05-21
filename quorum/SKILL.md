@@ -6,7 +6,7 @@ Place this file at `.claude/skills/quorum.md` in any project using Quorum.
 
 ## What This Skill Does
 
-This skill instructs Claude Code to use Quorum as its persistent engineering memory — automatically loading relevant context at session start, consulting it during decisions, adding learnings after task completion, and surfacing governance decisions at the right moment with the right context.
+This skill instructs Claude Code to use Quorum as its persistent engineering and business memory — automatically loading relevant context at session start, consulting it during decisions, adding learnings after task completion, and surfacing governance decisions at the right moment with the right context.
 
 The result: every Claude Code session builds on everything that came before it, across your entire team. And every decision is made by an informed human — not a rubber stamp.
 
@@ -48,7 +48,7 @@ If review_list.length > 0:
 
 ```
 1. Read current task description
-2. Infer primary domain (auth, payments, db, infra, api, testing)
+2. Infer primary domain (auth, payments, db, infra, api, testing, product, compliance)
 3. search(query=task_description, domain=inferred_domain, limit=5)
 4. Filter: ACTIVE status only — NEVER load DRAFT knowledge into context
 5. Inject results with full attribution tags
@@ -66,6 +66,16 @@ Task: "Add rate limiting to the payment API"
 → "Loaded 3 Quorum entries. infra:redis-usage was updated recently — check if relevant."
 ```
 
+Example (product/business context):
+```
+Task: "Refactor the checkout flow"
+→ search("checkout", domain="product,payments")
+→ Loaded (ACTIVE only):
+    product:guest-checkout-requirement  (v1 | confidence: 0.85 | @product-owner)
+    payments:idempotency                (v1 | confidence: 0.92 | @architect)
+→ "Loaded 2 Quorum entries. product:guest-checkout-requirement is a product requirement — check before removing any checkout paths."
+```
+
 **DRAFT knowledge is never loaded into Claude's context.** It is unreviewed and unvalidated.
 
 **SUPERSEDED knowledge is never loaded.** If it comes up in search, load the current version instead and note what changed.
@@ -79,6 +89,7 @@ If a loaded entry was SUPERSEDED since last session — alert and reload current
 ## During Task Protocol
 
 - Before making an implementation decision → check Quorum first: `recall(topic, key)`
+- Before removing or significantly changing a feature → check for product requirements: `search(feature_name, domain="product,compliance")`
 - Prefer ACTIVE Quorum knowledge over generic best practices
 - If Quorum knowledge seems outdated → flag it, don't silently ignore it
 - If Quorum conflicts with what the engineer just said → surface it immediately
@@ -101,7 +112,7 @@ Claude must self-declare which mode it is in. This is stored as metadata.
 
 ```
 Mode 1 — Echoing human decision       (confidence: 0.75)
-  Engineer explicitly decided something. Claude is recording it.
+  Engineer or product owner explicitly decided something. Claude is recording it.
   Human is the real author. Claude is the scribe.
 
 Mode 2 — Extracting a pattern         (confidence: 0.55)
@@ -129,6 +140,11 @@ Claude NEVER presents Mode 3 as Mode 1. Ever.
 
 **Runbook check:** Did I fix a non-obvious bug that could recur?
 → `remember(topic, key, steps, mode="extracting", confidence=0.65)`
+
+**Requirement check:** Did the engineer or product owner state a product requirement, business rule, or compliance constraint?
+→ `remember(topic, key, requirement, mode="echoing", confidence=0.75)`
+→ Use `entity_type: "Requirement"` and topic: `product` | `compliance` | `legal`
+→ Business rationale is highest value: *why* a feature exists, *who* it serves, *when* it applies
 
 **Gap check:** Did I find nothing in Quorum for this domain?
 → Flag to engineer: "Quorum has no knowledge about X — worth adding directly?"
@@ -362,17 +378,29 @@ Even if superseded knowledge is closer to what the engineer seems to want:
 
 ```
 Claude (any mode)     → always DRAFT → any engineer to approve
-Junior engineer       → always DRAFT → senior+ to approve
-Engineer              → DRAFT by default
-                         self-approve: domain_entries >= 10, conflict_rate < 10%
-Senior engineer       → ACTIVE in established domain
-                         DRAFT in unfamiliar domains
-Principal architect   → ACTIVE always, team notified
+
+Engineering roles:
+  Junior engineer       → always DRAFT → senior+ to approve
+  Engineer              → DRAFT by default
+                           self-approve: domain_entries >= 10, conflict_rate < 10%
+  Senior engineer       → ACTIVE in established domain
+                           DRAFT in unfamiliar domains
+  Principal architect   → ACTIVE always, team notified
+
+Business roles:
+  Business analyst      → DRAFT by default → product owner or PA to approve
+  Product owner         → ACTIVE for product/* and compliance/* domains
+                           DRAFT in engineering domains
+  Compliance officer    → ACTIVE for compliance/* and legal/* domains
+                           DRAFT in engineering domains
 ```
 
 Claude never approves its own additions.
 Claude never approves human additions.
 Self-approval constitutional rule applies to Claude too.
+
+Note: PMs, BAs, and compliance officers use Claude (via Claude Code or any Claude interface)
+to interact with Quorum — the MCP tools are their entry point, not just engineers'.
 
 ---
 
@@ -382,7 +410,7 @@ Always end with a concise Quorum summary:
 
 ```
 Quorum activity this session:
-  📖 Loaded:    auth:token-strategy (v3), infra:redis-usage (v2), payments:idempotency (v1)
+  📖 Loaded:    auth:token-strategy (v3), infra:redis-usage (v2), product:guest-checkout-requirement (v1)
   🔄 Updated:   infra:redis-usage was at v1 last session → now v2 (reloaded)
   ✅ Added:     auth:refresh-token-rotation v1 (DRAFT | echoing | conf: 0.75)
   ⚠️  Conflict: auth:session-vs-jwt — awaiting your decision
@@ -390,4 +418,3 @@ Quorum activity this session:
   📋 Pending:   1 review in your queue (api:rate-limiting v2)
   📜 History:   auth:token-strategy has 3 versions — type 'quorum history auth:token-strategy' to see
 ```
-

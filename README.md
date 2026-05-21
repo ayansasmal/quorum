@@ -4,7 +4,7 @@
 
 [![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://github.com/ayansasmal/quorum-mcp) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](gateway/openapi.yaml)
 
-**Quorum** is a governance layer for engineering knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, patterns, and institutional knowledge.
+**Quorum** is a governance layer for engineering and business knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, business requirements, patterns, and institutional knowledge.
 
 ---
 
@@ -82,7 +82,7 @@ graph TB
 ```
 
 
-**Identity model (v0.3):** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and base_confidence are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates "who you are" from "what project you're working in."
+**Identity model (v0.3):** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and base_confidence are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates “who you are” from “what project you’re working in.”
 
 **Content durability:** all knowledge text is stored in the PostgreSQL `knowledge_versions.summary` column on every write. Graphiti/FalkorDB holds semantic graph embeddings and is the fallback — it is treated as eventually consistent and can be wiped without permanent content loss.
 
@@ -181,7 +181,7 @@ node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL 
 | Durable content store | ⚠️ graph only | ✅ PostgreSQL summary column (survives FalkorDB wipes) |
 | PR knowledge ingestion | ❌ | ✅ ingest_pr() (v0.4) |
 | Atlassian integration | ❌ | ✅ Jira + Confluence via MCP (v0.4) |
-| Engineering entity types | ❌ | ✅ Decision, Pattern, Constraint, Runbook |
+| Knowledge entity types | ❌ | ✅ Decision, Pattern, Constraint, Runbook, Requirement |
 
 ---
 
@@ -189,7 +189,9 @@ node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL 
 
 Anthropic builds Claude around a model spec — values baked into how Claude reasons, not rules bolted on top. Governance is architecture, not afterthought.
 
-Quorum applies the same principle to engineering knowledge. Not a system that *prevents* bad knowledge from entering. A system that *naturally tends toward* accurate, governed, trustworthy knowledge because that's how it's built.
+Quorum applies the same principle to knowledge. Not a system that *prevents* bad knowledge from entering. A system that *naturally tends toward* accurate, governed, trustworthy knowledge because that’s how it’s built.
+
+Engineering decisions explain *how* things are built. Business requirements explain *why* they exist and *when* they apply. Quorum governs both.
 
 ---
 

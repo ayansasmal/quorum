@@ -1,9 +1,9 @@
 # Quorum
-## Persistent Engineering Memory for Claude Code and AI Agents
+## Persistent Engineering and Business Memory for Claude Code and AI Agents
 
-Quorum is an open-source **governance layer** for engineering knowledge built on Graphiti's
+Quorum is an open-source **governance layer** for engineering and business knowledge built on Graphiti's
 temporal knowledge graph. It gives Claude Code and multi-agent systems a shared,
-self-evolving, human-governed memory of engineering decisions, patterns, and institutional
+self-evolving, human-governed memory of engineering decisions, business requirements, patterns, and institutional
 knowledge — with conflict detection, authority weighting, and a full audit trail.
 
 ---
@@ -76,6 +76,28 @@ graph TD
 **Not yet built (v0.4+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
+
+---
+
+## Knowledge Domains
+
+Quorum stores two complementary types of knowledge:
+
+**Engineering knowledge** — the technical *why* and *how*: architectural decisions (ADRs), code patterns, infrastructure constraints, runbooks, and the reasoning behind implementation choices.
+
+**Business knowledge** — the product *why* and *when*: feature requirements, business rules, compliance constraints, and the rationale that explains why a capability exists and under what conditions it applies.
+
+Both types are governed identically: authored, versioned, conflict-detected, authority-weighted, and audited. Use the `Requirement` entity type for business knowledge. Suggested domains: `product`, `compliance`, `legal`.
+
+```
+remember("product", "guest-checkout-requirement",
+  "Guest checkout must remain available. Conversion data shows 40% abandonment on mandatory registration.",
+  { entity_type: "Requirement" })
+
+remember("compliance", "gdpr-data-residency",
+  "All EU user data must remain in eu-west-1. Required for GDPR compliance with enterprise customers.",
+  { entity_type: "Requirement" })
+```
 
 ---
 
