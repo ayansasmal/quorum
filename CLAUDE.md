@@ -82,7 +82,17 @@ graph TD
 - `remember.js` global write guard lifted from soft-return to `enforceGlobalWriteAuthority`; `isGlobal` now config-driven (`getConfig()?.is_global === true`) not hardcoded project id
 - Executive roles added to `authority.js`: `director (0.75/tier3)`, `vp_engineering (0.75/tier3)`, `group_executive (0.70/tier3)` — both repos synced; blocked from deviation governance by `enforceDeviationActionAuthority`
 
-**Not yet built (v0.4 Waves B-G):** Federation cross-project reads, deviation write path, PE governance, conformance scoring, portfolio intelligence, documentation
+**v0.4 Wave B (complete):** Federation — Cross-project reads
+- `normalizeGroupId()` exported from `graph/client.js` (both repos); `searchNodes`/`searchFacts` accept `groupIds: string[]` array alongside legacy `groupId: string`
+- `detectConflict()` (both repos): added `projectId` + `globals` params; scopes search to `[projectId, ...globals]` — prevents project-local writes from silently contradicting global catalog entries
+- `remember.js` (quorum-mcp): passes `getConfig()?.globals ?? []` to `detectConflict`
+- `search.js` (quorum-mcp): config-driven globals via `getConfig()`; per-catalog `searchNodes` calls preserve `catalog_id` attribution; results annotated `source: 'project'|'global'`, `catalog_id: string|null`
+- `recall.js` (quorum-mcp): config-driven globals fallback loop; XML result annotated `source` + `catalog_id` attributes; includes inline `<!-- ℹ️ Sourced from global catalog '...' -->` comment
+- `graphiti.js` (gateway proxy): fixed `group_ids` injection from `body.params` level (ineffective) to `body.params.arguments` level (MCP protocol-authoritative); read ops (`search_nodes`, `search_memory_facts`) inject `[project, ...sanitizedGlobals]`; write ops restricted to `[project]`; loads globals from `loadProjectConfig` at proxy time with graceful fallback
+- `GET /api/globals` (gateway): discovers `is_global = TRUE` projects from PostgreSQL; enriches with S3/Redis config metadata (`global_scope`, `display_name`, `entry_count`, `globals[]`); filters by `global_scope` — org-scoped visible to all, division/department-scoped filtered by hierarchy ancestry
+- `POST /sync/configs` (gateway): self-reference check (`globals` cannot include own `group_id`); cross-catalog `is_global` validation after full batch sync; `globals_warnings[]` in response for non-global catalog references
+
+**Not yet built (v0.4 Waves C-G):** Deviation write path, PE governance, conformance scoring, portfolio intelligence, documentation
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
