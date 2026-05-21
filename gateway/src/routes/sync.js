@@ -91,9 +91,17 @@ async function inBatches(items, size, fn) {
 /**
  * Sync a single project's config + membership from S3 to DDB.
  * Exported so config.js can call it after a new project config is uploaded.
+ *
+ * On success, returns the parsed config alongside { ok: true } so that
+ * syncAllConfigs can build an is_global map for cross-catalog globals validation
+ * without additional S3 round-trips.
+ *
  * @param {string} bucket
  * @param {string} projectId
- * @returns {Promise<{ project_id: string, ok: true } | { project_id: string, ok: false, error: string }>}
+ * @returns {Promise<
+ *   { project_id: string, ok: true,  config: import('../shared/config/schema.js').QuorumConfig } |
+ *   { project_id: string, ok: false, error: string }
+ * >}
  */
 export async function syncOneProject(bucket, projectId) {
   try {
@@ -104,6 +112,17 @@ export async function syncOneProject(bucket, projectId) {
     const body = await obj.Body.transformToString()
     const raw  = JSON.parse(body)
     const config = QuorumConfigSchema.parse(raw)
+
+    // Self-reference guard: a project cannot list itself in its own globals array.
+    // A project reading from itself is a no-op but signals a misconfigured .quorum file.
+    const canonicalId = config.group_id ?? projectId
+    if ((config.globals ?? []).includes(canonicalId)) {
+      return {
+        project_id: projectId,
+        ok:         false,
+        error:      `globals self-reference: '${canonicalId}' cannot link to itself`,
+      }
+    }
 
     const owner = config.owner ?? null
     const members = (config.members ?? []).map((m) => ({
@@ -120,7 +139,7 @@ export async function syncOneProject(bucket, projectId) {
     await invalidateProject(projectId)
     await syncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
 
-    return { project_id: projectId, ok: true }
+    return { project_id: projectId, ok: true, config }
   } catch (err) {
     return { project_id: projectId, ok: false, error: err.message }
   }
@@ -177,7 +196,34 @@ export async function syncAllConfigs() {
   const failed = results.filter((r) => !r.ok).map((r) => ({ project_id: r.project_id, error: r.error }))
   const synced = results.length - failed.length
 
-  return { synced, failed, duration_ms: Date.now() - startedAt }
+  // 3. Cross-catalog globals validation.
+  // Build an is_global map from all successfully synced configs (no extra S3 calls needed —
+  // each syncOneProject result carries the parsed config). Then verify that every entry in
+  // a project's globals list actually has is_global: true in the synced set.
+  // Unknown catalog IDs (not in this sync batch) are skipped — they may be valid but just
+  // not synced this run. Only entries whose is_global is explicitly false are flagged.
+  const isGlobalMap = new Map()
+  for (const r of results) {
+    if (r.ok && r.config) {
+      isGlobalMap.set(r.config.group_id ?? r.project_id, r.config.is_global === true)
+    }
+  }
+
+  const globalsWarnings = []
+  for (const r of results) {
+    if (!r.ok || !(r.config?.globals?.length)) continue
+    for (const catalogId of r.config.globals) {
+      if (isGlobalMap.has(catalogId) && !isGlobalMap.get(catalogId)) {
+        globalsWarnings.push({
+          project_id: r.project_id,
+          catalog_id: catalogId,
+          warning:    `globals references '${catalogId}' which is not a global catalog (is_global: false)`,
+        })
+      }
+    }
+  }
+
+  return { synced, failed, globals_warnings: globalsWarnings, duration_ms: Date.now() - startedAt }
 }
 
 // POST /sync/configs
