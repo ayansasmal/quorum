@@ -36,7 +36,7 @@ const PLACEHOLDER_PATTERNS = [
 
 export class ConstitutionalViolation extends Error {
   /**
-   * @param {'NO_HARD_DELETE'|'APPEND_ONLY_AUDIT'|'REASON_REQUIRED'|'NO_SELF_APPROVAL'|'MULTI_PARTY_CONFIG'} rule
+   * @param {'NO_HARD_DELETE'|'APPEND_ONLY_AUDIT'|'REASON_REQUIRED'|'NO_SELF_APPROVAL'|'MULTI_PARTY_CONFIG'|'GLOBAL_WRITE_AUTHORITY'|'DEVIATION_ACTION_AUTHORITY'|'DEFER_DEADLINE'} rule
    * @param {string} message
    * @param {unknown} [context]
    */
@@ -253,6 +253,101 @@ export function enforceConstitutionalRulesAreImmutable(configKey) {
       'MULTI_PARTY_CONFIG',
       `Constitutional rules cannot be changed via config: '${configKey}'`,
       { configKey },
+    )
+  }
+}
+
+// ── v0.4: Federation + Deviation governance ───────────────────────────────────
+
+/**
+ * Throws if a role below architect-tier attempts to write to a global catalog.
+ *
+ * Lifted from the application-level soft-return in remember.js (GAP-27) into
+ * the constitutional layer. Widened from principal_architect-only to all
+ * architect-tier and business-authority roles because POs and compliance officers
+ * need to maintain standards in their domain catalogs.
+ *
+ * isGlobalProject is resolved by the caller from the target project's config:
+ *   - MCP:     getConfig()?.is_global === true  (loaded from .quorum file)
+ *   - Gateway: projectConfig.is_global === true (from Redis config cache)
+ *
+ * Non-global projects are unaffected — every role can write to their own project.
+ *
+ * @param {{ role?: string }} identity
+ * @param {string} projectId - group_id of the target project
+ * @param {boolean} isGlobalProject - true when the target project has is_global: true
+ */
+export function enforceGlobalWriteAuthority(identity, projectId, isGlobalProject) {
+  // Non-global projects: no restriction on write role.
+  if (!isGlobalProject) return
+
+  const GLOBAL_WRITE_ROLES = [
+    'architect',
+    'principal_architect',
+    'product_owner',       // owns product standards catalog
+    'compliance_officer',  // owns compliance standards catalog
+  ]
+
+  if (!GLOBAL_WRITE_ROLES.includes(identity?.role)) {
+    throw new ConstitutionalViolation(
+      'GLOBAL_WRITE_AUTHORITY',
+      `Role '${identity?.role ?? 'unknown'}' cannot write to global catalog '${projectId}'. ` +
+        `Minimum role required: architect.`,
+      { role: identity?.role, projectId },
+    )
+  }
+}
+
+/**
+ * Throws if the actor lacks authority to action (accept/deny/defer) a deviation.
+ *
+ * Architect-tier roles and business-authority roles can govern deviations.
+ * Executive roles (director, vp_engineering, group_executive) are READ-ONLY —
+ * they see portfolio data but cannot change governance state. Enforced here at
+ * the constitutional layer (not just the UI) so API calls are also rejected.
+ *
+ * @param {string} actorRole
+ * @param {'accept'|'deny'|'defer'} operation
+ */
+export function enforceDeviationActionAuthority(actorRole, operation) {
+  const ALLOWED_ROLES = [
+    'architect',
+    'principal_architect',
+    'product_owner',
+    'compliance_officer',
+  ]
+
+  if (!ALLOWED_ROLES.includes(actorRole)) {
+    throw new ConstitutionalViolation(
+      'DEVIATION_ACTION_AUTHORITY',
+      `Role '${actorRole}' cannot ${operation} deviations. Minimum role required: architect.`,
+      { actorRole, operation },
+    )
+  }
+}
+
+/**
+ * Throws if the defer deadline is not exactly 30, 45, 60, or 90 days from now.
+ *
+ * Fixed options create accountability checkpoints and prevent indefinite deferrals.
+ * A PE who chooses 90 days is making a visible, recorded commitment to revisit.
+ * Arbitrary dates would make the commitment ambiguous and harder to surface in
+ * the portfolio view.
+ *
+ * Tolerance: ±rounding via Math.round to absorb clock skew between client and
+ * server when the deadline is computed client-side.
+ *
+ * @param {string | Date} deferUntil - ISO timestamp or Date object
+ */
+export function enforceValidDeferDeadline(deferUntil) {
+  const days = Math.round(
+    (new Date(deferUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+  )
+  if (![30, 45, 60, 90].includes(days)) {
+    throw new ConstitutionalViolation(
+      'DEFER_DEADLINE',
+      `Defer deadline must be exactly 30, 45, 60, or 90 days from now. Got: ${days} days.`,
+      { days, deferUntil },
     )
   }
 }

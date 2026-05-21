@@ -27,6 +27,9 @@ import {
   enforceConflictPartyCannotSelfResolve,
   enforceMultiPartyConfig,
   enforceConstitutionalRulesAreImmutable,
+  enforceGlobalWriteAuthority,         // v0.4 Wave A
+  enforceDeviationActionAuthority,     // v0.4 Wave A
+  enforceValidDeferDeadline,           // v0.4 Wave A
 } from '../../gateway/src/shared/governance/constitutional.js'
 
 import {
@@ -300,5 +303,188 @@ describe('authority: resolveAuthorConfidence', () => {
   })
   it('defaults to 0.5 floor when identity has no base_confidence', () => {
     expect(resolveAuthorConfidence(0.1, { role: 'engineer' })).toBe(0.5)
+  })
+})
+
+// ── v0.4 Wave A: new constitutional functions ─────────────────────────────────
+
+describe('constitutional: enforceGlobalWriteAuthority', () => {
+  it('does nothing when isGlobalProject is false (non-global project)', () => {
+    // engineer can write to their own project — not a global catalog
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'engineer' }, 'payments-service', false),
+    ).not.toThrow()
+  })
+
+  it('throws ConstitutionalViolation for engineer writing to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'engineer' }, 'security-standards', true),
+    ).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for senior_engineer writing to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'senior_engineer' }, 'security-standards', true),
+    ).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for tech_lead writing to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'tech_lead' }, 'security-standards', true),
+    ).toThrow(ConstitutionalViolation)
+  })
+
+  it('allows architect to write to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'architect' }, 'security-standards', true),
+    ).not.toThrow()
+  })
+
+  it('allows principal_architect to write to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'principal_architect' }, 'security-standards', true),
+    ).not.toThrow()
+  })
+
+  it('allows product_owner to write to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'product_owner' }, 'security-standards', true),
+    ).not.toThrow()
+  })
+
+  it('allows compliance_officer to write to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({ role: 'compliance_officer' }, 'security-standards', true),
+    ).not.toThrow()
+  })
+
+  it('violation carries rule GLOBAL_WRITE_AUTHORITY with correct context', () => {
+    try {
+      enforceGlobalWriteAuthority({ role: 'engineer' }, 'security-standards', true)
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConstitutionalViolation)
+      expect(err.rule).toBe('GLOBAL_WRITE_AUTHORITY')
+      expect(err.context.role).toBe('engineer')
+      expect(err.context.projectId).toBe('security-standards')
+    }
+  })
+
+  it('throws for undefined role (empty identity) writing to a global catalog', () => {
+    expect(() =>
+      enforceGlobalWriteAuthority({}, 'security-standards', true),
+    ).toThrow(ConstitutionalViolation)
+  })
+
+  it('executive roles (director, vp_engineering, group_executive) cannot write to global catalogs', () => {
+    for (const role of ['director', 'vp_engineering', 'group_executive']) {
+      expect(() =>
+        enforceGlobalWriteAuthority({ role }, 'security-standards', true),
+      ).toThrow(ConstitutionalViolation)
+    }
+  })
+})
+
+describe('constitutional: enforceDeviationActionAuthority', () => {
+  it('allows architect to accept a deviation', () => {
+    expect(() => enforceDeviationActionAuthority('architect', 'accept')).not.toThrow()
+  })
+
+  it('allows principal_architect to deny a deviation', () => {
+    expect(() => enforceDeviationActionAuthority('principal_architect', 'deny')).not.toThrow()
+  })
+
+  it('allows product_owner to defer a deviation', () => {
+    expect(() => enforceDeviationActionAuthority('product_owner', 'defer')).not.toThrow()
+  })
+
+  it('allows compliance_officer to accept a deviation', () => {
+    expect(() => enforceDeviationActionAuthority('compliance_officer', 'accept')).not.toThrow()
+  })
+
+  it('throws for engineer attempting to accept a deviation', () => {
+    expect(() => enforceDeviationActionAuthority('engineer', 'accept')).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for senior_engineer attempting to deny', () => {
+    expect(() => enforceDeviationActionAuthority('senior_engineer', 'deny')).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for director (executive roles are read-only in governance)', () => {
+    expect(() => enforceDeviationActionAuthority('director', 'deny')).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for vp_engineering (executive roles are read-only)', () => {
+    expect(() => enforceDeviationActionAuthority('vp_engineering', 'accept')).toThrow(ConstitutionalViolation)
+  })
+
+  it('throws for group_executive (executive roles are read-only)', () => {
+    expect(() => enforceDeviationActionAuthority('group_executive', 'defer')).toThrow(ConstitutionalViolation)
+  })
+
+  it('violation carries rule DEVIATION_ACTION_AUTHORITY with correct context', () => {
+    try {
+      enforceDeviationActionAuthority('engineer', 'accept')
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConstitutionalViolation)
+      expect(err.rule).toBe('DEVIATION_ACTION_AUTHORITY')
+      expect(err.context.actorRole).toBe('engineer')
+      expect(err.context.operation).toBe('accept')
+    }
+  })
+})
+
+describe('constitutional: enforceValidDeferDeadline', () => {
+  // Helper: create a Date exactly N days from now
+  function daysFromNow(n) {
+    return new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString()
+  }
+
+  it('accepts exactly 30 days from now', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(30))).not.toThrow()
+  })
+
+  it('accepts exactly 45 days from now', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(45))).not.toThrow()
+  })
+
+  it('accepts exactly 60 days from now', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(60))).not.toThrow()
+  })
+
+  it('accepts exactly 90 days from now', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(90))).not.toThrow()
+  })
+
+  it('rejects 29 days (not a valid option)', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(29))).toThrow(ConstitutionalViolation)
+  })
+
+  it('rejects 31 days (not a valid option)', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(31))).toThrow(ConstitutionalViolation)
+  })
+
+  it('rejects 0 days (immediate expiry is not a defer)', () => {
+    expect(() => enforceValidDeferDeadline(new Date().toISOString())).toThrow(ConstitutionalViolation)
+  })
+
+  it('rejects 120 days (no indefinite deferrals)', () => {
+    expect(() => enforceValidDeferDeadline(daysFromNow(120))).toThrow(ConstitutionalViolation)
+  })
+
+  it('also accepts Date objects, not just ISO strings', () => {
+    expect(() => enforceValidDeferDeadline(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000))).not.toThrow()
+  })
+
+  it('violation carries rule DEFER_DEADLINE with the computed day count', () => {
+    try {
+      enforceValidDeferDeadline(daysFromNow(31))
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConstitutionalViolation)
+      expect(err.rule).toBe('DEFER_DEADLINE')
+      expect(err.context.days).toBe(31)
+    }
   })
 })
