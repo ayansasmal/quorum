@@ -15,6 +15,7 @@
 
 import { Router } from 'express';
 import { verifyJwt } from '../middleware/verify-jwt.js';
+import { loadProjectConfig } from '../config-cache.js';
 
 const router = Router();
 
@@ -37,9 +38,39 @@ router.post('/*path', verifyJwt, async (req, res) => {
   // RediSearch, causing syntax errors for any project with a hyphenated group_id. Replace
   // hyphens with underscores so the graph name is safe. PostgreSQL project_id is never modified.
   const sanitizedProject = req.user.project.replace(/-/g, '_');
-  const body = { ...(req.body ?? {}), params: { ...(req.body?.params ?? {}) } };
-  body.params.group_id = sanitizedProject;
-  if (body.params.group_ids !== undefined) body.params.group_ids = [sanitizedProject];
+
+  // Wave B: load linked global catalogs for cross-catalog read injection.
+  // Uses the raw project ID for S3/Redis config lookup (configs stored with original hyphens).
+  // Falls back to empty globals if config is unavailable — call proceeds project-scoped only.
+  const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+  const sanitizedGlobals = (projectConfig?.globals ?? []).map((id) => id.replace(/-/g, '_'))
+
+  // Detect read vs write MCP tool calls by inspecting params.name.
+  // Read ops (search_nodes, search_memory_facts): inject all linked catalog group_ids.
+  // Write ops (add_memory, etc.): restrict to the project group_id — cross-catalog writes are never allowed.
+  const READ_TOOLS = new Set(['search_nodes', 'search_memory_facts'])
+  const toolName = req.body?.params?.name ?? ''
+  const isReadOp = READ_TOOLS.has(toolName)
+  const injectedGroupIds = isReadOp
+    ? [sanitizedProject, ...sanitizedGlobals]
+    : [sanitizedProject]
+
+  // Deep-copy params.arguments: MCP protocol nests tool arguments inside body.params.arguments,
+  // not at body.params level. The previous group_id override never reached Graphiti's tool
+  // arguments (it was setting body.params.group_id, not body.params.arguments.group_id).
+  // Override at both levels: params level for backward compat; arguments level for MCP protocol.
+  const body = {
+    ...(req.body ?? {}),
+    params: {
+      ...(req.body?.params ?? {}),
+      arguments: { ...(req.body?.params?.arguments ?? {}) },
+    },
+  }
+
+  body.params.group_id = sanitizedProject
+  body.params.arguments.group_id = sanitizedProject
+  body.params.group_ids = injectedGroupIds
+  body.params.arguments.group_ids = injectedGroupIds
 
   // Forward MCP protocol headers from the caller to Graphiti.
   // Accept is required: Graphiti's streamable-http transport returns 406 without it.

@@ -25,6 +25,8 @@ vi.mock('../../gateway/src/config-cache.js', () => ({
     is_admin: false,
     projects: [{ group_id: 'test-project', role: 'engineer', base_confidence: 0.7, is_owner: false, team: 'platform' }],
   }),
+  // Wave B: default returns no linked global catalogs (project-scoped only)
+  loadProjectConfig: vi.fn().mockResolvedValue({ group_id: 'test-project', globals: [] }),
 }))
 
 // ── Imports ────────────────────────────────────────────────────────────────────
@@ -208,15 +210,16 @@ describe('POST /graphiti/*path — group_id isolation', () => {
     expect(store.capturedBody.params.group_ids).toEqual(['test_project'])
   })
 
-  it('does not add group_ids when the caller did not include it', async () => {
+  it('always injects group_ids for read ops even when the caller omits it', async () => {
+    // Wave B: read ops always have group_ids injected (project-only when no globals linked).
     const store = mockGraphiti()
 
     await post('/graphiti/mcp', {
-      method: 'search_memory_facts',
-      params: { query: 'auth patterns' },
+      params: { name: 'search_memory_facts', arguments: { query: 'auth patterns' } },
     })
 
-    expect(store.capturedBody.params.group_ids).toBeUndefined()
+    expect(store.capturedBody.params.group_ids).toEqual(['test_project'])
+    expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
   })
 
   it('returns 401 when no Authorization header is present', async () => {
@@ -298,6 +301,90 @@ describe('POST /graphiti/*path — MCP session ID forwarding', () => {
 
     // 421 is forwarded as-is; the important thing is no unhandled exception
     expect(status).toBe(421)
+  })
+})
+
+describe('POST /graphiti/*path — Wave B: arguments-level group_ids injection', () => {
+  it('injects group_ids at params.arguments level for search_nodes (MCP protocol level)', async () => {
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'search_nodes',
+        arguments: { query: 'auth patterns' },
+      },
+    })
+
+    expect(store.capturedBody.params.arguments.group_id).toBe('test_project')
+    expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
+  })
+
+  it('injects group_ids at params.arguments level for search_memory_facts', async () => {
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'search_memory_facts',
+        arguments: { query: 'auth patterns' },
+      },
+    })
+
+    expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
+  })
+
+  it('restricts write ops (add_memory) to single project group_id at arguments level', async () => {
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'add_memory',
+        arguments: { content: 'use jwt', group_ids: ['other-catalog'] },
+      },
+    })
+
+    // write ops must never cross-catalog write
+    expect(store.capturedBody.params.arguments.group_id).toBe('test_project')
+    expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
+  })
+
+  it('injects linked global catalog group_ids for read ops', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockResolvedValueOnce({
+      group_id: 'test-project',
+      globals: ['security-standards', 'org-base'],
+    })
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'search_nodes',
+        arguments: { query: 'tls certs' },
+      },
+    })
+
+    expect(store.capturedBody.params.arguments.group_ids).toEqual([
+      'test_project',
+      'security_standards',
+      'org_base',
+    ])
+  })
+
+  it('falls back to project-only when loadProjectConfig throws', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockRejectedValueOnce(new Error('S3 unavailable'))
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'search_nodes',
+        arguments: { query: 'tls certs' },
+      },
+    })
+
+    // should not fail — falls back gracefully to project-only
+    expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
   })
 })
 
