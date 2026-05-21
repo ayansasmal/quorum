@@ -23,7 +23,7 @@
  *   normalizeTags() is exported for use in remember() and recall().
  */
 
-import { searchNodes } from '../graph/client.js'
+import { searchNodes, normalizeGroupId } from '../graph/client.js'
 import { calculateAuthority, shouldAutoSupersede } from './authority.js'
 import { getConfig } from '../config/loader.js'
 
@@ -146,19 +146,34 @@ export async function generateEnrichment(existing, incoming, conflictReason, pos
  * Uses the domain-specific conflict threshold when available.
  * Returns { conflict: false } if no conflict detected.
  *
+ * Search scope: when projectId is provided, restricts searchNodes to the
+ * project + all linked global catalogs (globals). Without projectId the
+ * search is unscoped (legacy behavior preserved for backward compatibility).
+ * Group IDs are normalised (hyphen → underscore) before passing to Graphiti
+ * to avoid RediSearch treating `-` as a NOT operator.
+ *
  * @param {string} newContent
  * @param {string} topic
  * @param {string} key
  * @param {string} [domain] - domain name for per-domain threshold lookup
  * @param {import('../gateway/client.js').GatewayClient} [gw]
+ * @param {string | null} [projectId] - project group_id for scoped search; null = unscoped
+ * @param {string[]} [globals] - linked global catalog group_ids to include in search scope
  * @returns {Promise<ConflictResult>}
  */
-export async function detectConflict(newContent, topic, key, domain, gw) {
+export async function detectConflict(newContent, topic, key, domain, gw, projectId = null, globals = []) {
   const conflictThreshold = getConflictThreshold(domain)
+
+  // Scope conflict detection to project + linked global catalogs.
+  // An un-normalized hyphenated group_id would cause RediSearch NOT-operator
+  // false misses — normalizeGroupId converts hyphens to underscores.
+  const groupIds = projectId
+    ? [normalizeGroupId(projectId), ...globals.map(normalizeGroupId)]
+    : undefined
 
   let searchResult
   try {
-    searchResult = await searchNodes(newContent, { limit: 5 })
+    searchResult = await searchNodes(newContent, { limit: 5, ...(groupIds ? { groupIds } : {}) })
   } catch {
     // GAP-03: Graphiti unavailable — signal caller to store with PENDING_CONFLICT_CHECK status.
     // Do NOT silently skip: a skipped conflict check is a governance failure.

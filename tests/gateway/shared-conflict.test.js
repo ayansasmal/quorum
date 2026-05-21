@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('../../gateway/src/shared/graph/client.js', () => ({
   searchNodes: vi.fn(),
+  normalizeGroupId: vi.fn((id) => (typeof id === 'string' ? id.replace(/-/g, '_') : id)),
 }))
 
 vi.mock('../../gateway/src/shared/governance/authority.js', () => ({
@@ -26,7 +27,7 @@ vi.mock('../../gateway/src/shared/config/loader.js', () => ({
 
 // ── Imports ────────────────────────────────────────────────────────────────────
 
-import { searchNodes } from '../../gateway/src/shared/graph/client.js'
+import { searchNodes, normalizeGroupId } from '../../gateway/src/shared/graph/client.js'
 import { calculateAuthority, shouldAutoSupersede } from '../../gateway/src/shared/governance/authority.js'
 import {
   normalizeTags,
@@ -418,5 +419,62 @@ describe('resolveConflict', () => {
 
     expect(result.brief.possible_split).toBe(false)
     expect(result.brief.split_suggestion).toBeNull()
+  })
+})
+
+// ── detectConflict — group_id scoping (Wave B) ────────────────────────────────
+
+describe('detectConflict — groupIds scoping', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('calls searchNodes without groupIds when projectId is null (backward compat)', async () => {
+    searchNodes.mockResolvedValue({ nodes: [] })
+
+    await detectConflict('content', 'auth', 'key', null, null)
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.not.objectContaining({ groupIds: expect.anything() }),
+    )
+  })
+
+  it('calls searchNodes with [projectId] when projectId is set and no globals', async () => {
+    searchNodes.mockResolvedValue({ nodes: [] })
+
+    await detectConflict('content', 'auth', 'key', null, null, 'payments-service', [])
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({ groupIds: ['payments_service'] }),
+    )
+  })
+
+  it('calls searchNodes with [projectId, ...globals] when both are set', async () => {
+    searchNodes.mockResolvedValue({ nodes: [] })
+
+    await detectConflict('content', 'auth', 'key', null, null, 'payments-service', ['security-standards', 'payments-compliance'])
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({ groupIds: ['payments_service', 'security_standards', 'payments_compliance'] }),
+    )
+  })
+
+  it('normalizes hyphens to underscores in all group IDs', async () => {
+    searchNodes.mockResolvedValue({ nodes: [] })
+
+    await detectConflict('content', 'auth', 'key', null, null, 'my-project', ['org-standards'])
+
+    const call = searchNodes.mock.calls[0][1]
+    expect(call.groupIds).toEqual(['my_project', 'org_standards'])
+  })
+
+  it('returns { conflict: false, graphiti_unavailable: true } when searchNodes throws (scoped)', async () => {
+    searchNodes.mockRejectedValue(new Error('Graphiti down'))
+
+    const result = await detectConflict('content', 'auth', 'key', null, null, 'my-project', ['org-standards'])
+
+    expect(result.conflict).toBe(false)
+    expect(result.graphiti_unavailable).toBe(true)
   })
 })
