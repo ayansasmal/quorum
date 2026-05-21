@@ -42,6 +42,13 @@ const DEFAULT_ROLE_SCORES = {
   business_analyst:     0.65,
   product_owner:        0.85,
   compliance_officer:   0.90,
+  // v0.4: Executive roles — read-only consumers of portfolio intelligence.
+  // Scored so their occasional knowledge contributions are weighted appropriately.
+  // Executive roles are EXCLUDED from deviation governance actions
+  // (enforceDeviationActionAuthority blocks them from accept/deny/defer).
+  director:             0.75,
+  vp_engineering:       0.75,
+  group_executive:      0.70,
 }
 
 /** Default formula weights — overridable via governance.authority.weights */
@@ -61,6 +68,11 @@ const DEFAULT_WEIGHTS = {
  * Business tiers:     business_analyst(2) < product_owner(3) / compliance_officer(3)
  * Business roles are peer-tiered with engineering architects so that a product
  * owner's requirement cannot be silently overridden by a junior engineer.
+ *
+ * v0.4 Executive tiers: director/vp_engineering/group_executive at tier 3.
+ * Peer-tiered with architects so their entries survive junior-engineer supersession.
+ * Excluded from deviation governance (enforceDeviationActionAuthority) — they are
+ * portfolio consumers, not governance actors.
  */
 const ROLE_TIER = {
   // Engineering roles
@@ -73,6 +85,10 @@ const ROLE_TIER = {
   business_analyst:     2,
   product_owner:        3,
   compliance_officer:   3,
+  // v0.4: Executive roles
+  director:             3,
+  vp_engineering:       3,
+  group_executive:      3,
 }
 
 /**
