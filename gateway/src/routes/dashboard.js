@@ -31,6 +31,7 @@ import {
 } from '../shared/graph/queries.js'
 import { searchNodes, searchFacts } from '../shared/graph/client.js'
 import { writeAuditEntry } from '../shared/audit/secondary.js'
+import { loadProjectConfig } from '../config-cache.js'
 import { enforceNoSelfApproval, enforceReasonRequired } from '../shared/governance/constitutional.js'
 import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
 import { createHash } from 'node:crypto'
@@ -1468,5 +1469,120 @@ router.post('/knowledge/:topic/:key/deprecate', peWriteLimit, async (req, res, n
     next(err)
   }
 })
+
+// ── GET /api/globals ───────────────────────────────────────────────────────────
+
+/**
+ * Return all global catalogs visible to the requesting project.
+ *
+ * Discovers projects with is_global = TRUE from PostgreSQL, enriches each
+ * with metadata from S3/Redis config (global_scope, globals, display_name),
+ * and filters by global_scope:
+ *   'org' (or absent) → visible to all authenticated users.
+ *   'division:<id>'  → visible only if the requesting project's hierarchy
+ *                      parent chain includes that division id (Wave B: omitted
+ *                      for org-scoped catalogs; full hierarchy scoping in v0.5).
+ *   'department:<id>' → same, narrower.
+ *
+ * Response: Array of { group_id, display_name, global_scope, entry_count, globals }
+ * Used by quorum:onboard to present catalog choices during project setup.
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.get('/globals', async (req, res, next) => {
+  try {
+    const pool = req.app.locals.pool
+
+    // Load the requesting project's config for hierarchy-based scope filtering.
+    // Falls back to null (no hierarchy) so org-scoped catalogs are still returned.
+    const requestingConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    const requestingParents = buildAncestorSet(requestingConfig)
+
+    // Discover all global catalogs from PostgreSQL.
+    const { rows: globalRows } = await pool.query(
+      `SELECT qp.group_id, qp.display_name
+         FROM q_projects qp
+        WHERE qp.is_global = TRUE
+        ORDER BY qp.group_id`,
+    )
+
+    if (globalRows.length === 0) {
+      return res.json([])
+    }
+
+    // Enrich each catalog with S3/Redis config metadata and ACTIVE entry count.
+    // Config fetch + count query are issued in parallel per catalog.
+    const catalogs = await Promise.all(
+      globalRows.map(async (row) => {
+        const [config, countResult] = await Promise.all([
+          loadProjectConfig(row.group_id).catch(() => null),
+          pool.query(
+            `SELECT COUNT(*) AS entry_count
+               FROM knowledge_versions kv
+               JOIN q_keys qk ON kv.q_key_id = qk.q_key_id
+               JOIN q_projects qp ON qk.q_project_id = qp.q_project_id
+              WHERE qp.group_id = $1
+                AND kv.status = 'ACTIVE'`,
+            [row.group_id],
+          ).catch(() => null),
+        ])
+
+        const globalScope = config?.global_scope ?? 'org'
+        const entryCount  = parseInt(countResult?.rows?.[0]?.entry_count ?? '0', 10)
+
+        return {
+          group_id:     row.group_id,
+          display_name: config?.hierarchy?.display_name ?? row.display_name ?? row.group_id,
+          global_scope: globalScope,
+          entry_count:  entryCount,
+          globals:      config?.globals ?? [],
+        }
+      }),
+    )
+
+    // Filter by global_scope — only return catalogs visible to the requesting project.
+    const visible = catalogs.filter((c) => isScopeVisible(c.global_scope, requestingParents))
+
+    res.json(visible)
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * Build the set of hierarchy ancestor IDs for a project config.
+ * Returns a Set of all parent/ancestor group_ids derived from the config.
+ * Used for global_scope filtering (division:<id> / department:<id>).
+ * @param {object | null} config
+ * @returns {Set<string>}
+ */
+function buildAncestorSet(config) {
+  const ancestors = new Set()
+  if (!config?.hierarchy?.parent) return ancestors
+  // Walk the parent chain. In Wave B configs are shallow (one parent), so a single
+  // level is sufficient. Full multi-level ancestry traversal is a v0.5 concern.
+  let current = config.hierarchy.parent
+  while (current) {
+    ancestors.add(current)
+    // Prevent infinite loops from misconfigured circular hierarchies.
+    break
+  }
+  return ancestors
+}
+
+/**
+ * Return true if a catalog's global_scope is visible to the requesting project.
+ * @param {string} scope  - 'org' | 'division:<id>' | 'department:<id>'
+ * @param {Set<string>} requestingParents - ancestor group_ids of the requesting project
+ * @returns {boolean}
+ */
+function isScopeVisible(scope, requestingParents) {
+  if (!scope || scope === 'org') return true
+  const match = scope.match(/^(?:division|department):(.+)$/)
+  if (!match) return true  // unknown scope format — default to visible
+  return requestingParents.has(match[1])
+}
 
 export default router
