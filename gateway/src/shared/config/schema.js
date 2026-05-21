@@ -65,6 +65,39 @@ export const NotificationsSchema = z.object({
   dashboard_url: z.string().url().optional(),
 })
 
+// ── v0.4: Federation hierarchy schemas ───────────────────────────────────────
+
+/**
+ * Project position in the organisational hierarchy.
+ * Hierarchy levels are defined in the platform config — no hard-coded values here.
+ * Used for rollup conformance scoring and scoped portfolio visibility.
+ */
+export const HierarchySchema = z.object({
+  /**
+   * Hierarchy level name (must match a level in the platform config's hierarchy.levels array).
+   * Examples: 'service', 'application', 'department', 'division', 'group'.
+   */
+  level: z.string().min(1),
+  /**
+   * group_id of the parent node in the hierarchy tree.
+   * Null or absent for root nodes (top-level groups).
+   */
+  parent: z.string().optional(),
+  /**
+   * Human-readable label for this project's position (e.g. 'Payments Processing Service').
+   */
+  display_name: z.string().optional(),
+  /**
+   * Criticality weight 1–5 used in rollup score formula:
+   *   node_score = Σ(child_score × child_criticality) / Σ(child_criticality)
+   * Higher criticality = larger influence on parent node's score.
+   * Defaults to 1 if absent (equal weight).
+   */
+  criticality: z.number().int().min(1).max(5).optional(),
+})
+
+// ── Root config schema ────────────────────────────────────────────────────────
+
 /** Root config schema. */
 export const QuorumConfigSchema = z.object({
   /**
@@ -100,6 +133,61 @@ export const QuorumConfigSchema = z.object({
    * Guests have role: null — read-only dashboard, all writes forced to DRAFT.
    */
   guest_access: z.boolean().default(false),
+
+  // ── v0.4 federation fields ──────────────────────────────────────────────────
+
+  /**
+   * Position of this project in the organisational hierarchy.
+   * Used for rollup conformance scoring in GET /api/portfolio.
+   */
+  hierarchy: HierarchySchema.optional(),
+
+  /**
+   * Marks this project as a global knowledge catalog.
+   *
+   * When true:
+   *   - Architect-tier roles can write to this project (enforceGlobalWriteAuthority).
+   *   - All writes enter DRAFT regardless of author role.
+   *   - The project appears in GET /api/globals for catalog discovery.
+   *   - Setting this flag requires multi-party approval (enforceMultiPartyConfig).
+   */
+  is_global: z.boolean().optional(),
+
+  /**
+   * Scope of visibility for a global catalog.
+   * Only meaningful when is_global is true.
+   *
+   * Format: 'org' | 'division:<group_id>' | 'department:<group_id>'
+   *   - 'org' (default): visible to all projects
+   *   - 'division:<group_id>': visible only to projects whose hierarchy ancestry includes the given division
+   *   - 'department:<group_id>': same, narrower
+   */
+  global_scope: z
+    .string()
+    .regex(
+      /^(org|division:[a-z0-9-]+|department:[a-z0-9-]+)$/,
+      "global_scope must be 'org', 'division:<group_id>', or 'department:<group_id>'",
+    )
+    .optional(),
+
+  /**
+   * Marks this project's knowledge as freely readable without authentication.
+   * Defined now for schema completeness; enforcement is a v0.5 feature.
+   */
+  is_public: z.boolean().optional(),
+
+  /**
+   * List of group_ids of global catalog projects this project links to.
+   * A project is only scored against the global catalogs it has explicitly opted into.
+   *
+   * Validation: each entry must resolve to a project with is_global: true.
+   * This is validated at POST /sync/configs time (DDB lookup), not by this Zod schema.
+   *
+   * A project may also list other global projects in its own globals list to create
+   * catalog inheritance (e.g. a division-level catalog inheriting from an org-level one).
+   */
+  globals: z.array(z.string().min(1)).optional(),
 })
 
 /** @typedef {import('zod').infer<typeof QuorumConfigSchema>} QuorumConfig */
+/** @typedef {import('zod').infer<typeof HierarchySchema>} HierarchyConfig */
