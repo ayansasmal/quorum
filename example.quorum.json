@@ -30,13 +30,37 @@
       "role": "junior",
       "github_username": "carol-dev",
       "git_email": "carol@company.com"
+    },
+    {
+      "name": "Priya",
+      "team": "product",
+      "role": "product_owner",
+      "github_username": "priya-pm",
+      "git_email": "priya@company.com"
+    },
+    {
+      "name": "Sam",
+      "team": "product",
+      "role": "business_analyst",
+      "github_username": "sam-ba",
+      "git_email": "sam@company.com"
+    },
+    {
+      "name": "Jordan",
+      "team": "legal",
+      "role": "compliance_officer",
+      "github_username": "jordan-legal",
+      "git_email": "jordan@company.com"
     }
   ],
   "roles": {
     "principal_architect": { "base_confidence": 0.90 },
     "senior_engineer":     { "base_confidence": 0.80 },
     "engineer":            { "base_confidence": 0.70 },
-    "junior":              { "base_confidence": 0.60 }
+    "junior":              { "base_confidence": 0.60 },
+    "product_owner":       { "base_confidence": 0.80 },
+    "business_analyst":    { "base_confidence": 0.70 },
+    "compliance_officer":  { "base_confidence": 0.85 }
   },
   "domains": {
     "auth": {

@@ -71,7 +71,7 @@ Example (product/business context):
 Task: "Refactor the checkout flow"
 → search("checkout", domain="product,payments")
 → Loaded (ACTIVE only):
-    product:guest-checkout-requirement  (v1 | confidence: 0.85 | @product-manager)
+    product:guest-checkout-requirement  (v1 | confidence: 0.85 | @product-owner)
     payments:idempotency                (v1 | confidence: 0.92 | @architect)
 → "Loaded 2 Quorum entries. product:guest-checkout-requirement is a product requirement — check before removing any checkout paths."
 ```
@@ -378,17 +378,29 @@ Even if superseded knowledge is closer to what the engineer seems to want:
 
 ```
 Claude (any mode)     → always DRAFT → any engineer to approve
-Junior engineer       → always DRAFT → senior+ to approve
-Engineer              → DRAFT by default
-                         self-approve: domain_entries >= 10, conflict_rate < 10%
-Senior engineer       → ACTIVE in established domain
-                         DRAFT in unfamiliar domains
-Principal architect   → ACTIVE always, team notified
+
+Engineering roles:
+  Junior engineer       → always DRAFT → senior+ to approve
+  Engineer              → DRAFT by default
+                           self-approve: domain_entries >= 10, conflict_rate < 10%
+  Senior engineer       → ACTIVE in established domain
+                           DRAFT in unfamiliar domains
+  Principal architect   → ACTIVE always, team notified
+
+Business roles:
+  Business analyst      → DRAFT by default → product owner or PA to approve
+  Product owner         → ACTIVE for product/* and compliance/* domains
+                           DRAFT in engineering domains
+  Compliance officer    → ACTIVE for compliance/* and legal/* domains
+                           DRAFT in engineering domains
 ```
 
 Claude never approves its own additions.
 Claude never approves human additions.
 Self-approval constitutional rule applies to Claude too.
+
+Note: PMs, BAs, and compliance officers use Claude (via Claude Code or any Claude interface)
+to interact with Quorum — the MCP tools are their entry point, not just engineers'.
 
 ---
 
