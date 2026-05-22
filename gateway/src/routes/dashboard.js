@@ -33,6 +33,8 @@ import {
   batchUpsertDeviations,
   getDeviationsByProject,
   insertDeviationAction,
+  getConformanceScore,
+  getPortfolioScores,
 } from '../shared/graph/queries.js'
 import { DEFAULT_ROLE_SCORES } from '../shared/governance/authority.js'
 import { searchNodes, searchFacts } from '../shared/graph/client.js'
@@ -464,8 +466,31 @@ router.get('/knowledge', async (req, res, next) => {
     ])
 
     const total = countResult.rows[0].total
+
+    // For global catalog projects, annotate each entry with denial_hint_count —
+    // the number of distinct projects that have denied a deviation against this standard.
+    // One batch query replaces N per-row subqueries.
+    const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    let denialMap = new Map()   // "topic:key" → count
+    if (projectConfig?.is_global === true && dataResult.rows.length > 0) {
+      const catalogGroupId = req.user.project
+      const { rows: denialRows } = await pool.query(
+        `SELECT d.topic, d.key, COUNT(DISTINCT d.q_project_id)::int AS denial_count
+         FROM deviation_actions da
+         JOIN deviations d ON da.deviation_id = d.deviation_id
+         WHERE d.catalog_id = $1
+           AND da.action_type = 'deny'
+         GROUP BY d.topic, d.key`,
+        [catalogGroupId],
+      )
+      for (const r of denialRows) denialMap.set(`${r.topic}:${r.key}`, r.denial_count)
+    }
+
     res.json({
-      items: dataResult.rows,
+      items: dataResult.rows.map((row) => ({
+        ...row,
+        denial_hint_count: denialMap.get(`${row.topic}:${row.key}`) ?? 0,
+      })),
       total,
       page,
       pages: Math.ceil(total / limit),
@@ -1908,6 +1933,161 @@ router.post('/deviations/:id/action', async (req, res, next) => {
     }
 
     return res.json({ action_id: actionId, deviation_id: deviationId, action_type, ...(denialHint ? { hint: denialHint } : {}) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/conformance ──────────────────────────────────────────────────────
+
+/**
+ * Project conformance scorecard.
+ *
+ * Returns the project's weighted conformance score (0–100) across all linked
+ * global catalogs, plus a per-catalog entry count and scan metadata.
+ *
+ * Returns `{ status: 'UNCERTIFIED' }` (no numeric score) when:
+ *   - The project has no linked global catalogs
+ *   - Total ACTIVE entries across all linked catalogs is fewer than 10
+ *   - No scan has been run yet (scan_count = 0)
+ *
+ * Response shape:
+ *   {
+ *     score:             number | null,
+ *     status:            'CERTIFIED' | 'UNCERTIFIED',
+ *     applicable_entries: number,
+ *     scan_count:        number,
+ *     last_scan_at:      string | null,
+ *     breakdown:         { open, accepted, denied, deferred, overdue, resolved },
+ *     catalogs:          [{ catalog_id, entry_count }],
+ *   }
+ */
+router.get('/conformance', async (req, res, next) => {
+  const pool = req.app.locals.pool
+
+  try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    const globals       = projectConfig?.globals ?? []
+
+    const score = await getConformanceScore(pool, qProjectId, globals)
+
+    // Per-catalog ACTIVE entry counts (batch query, zero round-trips per catalog).
+    let catalogs = []
+    if (globals.length > 0) {
+      const { rows } = await pool.query(
+        `SELECT qp.group_id AS catalog_id, COUNT(*)::int AS entry_count
+         FROM knowledge_versions kv
+         JOIN q_keys qk ON kv.q_key_id = qk.q_key_id
+         JOIN q_projects qp ON qk.q_project_id = qp.q_project_id
+         WHERE qp.group_id = ANY($1)
+           AND kv.status = 'ACTIVE'
+         GROUP BY qp.group_id`,
+        [globals],
+      )
+      catalogs = rows.map((r) => ({ catalog_id: r.catalog_id, entry_count: r.entry_count }))
+    }
+
+    return res.json({ ...score, catalogs })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/portfolio ────────────────────────────────────────────────────────
+
+/**
+ * Portfolio conformance view — all accessible projects with their conformance
+ * scores, optionally scoped to a hierarchy node.
+ *
+ * Auth: is_admin OR principal_architect OR director OR vp_engineering OR group_executive.
+ *
+ * Query params:
+ *   node_id?  — hierarchy group_id to scope; filters to projects whose
+ *               config.hierarchy.parent === node_id (direct children only).
+ *               Omit to return all accessible projects.
+ *
+ * Response shape:
+ *   {
+ *     projects: [{
+ *       group_id, display_name, hierarchy_level, criticality,
+ *       score, status, breakdown, scan_count, last_scan_at
+ *     }],
+ *     rollup: { score, status, certified_count, uncertified_count } | null,
+ *   }
+ */
+const PORTFOLIO_ROLES = new Set(['principal_architect', 'director', 'vp_engineering', 'group_executive'])
+
+router.get('/portfolio', async (req, res, next) => {
+  const pool = req.app.locals.pool
+
+  try {
+    // Role gate: admin or senior role only
+    if (!req.user.is_admin && !PORTFOLIO_ROLES.has(req.user.role)) {
+      return res.status(403).json({ error: 'forbidden', message: 'Portfolio view requires architect-level or executive role.' })
+    }
+
+    const nodeId = req.query.node_id ?? null
+
+    // Fetch all registered projects from PostgreSQL
+    const { rows: projectRows } = await pool.query(
+      `SELECT q_project_id, group_id FROM q_projects ORDER BY group_id`,
+    )
+
+    // Load configs in parallel (graceful fallback to empty config on miss)
+    const projectInfos = (
+      await Promise.all(
+        projectRows.map(async ({ q_project_id, group_id }) => {
+          const cfg = await loadProjectConfig(group_id).catch(() => null)
+          // Apply node_id filter: include only projects whose hierarchy.parent === node_id
+          if (nodeId && cfg?.hierarchy?.parent !== nodeId) return null
+          return {
+            groupId:        group_id,
+            qProjectId:     q_project_id,
+            catalogGroupIds: cfg?.globals ?? [],
+            criticality:    cfg?.hierarchy?.criticality ?? 1,
+            displayName:    cfg?.hierarchy?.display_name ?? cfg?.project ?? group_id,
+            hierarchyLevel: cfg?.hierarchy?.level ?? null,
+          }
+        }),
+      )
+    ).filter(Boolean)
+
+    // Compute conformance scores in parallel
+    const scores = await getPortfolioScores(pool, projectInfos)
+
+    // Weighted rollup over CERTIFIED projects only
+    const certified = scores.filter((p) => p.status === 'CERTIFIED')
+    let rollup = null
+    if (certified.length > 0) {
+      const weightedSum = certified.reduce((s, p) => s + (p.score ?? 0) * p.criticality, 0)
+      const totalWeight = certified.reduce((s, p) => s + p.criticality, 0)
+      rollup = {
+        score:             totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null,
+        status:            'CERTIFIED',
+        certified_count:   certified.length,
+        uncertified_count: scores.length - certified.length,
+      }
+    } else if (scores.length > 0) {
+      rollup = { score: null, status: 'UNCERTIFIED', certified_count: 0, uncertified_count: scores.length }
+    }
+
+    return res.json({
+      projects: scores.map((p) => ({
+        group_id:        p.groupId,
+        display_name:    p.displayName,
+        hierarchy_level: p.hierarchyLevel,
+        criticality:     p.criticality,
+        score:           p.score,
+        status:          p.status,
+        breakdown:       p.breakdown,
+        scan_count:      p.scan_count,
+        last_scan_at:    p.last_scan_at,
+      })),
+      rollup,
+    })
   } catch (err) {
     next(err)
   }

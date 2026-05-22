@@ -219,8 +219,16 @@ export default function Knowledge() {
                     <td className="px-4 py-2.5 text-gray-500 dark:text-gray-400 font-mono text-xs">
                       {row.topic}
                     </td>
-                    <td className="px-4 py-2.5 text-blue-400 font-mono text-xs">
-                      {row.key}
+                    <td className="px-4 py-2.5 font-mono text-xs">
+                      <span className="text-blue-400">{row.key}</span>
+                      {row.denial_hint_count > 0 && (
+                        <span
+                          title={`${row.denial_hint_count} project${row.denial_hint_count !== 1 ? 's have' : ' has'} denied this standard`}
+                          className="ml-2 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 cursor-help"
+                        >
+                          ✕{row.denial_hint_count}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <span

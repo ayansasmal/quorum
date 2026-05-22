@@ -1085,3 +1085,55 @@ export async function getConformanceScore(pg, qProjectId, catalogGroupIds = []) 
   return { score, status: 'CERTIFIED', applicable_entries: applicableEntries,
            scan_count: scanCount, last_scan_at: lastScanAt, breakdown }
 }
+
+/**
+ * Compute conformance scores for multiple projects in parallel.
+ * Wraps `getConformanceScore` per project; failed individual lookups degrade
+ * gracefully to UNCERTIFIED rather than aborting the whole portfolio request.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {Array<{
+ *   groupId:         string,
+ *   qProjectId:      string,
+ *   catalogGroupIds: string[],
+ *   criticality?:    number,
+ *   displayName?:    string,
+ *   hierarchyLevel?: string,
+ * }>} projectInfos
+ * @returns {Promise<Array<Record<string, unknown>>>}
+ */
+export async function getPortfolioScores(pg, projectInfos) {
+  if (typeof pg.getPortfolioScores === 'function') return pg.getPortfolioScores(projectInfos)
+
+  const results = await Promise.allSettled(
+    projectInfos.map(async ({ groupId, qProjectId, catalogGroupIds, criticality, displayName, hierarchyLevel }) => {
+      const score = await getConformanceScore(pg, qProjectId, catalogGroupIds ?? [])
+      return {
+        groupId,
+        qProjectId,
+        displayName:    displayName    ?? groupId,
+        hierarchyLevel: hierarchyLevel ?? null,
+        criticality:    criticality    ?? 1,
+        ...score,
+      }
+    }),
+  )
+
+  return results.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value
+    const p = projectInfos[i]
+    return {
+      groupId:        p.groupId,
+      qProjectId:     p.qProjectId,
+      displayName:    p.displayName    ?? p.groupId,
+      hierarchyLevel: p.hierarchyLevel ?? null,
+      criticality:    p.criticality    ?? 1,
+      score:          null,
+      status:         'UNCERTIFIED',
+      applicable_entries: 0,
+      breakdown:      { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
+      scan_count:     0,
+      last_scan_at:   null,
+    }
+  })
+}

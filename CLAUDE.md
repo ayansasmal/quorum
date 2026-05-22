@@ -106,7 +106,21 @@ graph TD
 - Dashboard `src/pages/Pending.jsx`: added overdue deferrals section — uses `useDeviations({ status: 'OVERDUE' })`, shows catalog/topic/key/description/severity/last_seen with link to Deviations page
 - Dashboard nav wired: `/deviations` route (MemberRoute), AlertTriangle icon in Sidebar, "Deviations" in Layout PAGE_TITLES
 
-**Not yet built (v0.4 Waves E-G):** Conformance scoring, portfolio intelligence, documentation
+**v0.4 Wave E+F (complete):** Conformance Scoring + Portfolio Intelligence
+- `GET /api/conformance` (gateway): resolves project → globals → calls `getConformanceScore`; batch query for per-catalog entry counts; returns `{ score, status, breakdown, scan_count, last_scan_at, catalogs: [{ catalog_id, entry_count }] }`; returns UNCERTIFIED when no globals / sparse catalog (<10 ACTIVE entries) / no scans run yet
+- `GET /api/portfolio` (gateway): `PORTFOLIO_ROLES = Set(['principal_architect', 'director', 'vp_engineering', 'group_executive'])` OR `is_admin` gate; queries all `q_projects`; loads configs in parallel with graceful fallback; applies `node_id` filter (config.hierarchy.parent match); calls `getPortfolioScores`; weighted rollup `Σ(score × criticality) / Σ(criticality)` over CERTIFIED only; UNCERTIFIED counted separately; returns `{ projects, rollup: { score, status, certified_count, uncertified_count } | null }`
+- `getConformanceScore(pg, qProjectId, globals)` (gateway + quorum-mcp vendored): SQL scoring via `LATERAL` join on `deviation_actions`; `STATUS_WEIGHT = { OPEN:1.0, OVERDUE:1.0, ACCEPTED:1.0, DEFERRED:0.6, DENIED:0.3, RESOLVED:0.0 }`; UNCERTIFIED when < 10 ACTIVE catalog entries or scan_count=0 or no globals; returns `{ score, status, applicable_entries, scan_count, last_scan_at, breakdown }`
+- `getPortfolioScores(pg, projectInfos)` (gateway + quorum-mcp vendored): `Promise.allSettled` so per-project failures degrade to UNCERTIFIED without aborting portfolio; checks for `pg.getPortfolioScores()` override first (enables test injection)
+- `GET /api/knowledge` denial_hint_count (gateway): batch query when `projectConfig.is_global === true`; groups by `(topic, key)` denial count from `deviation_actions JOIN deviations`; joined in-memory via `Map`; returned as `denial_hint_count` per row (0 if not denied)
+- `conformance()` MCP tool (`quorum-mcp/src/tools/conformance.js`): thin proxy to `GET /api/conformance`; UNCERTIFIED returns contextual message (no scan / no catalogs / sparse coverage); `include_details: true` fetches top 10 OPEN deviations sorted by severity desc
+- `GatewayClient.getConformance()` + `getPortfolio(opts)` (quorum-mcp): `_get` wrapper methods added between deviation methods and config section
+- Dashboard `src/api/conformance.js`: `useConformance()` (staleTime: 60_000) + `usePortfolio(opts)` (staleTime: 120_000, retry: false — 403 is not transient)
+- Dashboard `src/pages/Stats.jsx`: `ConformanceCard` component — score badge (green ≥80, amber 50–80, red <50, grey=UNCERTIFIED), breakdown bar (6 segments), per-catalog list, scan metadata with staleness warning >14 days; `BreakdownBar` helper
+- Dashboard `src/pages/Knowledge.jsx`: `denial_hint_count` badge on key column — red pill showing `✕N` with tooltip "N projects have denied this standard"; only shown when count > 0
+- `quorum-mcp/skill/references/scan.md`: full `quorum:scan` skill orchestration doc — check conformance → git diff → code-review → security-review → deviate()/remember() → resolve fixed → updated conformance → summary; scheduled scanning via `quorum:schedule`
+- Tests: `tests/gateway/dashboard-conformance.test.js` (14 tests — conformance UNCERTIFIED/CERTIFIED/catalogs/404; portfolio 403/admin-bypass/roles/rollup/null-rollup/node_id-filter/UNCERTIFIED-rollup); `quorum-mcp/tests/tools/conformance.test.js` (15 tests — validation, UNCERTIFIED variants, CERTIFIED pass-through, include_details sort+cap, audit pipeline); gateway total: 675 passed; quorum-mcp total: 620 passed
+
+**Not yet built (v0.4 Wave G):** Documentation
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
