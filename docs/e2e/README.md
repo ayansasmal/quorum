@@ -23,8 +23,9 @@ Each journey is its own file. Read the journey before implementing its spec file
 | J13 — Config Management & Governance | S-13 | 16 | 1.7% | [J13](journeys/J13-config-governance.md) |
 | J14 — Dashboard Visual & Interaction | S-14 | 30 | 3.2% | [J14](journeys/J14-dashboard-visual.md) |
 | J15 — Reason / Placeholder Rejection | S-15 | 45 | 4.8% | [J15](journeys/J15-reason-placeholder.md) |
+| J16 — Knowledge History & Point-in-Time Recall | S-16 | 18 | 1.9% | [J16](journeys/J16-knowledge-history.md) |
 
-**Total suite weight: 933.5 | 10% gate: 93.4 | Max single blast radius: 7.7% (S-05.1)**
+**Total suite weight: 951.5 | 10% gate: 95.2 | Max single blast radius: 7.6% (S-05.1)**
 
 ---
 
@@ -72,3 +73,6 @@ node tests/e2e/helpers/teardown.js
 | `reflect()` extraction quality | Non-deterministic LLM — quality requires human review | MT-02 |
 | `quorum:scan` skill orchestration | Claude skill prompt, not testable code | MT-03 |
 | Visual graph layout quality | Node presence asserted; layout clarity requires human judgment | MT-04 |
+| `export()` MCP tool — markdown/confluence output | No gateway HTTP route; tool queries PostgreSQL + Graphiti directly in MCP process; requires MCP client (stdio) test | MT-05 |
+| `set_agent_context` gate behaviour | Module-level state in MCP process — write blocked until context set; no HTTP equivalent | MT-06 |
+| `history()` MCP Graphiti SUPERSEDES edge enrichment | HTTP route (`/pg/versions/:t/:k/history`) returns PostgreSQL data only; MCP tool additionally merges Graphiti SUPERSEDES edges via `getEvolutionChain()` — requires MCP client test | MT-07 |

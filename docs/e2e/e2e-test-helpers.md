@@ -333,6 +333,7 @@ export const DOMAINS = {
   'S-13':   'config-governance-test',
   'S-14':   'dashboard-visual-test',
   'S-15':   'reason-placeholder-test',
+  'S-16':   'knowledge-history-test',
 }
 ```
 
@@ -372,6 +373,7 @@ Which helpers each scenario needs at a glance.
 | S-13 | ✓ | ✓ (pa) | — | — |
 | S-14 | ✓ | ✓ | `activeEntry` × 3 | — |
 | S-15 | ✓ | ✓ | `activeEntry` + `draftEntry` + `conflict` + `deviation` | — (via seed.conflict) |
+| S-16 | ✓ | ✓ (pa) | — | — |
 
 > `graphitiSettle` is called **directly** only in S-01 and S-02.1.
 > S-02.2, S-06, and S-15 use `seed.conflict()` which calls it internally.

@@ -57,6 +57,14 @@ Fresh project state. No existing knowledge for `db:connection-pooling`.
 5. `GET /pg/versions/db/migration-strategy`
    - Assert: content matches exactly — confirms round-trip fidelity
 
+6. `GET /pg/search?q=connection+pooling` as `test-engineer`
+   - Assert: `200`, `results` array is non-empty
+   - Assert: at least one result has `topic: "db"`, `key: "connection-pooling"`
+   - Assert: result has `source: "project"` (project-local entry — not from a global catalog)
+   - Assert: result has `catalog_id: null` (no global source)
+   - (Note: `GET /pg/search` is the PostgreSQL ILIKE fallback — synchronous, no graphitiSettle needed.
+     Cross-catalog search annotated `source: "global"` is covered in S-01.)
+
 ### Pass Criteria
 - [ ] Engineer write → `ACTIVE` with correct version number
 - [ ] Author + base_confidence present in response
@@ -66,6 +74,7 @@ Fresh project state. No existing knowledge for `db:connection-pooling`.
 - [ ] Confidence bar visible and correct
 - [ ] Round-trip content fidelity (write then read returns identical content)
 - [ ] No existing entry required — write to a fresh key always succeeds
+- [ ] PostgreSQL ILIKE search finds the written entry with `source: "project"`, `catalog_id: null`
 
 ---
 

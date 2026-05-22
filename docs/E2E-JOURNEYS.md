@@ -26,3 +26,4 @@
 | J13 — Config Management & Governance | S-13 | 1.7% | [J13](e2e/journeys/J13-config-governance.md) |
 | J14 — Dashboard Visual & Interaction | S-14 | 3.2% | [J14](e2e/journeys/J14-dashboard-visual.md) |
 | J15 — Reason / Placeholder Rejection | S-15 | 4.8% | [J15](e2e/journeys/J15-reason-placeholder.md) |
+| J16 — Knowledge History & Point-in-Time Recall | S-16 | 1.9% | [J16](e2e/journeys/J16-knowledge-history.md) |
