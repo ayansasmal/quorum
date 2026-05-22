@@ -31,7 +31,7 @@ const AGE_DECAY          = parseFloat(process.env.QUORUM_AGE_DECAY          ?? '
 const AUTHORITY_THRESHOLD = parseFloat(process.env.QUORUM_AUTHORITY_THRESHOLD ?? '0.20')
 
 /** Default role scores — overridable per project via governance.authority.role_scores */
-const DEFAULT_ROLE_SCORES = {
+export const DEFAULT_ROLE_SCORES = {
   // Engineering roles
   engineer:             0.50,
   senior_engineer:      0.70,

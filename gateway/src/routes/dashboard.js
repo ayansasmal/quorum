@@ -28,11 +28,22 @@ import {
   updateConfidence,
   getNextVersionNumber,
   insertVersion,
+  getKeyId,
+  upsertDeviation,
+  batchUpsertDeviations,
+  getDeviationsByProject,
+  insertDeviationAction,
 } from '../shared/graph/queries.js'
+import { DEFAULT_ROLE_SCORES } from '../shared/governance/authority.js'
 import { searchNodes, searchFacts } from '../shared/graph/client.js'
 import { writeAuditEntry } from '../shared/audit/secondary.js'
 import { loadProjectConfig } from '../config-cache.js'
-import { enforceNoSelfApproval, enforceReasonRequired } from '../shared/governance/constitutional.js'
+import {
+  enforceNoSelfApproval,
+  enforceReasonRequired,
+  enforceDeviationActionAuthority,
+  enforceValidDeferDeadline,
+} from '../shared/governance/constitutional.js'
 import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
 import { createHash } from 'node:crypto'
 
@@ -1584,5 +1595,322 @@ function isScopeVisible(scope, requestingParents) {
   if (!match) return true  // unknown scope format — default to visible
   return requestingParents.has(match[1])
 }
+
+// ── Minimum severity for PA-authored catalog entries (cold-start floor) ────────
+const PA_AUTHORED_FLOOR = 0.70
+
+// ── Deviation routes ───────────────────────────────────────────────────────────
+
+/**
+ * POST /api/deviations
+ * Record a single deviation from a linked global catalog entry.
+ * All business logic (catalog validation, severity derivation, upsert) runs here.
+ *
+ * Returns:
+ *   200 { status: 'not_linked', catalog_id, message }
+ *   200 { status: 'not_found', catalog_id, topic, key, message }
+ *   200 { status: 'recorded', deviation_id, catalog_id, topic, key, severity, is_new, message }
+ *   400 on missing required fields
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.post('/deviations', async (req, res, next) => {
+  try {
+    const pool = req.app.locals.pool
+    const { catalog_id, topic, key, description, evidence, source = 'agent', author = 'unknown' } = req.body ?? {}
+
+    if (!catalog_id || !topic || !key || !description) {
+      return res.status(400).json({ error: 'catalog_id, topic, key, and description are required' })
+    }
+
+    // ── 1. Verify catalog is in this project's linked globals list ────────────
+    const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    const globals = projectConfig?.globals ?? []
+
+    if (!globals.includes(catalog_id)) {
+      return res.json({
+        status:     'not_linked',
+        catalog_id,
+        message:    `Catalog '${catalog_id}' is not in this project's globals list. ` +
+                    `Add it to your .quorum file before recording deviations against it.`,
+      })
+    }
+
+    // ── 2. Resolve internal IDs for the global catalog entry ─────────────────
+    const catalogQProjectId = await getProjectByGroupId(pool, catalog_id)
+    if (!catalogQProjectId) {
+      return res.json({
+        status:     'not_found',
+        catalog_id,
+        topic,
+        key,
+        message:    `Global catalog '${catalog_id}' is not registered in this Quorum instance.`,
+      })
+    }
+
+    const catalogQKeyId = await getKeyId(pool, catalogQProjectId, topic, key)
+    if (!catalogQKeyId) {
+      return res.json({
+        status:     'not_found',
+        catalog_id,
+        topic,
+        key,
+        message:    `Entry '${topic}:${key}' does not exist in catalog '${catalog_id}'.`,
+      })
+    }
+
+    const globalEntry = await getCurrentVersion(pool, catalogQKeyId)
+    if (!globalEntry) {
+      return res.json({
+        status:     'not_found',
+        catalog_id,
+        topic,
+        key,
+        message:    `Entry '${topic}:${key}' has no ACTIVE version in catalog '${catalog_id}'.`,
+      })
+    }
+
+    // ── 3. Derive severity server-side ────────────────────────────────────────
+    // severity = confidence × authority_score(author_role)
+    // PA_AUTHORED_FLOOR prevents meaningless severity on cold-start global entries.
+    const confidence    = globalEntry.confidence ?? 0.5
+    const authorRole    = globalEntry.author_role ?? 'engineer'
+    const authorityScore = DEFAULT_ROLE_SCORES[authorRole] ?? DEFAULT_ROLE_SCORES.engineer
+    let severity = parseFloat((confidence * authorityScore).toFixed(3))
+    if (authorRole === 'principal_architect' && severity < PA_AUTHORED_FLOOR) {
+      severity = PA_AUTHORED_FLOOR
+    }
+
+    // ── 4. Resolve the calling project's q_project_id ────────────────────────
+    const projectQProjectId = await getProjectByGroupId(pool, req.user.project)
+    if (!projectQProjectId) {
+      return res.status(400).json({ error: `Project '${req.user.project}' is not registered in this Quorum instance` })
+    }
+
+    // ── 5. Upsert the deviation record ────────────────────────────────────────
+    const { deviation_id, is_new } = await upsertDeviation(pool, {
+      qProjectId:  projectQProjectId,
+      catalogId:   catalog_id,
+      topic,
+      key,
+      description,
+      evidence:    evidence ?? null,
+      severity,
+      source,
+      entityType:  globalEntry.entity_type ?? null,
+      createdBy:   author,
+    })
+
+    return res.json({
+      status:      'recorded',
+      deviation_id,
+      catalog_id,
+      topic,
+      key,
+      severity,
+      is_new,
+      message:     is_new
+        ? `Deviation recorded (severity ${severity.toFixed(3)}).`
+        : `Deviation updated — last_seen_at refreshed (severity ${severity.toFixed(3)}).`,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * POST /api/deviations/batch
+ * Batch upsert of deviations — used by quorum:scan after a full file scan.
+ * Each record is validated and processed identically to POST /api/deviations.
+ * Partial success is allowed — failed records are included in the response.
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.post('/deviations/batch', async (req, res, next) => {
+  try {
+    const pool = req.app.locals.pool
+    const { deviations } = req.body ?? {}
+
+    if (!Array.isArray(deviations) || deviations.length === 0) {
+      return res.status(400).json({ error: 'deviations array is required and must not be empty' })
+    }
+    if (deviations.length > 100) {
+      return res.status(400).json({ error: 'batch size limit is 100 deviations per request' })
+    }
+
+    const projectConfig   = await loadProjectConfig(req.user.project).catch(() => null)
+    const globals         = projectConfig?.globals ?? []
+    const projectQProjId  = await getProjectByGroupId(pool, req.user.project)
+    if (!projectQProjId) {
+      return res.status(400).json({ error: `Project '${req.user.project}' is not registered in this Quorum instance` })
+    }
+
+    const results = await Promise.allSettled(deviations.map(async (d) => {
+      const { catalog_id, topic, key, description, evidence, source = 'agent', author = 'unknown' } = d
+      if (!catalog_id || !topic || !key || !description) {
+        throw new Error('catalog_id, topic, key, and description are required')
+      }
+      if (!globals.includes(catalog_id)) {
+        return { status: 'not_linked', catalog_id, topic, key }
+      }
+      const catalogQProjId = await getProjectByGroupId(pool, catalog_id)
+      if (!catalogQProjId) return { status: 'not_found', catalog_id, topic, key }
+      const catalogQKeyId  = await getKeyId(pool, catalogQProjId, topic, key)
+      if (!catalogQKeyId)  return { status: 'not_found', catalog_id, topic, key }
+      const globalEntry    = await getCurrentVersion(pool, catalogQKeyId)
+      if (!globalEntry)    return { status: 'not_found', catalog_id, topic, key }
+
+      const confidence     = globalEntry.confidence ?? 0.5
+      const authorRole     = globalEntry.author_role ?? 'engineer'
+      const authorityScore = DEFAULT_ROLE_SCORES[authorRole] ?? DEFAULT_ROLE_SCORES.engineer
+      let severity = parseFloat((confidence * authorityScore).toFixed(3))
+      if (authorRole === 'principal_architect' && severity < PA_AUTHORED_FLOOR) severity = PA_AUTHORED_FLOOR
+
+      const { deviation_id, is_new } = await upsertDeviation(pool, {
+        qProjectId: projectQProjId,
+        catalogId:  catalog_id,
+        topic,
+        key,
+        description,
+        evidence:   evidence ?? null,
+        severity,
+        source,
+        entityType: globalEntry.entity_type ?? null,
+        createdBy:  author,
+      })
+      return { status: 'recorded', deviation_id, catalog_id, topic, key, severity, is_new }
+    }))
+
+    const processed = results.map((r, i) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : { status: 'error', catalog_id: deviations[i]?.catalog_id, topic: deviations[i]?.topic,
+            key: deviations[i]?.key, error: r.reason?.message ?? 'Unknown error' }
+    )
+    const recorded  = processed.filter((r) => r.status === 'recorded').length
+    const failed    = processed.filter((r) => r.status === 'error').length
+
+    return res.json({ recorded, failed, results: processed })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * GET /api/deviations
+ * List deviations for the current project with computed status.
+ * Supports filters: status, catalog_id, topic, severity_min, source, limit, offset.
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.get('/deviations', async (req, res, next) => {
+  try {
+    const pool = req.app.locals.pool
+    const qProjectId = await getProjectByGroupId(pool, req.user.project)
+    if (!qProjectId) {
+      return res.status(400).json({ error: `Project '${req.user.project}' is not registered in this Quorum instance` })
+    }
+
+    const filters = {
+      status:      req.query.status,
+      catalogId:   req.query.catalog_id,
+      topic:       req.query.topic,
+      severityMin: req.query.severity_min !== undefined ? parseFloat(req.query.severity_min) : undefined,
+      source:      req.query.source,
+      limit:       req.query.limit  !== undefined ? parseInt(req.query.limit,  10) : 50,
+      offset:      req.query.offset !== undefined ? parseInt(req.query.offset, 10) : 0,
+    }
+
+    const deviations = await getDeviationsByProject(pool, qProjectId, filters)
+    return res.json({ deviations, total: deviations.length })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * POST /api/deviations/:id/action
+ * PE/Architect actions a deviation: accept, deny, or defer.
+ * Constitutional checks: role gate (architect+), reason ≥10 chars, valid defer days.
+ *
+ * Body: { action_type: 'accept'|'deny'|'defer', reason: string, defer_until?: string }
+ *
+ * @param {import('express').Request}  req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.post('/deviations/:id/action', async (req, res, next) => {
+  try {
+    const pool = req.app.locals.pool
+    const deviationId = req.params.id
+    const { action_type, reason, defer_until } = req.body ?? {}
+    const actorRole = req.user.role
+
+    // ── Constitutional enforcement ────────────────────────────────────────────
+    enforceDeviationActionAuthority(actorRole, action_type)
+    enforceReasonRequired(reason)
+
+    if (action_type === 'defer') {
+      if (!defer_until) {
+        return res.status(400).json({ error: 'defer_until is required for defer action' })
+      }
+      enforceValidDeferDeadline(defer_until)
+    }
+
+    // Verify the deviation exists and belongs to this project
+    const { rows: devRows } = await pool.query(
+      `SELECT d.deviation_id, d.q_project_id, qp.group_id
+       FROM deviations d
+       JOIN q_projects qp ON d.q_project_id = qp.q_project_id
+       WHERE d.deviation_id = $1`,
+      [deviationId],
+    )
+    if (devRows.length === 0) {
+      return res.status(404).json({ error: `Deviation '${deviationId}' not found` })
+    }
+    if (devRows[0].group_id !== req.user.project) {
+      return res.status(403).json({ error: 'Cannot action a deviation belonging to a different project' })
+    }
+
+    const actionId = await insertDeviationAction(pool, {
+      deviationId,
+      actionType: action_type,
+      actor:      req.user.sub,
+      actorRole,
+      reason,
+      deferUntil: defer_until ?? null,
+    })
+
+    // Contextual note when denying a high-confidence PA-authored standard
+    let denialHint
+    if (action_type === 'deny') {
+      const { rows: entryRows } = await pool.query(
+        `SELECT kv.confidence, kv.author_role
+         FROM deviations d
+         JOIN q_projects cp    ON d.catalog_id = cp.group_id
+         JOIN q_keys qk        ON qk.q_project_id = cp.q_project_id
+                               AND qk.topic = d.topic AND qk.key = d.key
+         JOIN knowledge_versions kv ON kv.q_key_id = qk.q_key_id AND kv.status = 'ACTIVE'
+         WHERE d.deviation_id = $1`,
+        [deviationId],
+      )
+      const entry = entryRows[0]
+      if (entry?.author_role === 'principal_architect' && entry?.confidence > 0.85) {
+        denialHint = 'This global standard was authored by a principal_architect with high confidence. ' +
+                     'Consider adding a project-level knowledge entry to document your reasoning for this exception.'
+      }
+    }
+
+    return res.json({ action_id: actionId, deviation_id: deviationId, action_type, ...(denialHint ? { hint: denialHint } : {}) })
+  } catch (err) {
+    next(err)
+  }
+})
 
 export default router
