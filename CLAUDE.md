@@ -92,7 +92,21 @@ graph TD
 - `GET /api/globals` (gateway): discovers `is_global = TRUE` projects from PostgreSQL; enriches with S3/Redis config metadata (`global_scope`, `display_name`, `entry_count`, `globals[]`); filters by `global_scope` — org-scoped visible to all, division/department-scoped filtered by hierarchy ancestry
 - `POST /sync/configs` (gateway): self-reference check (`globals` cannot include own `group_id`); cross-catalog `is_global` validation after full batch sync; `globals_warnings[]` in response for non-global catalog references
 
-**Not yet built (v0.4 Waves C-G):** Deviation write path, PE governance, conformance scoring, portfolio intelligence, documentation
+**v0.4 Wave C+D (complete):** Deviation Write Path + PE Governance
+- `POST /api/deviations` (gateway): validates catalog link (`globals` in project config), resolves catalog entry via `getKeyId`/`getCurrentVersion`, derives `severity = confidence × DEFAULT_ROLE_SCORES[author_role]` with `PA_AUTHORED_FLOOR = 0.70` for low-confidence PA entries, upserts on `(q_project_id, catalog_id, topic, key)` — idempotent (`last_seen_at` updated on re-scan, not new row)
+- `POST /api/deviations/batch` (gateway): up to 100 records; `Promise.allSettled` for partial success; returns `{ recorded, failed, results }`
+- `GET /api/deviations` (gateway): returns deviations with computed status (OPEN/ACCEPTED/DENIED/DEFERRED/OVERDUE/RESOLVED via LATERAL join on `deviation_actions`) — filters: `status`, `catalog_id`, `topic`, `severity_min`, `source`, `limit`, `offset`
+- `POST /api/deviations/:id/action` (gateway): `enforceDeviationActionAuthority` + `enforceReasonRequired` + `enforceValidDeferDeadline` (defer only); denial hint returned when global entry `confidence > 0.85` + `author_role = 'principal_architect'` (non-blocking note)
+- `DEFAULT_ROLE_SCORES` in `gateway/src/shared/governance/authority.js` is now `export const` (required for severity derivation import)
+- `tests/gateway/dashboard-deviations.test.js`: 27 tests covering validation, catalog link checking, severity formula (4 cases: standard, PA floor, missing confidence, unknown role), upsert idempotency, batch partial success, GET filters, action constitutional enforcement, denial hint
+- `deviate()` MCP tool (`quorum-mcp/src/tools/deviate.js`): thin proxy to `POST /api/deviations` via `pg.recordDeviation()` — no business logic in MCP layer
+- `pending()` MCP tool updated: response now includes `deviations: { open, overdue_deferrals }` + `summary.open_deviations` + `summary.overdue_deferrals`; graceful fallback if gateway lacks `getDeviations` method
+- Dashboard `src/api/deviations.js`: `useDeviations(filters)` + `useDeviationAction()` TanStack Query hooks
+- Dashboard `src/pages/Deviations.jsx`: deviation table with filter rail (status/topic/source/severity_min), inline action panel per OPEN/OVERDUE row (accept/deny/defer with 30/45/60/90d), reason textarea with <10 char red-border validation, denial hint surfaced inline
+- Dashboard `src/pages/Pending.jsx`: added overdue deferrals section — uses `useDeviations({ status: 'OVERDUE' })`, shows catalog/topic/key/description/severity/last_seen with link to Deviations page
+- Dashboard nav wired: `/deviations` route (MemberRoute), AlertTriangle icon in Sidebar, "Deviations" in Layout PAGE_TITLES
+
+**Not yet built (v0.4 Waves E-G):** Conformance scoring, portfolio intelligence, documentation
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
 
 > [ROADMAP.md](docs/ROADMAP.md)
