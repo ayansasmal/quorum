@@ -120,8 +120,16 @@ graph TD
 - `quorum-mcp/skill/references/scan.md`: full `quorum:scan` skill orchestration doc — check conformance → git diff → code-review → security-review → deviate()/remember() → resolve fixed → updated conformance → summary; scheduled scanning via `quorum:schedule`
 - Tests: `tests/gateway/dashboard-conformance.test.js` (14 tests — conformance UNCERTIFIED/CERTIFIED/catalogs/404; portfolio 403/admin-bypass/roles/rollup/null-rollup/node_id-filter/UNCERTIFIED-rollup); `quorum-mcp/tests/tools/conformance.test.js` (15 tests — validation, UNCERTIFIED variants, CERTIFIED pass-through, include_details sort+cap, audit pipeline); gateway total: 675 passed; quorum-mcp total: 620 passed
 
-**Not yet built (v0.4 Wave G):** Documentation
-**Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop)
+**v0.4 Wave G (complete):** Documentation
+- `gateway/openapi.yaml`: bumped to 0.4.0; added schemas (Deviation, ConformanceScore, PortfolioProject, PortfolioRollup); added paths for /api/globals, /api/deviations, /api/deviations/batch, /api/deviations/{id}/action, /api/conformance, /api/portfolio with tags (Federation, Deviations, Conformance, Portfolio)
+- `docs/ARCHITECTURE.md`: v0.4 section — global catalogs and federation, organisational hierarchy, deviation data model (LATERAL join pattern for computed status), conformance scoring formula with status weights, self-evolution loop
+- `docs/ROADMAP.md`: complete v0.4 wave-by-wave record (Waves A–G) all marked ✅ with success criteria (675 gateway + 620 quorum-mcp tests)
+- `docs/FRONTEND.md`: Deviations page (action panel, denial hint, UNCERTIFIED banner), ConformanceCard in Stats (score badge, breakdown bar, scan metadata), overdue deferrals in Pending, denial_hint_count badge in Knowledge, v0.4 BFF routes, updated project structure
+- `docs/ONBOARDING.md`: v0.4 config fields table (hierarchy, is_global, global_scope, is_public, globals), Step 5 — global catalog linking with hierarchy config, quorum:scan conformance guidance
+- `quorum-mcp/skill/SKILL.md`: Conformance Scanning section (deviate(), conformance(), quorum:scan orchestration, pending() deviation handling), updated quick reference, references/scan.md added
+- `quorum-mcp/README.md`: tool count 12→14, test count 559→620, 14-tool table, v0.4 governance rules
+
+**Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)
 
