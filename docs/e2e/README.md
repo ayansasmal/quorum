@@ -32,6 +32,10 @@ Each journey is its own file. Read the journey before implementing its spec file
 
 See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full weight model, binary tree, frequency tiers, violation analysis, and CI execution strategy.
 
+## Test Helpers
+
+See [e2e-test-helpers.md](e2e-test-helpers.md) for helper API reference, non-conflicting data strategy, and the per-scenario helper usage table.
+
 ---
 
 ## Running Tests
