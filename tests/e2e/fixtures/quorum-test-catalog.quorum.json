@@ -1,0 +1,27 @@
+{
+  "group_id": "quorum-test-catalog",
+  "project": "Quorum E2E Test Global Catalog",
+  "owner": "test-pe",
+  "is_global": true,
+  "global_scope": "org",
+  "globals": [],
+  "domains": {
+    "security": {},
+    "auth": {},
+    "reliability": {}
+  },
+  "members": [
+    {
+      "github_username": "test-pe",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
+      "github_username": "test-architect",
+      "role": "architect",
+      "base_confidence": 0.80,
+      "team": "platform"
+    }
+  ]
+}

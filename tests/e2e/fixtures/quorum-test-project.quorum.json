@@ -1,0 +1,70 @@
+{
+  "group_id": "quorum-test-project",
+  "project": "Quorum E2E Test Project",
+  "owner": "test-pe",
+  "is_global": false,
+  "globals": ["quorum-test-catalog"],
+  "hierarchy": {
+    "level": "service",
+    "parent": null,
+    "display_name": "E2E Test Service",
+    "criticality": 3
+  },
+  "domains": {
+    "auth": {},
+    "db": {},
+    "infra": {},
+    "testing": {},
+    "security": {}
+  },
+  "members": [
+    {
+      "github_username": "test-pe",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
+      "github_username": "test-architect",
+      "role": "architect",
+      "base_confidence": 0.80,
+      "team": "platform"
+    },
+    {
+      "github_username": "test-engineer",
+      "role": "engineer",
+      "base_confidence": 0.70,
+      "team": "backend"
+    },
+    {
+      "github_username": "test-senior",
+      "role": "senior_engineer",
+      "base_confidence": 0.75,
+      "team": "backend"
+    },
+    {
+      "github_username": "test-director",
+      "role": "director",
+      "base_confidence": 0.75,
+      "team": "leadership"
+    },
+    {
+      "github_username": "test-vp",
+      "role": "vp_engineering",
+      "base_confidence": 0.75,
+      "team": "leadership"
+    },
+    {
+      "github_username": "test-product",
+      "role": "product_owner",
+      "base_confidence": 0.85,
+      "team": "product"
+    },
+    {
+      "github_username": "test-compliance",
+      "role": "compliance_officer",
+      "base_confidence": 0.90,
+      "team": "compliance"
+    }
+  ]
+}
