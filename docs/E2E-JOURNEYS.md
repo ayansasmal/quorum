@@ -3,7 +3,7 @@
 > Each journey has been moved to its own file for easier reading and focused implementation.
 >
 > **→ See [docs/e2e/README.md](e2e/README.md) for the full journey index.**
-> **→ See [docs/E2E-TEST-PLAN.md](E2E-TEST-PLAN.md) for the risk-weighted test plan.**
+> **→ See [docs/RISK_WEIGHTED_TEST_PLAN.md](RISK_WEIGHTED_TEST_PLAN.md) for the risk-weighted test plan (binary tree, gate rules, derivation table).**
 
 ---
 

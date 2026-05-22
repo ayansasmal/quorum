@@ -30,7 +30,7 @@ Each journey is its own file. Read the journey before implementing its spec file
 
 ## Risk & Weight Model
 
-See [E2E-TEST-PLAN.md](../E2E-TEST-PLAN.md) for the full weight model, frequency tiers, violation analysis, and CI execution strategy.
+See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full weight model, binary tree, frequency tiers, violation analysis, and CI execution strategy.
 
 ---
 
