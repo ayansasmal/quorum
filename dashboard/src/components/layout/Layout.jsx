@@ -6,7 +6,8 @@ import SessionWarningBanner from '../session/SessionWarningBanner.jsx'
 const PAGE_TITLES = {
   '/':          'Stats',
   '/graph':     'Knowledge Graph',
-  '/pending':   'Pending Decisions',
+  '/pending':    'Pending Decisions',
+  '/deviations': 'Deviations',
   '/knowledge': 'Knowledge Browser',
   '/audit':     'Audit Timeline',
   '/config':    'Config Editor',

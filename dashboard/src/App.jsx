@@ -18,6 +18,7 @@ import Audit           from './pages/Audit.jsx'
 import Config          from './pages/Config.jsx'
 import Status          from './pages/Status.jsx'
 import Admin           from './pages/Admin.jsx'
+import Deviations     from './pages/Deviations.jsx'
 
 /**
  * Registers the current JWT with the API client and sets up:
@@ -128,10 +129,11 @@ export default function App() {
                 <Route path="/graph"     element={<Graph />} />
                 <Route path="/knowledge" element={<Knowledge />} />
                 <Route element={<MemberRoute />}>
-                  <Route path="/pending" element={<Pending />} />
-                  <Route path="/audit"   element={<Audit />} />
-                  <Route path="/config"  element={<Config />} />
-                  <Route path="/status"  element={<Status />} />
+                  <Route path="/pending"    element={<Pending />} />
+                  <Route path="/deviations" element={<Deviations />} />
+                  <Route path="/audit"      element={<Audit />} />
+                  <Route path="/config"     element={<Config />} />
+                  <Route path="/status"     element={<Status />} />
                 </Route>
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<Admin />} />
