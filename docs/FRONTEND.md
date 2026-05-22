@@ -246,6 +246,13 @@ The reviewer workflow. Replaces "asking Claude for `pending()`" with an actionab
 - Table: domain, key, requestor, reason, current version, stale_warning badge (amber)
 - PE-only Approve/Reject buttons; approval runs the full ACTIVE→DEPRECATED transition atomically
 
+*Overdue deferrals (v0.4):*
+- Deviations that were `DEFERRED` with a `defer_until` date that has now passed
+- Surfaced via `GET /api/deviations?status=OVERDUE` — separate section at the bottom of Pending
+- Table: catalog/topic/key, description, severity bar, `last_seen_at`, link to Deviations page
+- No inline action — PE clicks through to the Deviations page to re-action the deviation
+- Urgency badge: "N overdue" count appears on the Pending nav item when any exist
+
 **Actions per conflict decision:**
 - **Approve** → `POST /api/review/:id { action: "approve", note: "..." }` — note required
 - **Reject** → `POST /api/review/:id { action: "reject", note: "..." }` — note required
@@ -279,6 +286,11 @@ Paginated knowledge browser. For engineers who want to read what Quorum knows.
 - Calls `GET /api/search?q=<query>&domain=<domain>` → proxies to Graphiti semantic search
 - Results ranked by relevance, shown with confidence and domain
 - Works across all entity types simultaneously
+
+**Global catalog entries (v0.4):**
+- Entries sourced from linked global catalogs are annotated with a `source: 'global'` badge and a `catalog_id` chip showing which catalog they came from
+- For global entries with `denial_hint_count > 0`: a secondary badge "N projects have denied this standard" is shown inline, helping PAs identify global standards that may need revision. The count is a derived aggregate from `deviation_actions WHERE action_type = 'deny'` grouped by `(catalog_id, topic, key)`. Tooltip shows the denial count per project (anonymised by default; configurable via platform `deny_reasons_visible: true`)
+- Project-local entries show no source badge (they are always project-scoped)
 
 ---
 
@@ -358,7 +370,62 @@ Response: { confidence: new_confidence, clock_reset: true, next_bump_allowed: IS
 
 ---
 
-### 6. Config Editor
+### 6. Deviations (v0.4)
+
+The PE governance page for deviation records — findings where a project's implementation
+diverges from an entry in a linked global catalog.
+
+**What it shows:**
+
+- Table: deviation description, referenced global catalog entry (linked to Knowledge page), severity bar (0–1 scale, colour-coded), source badge (`agent` / `code-review` / `security-review`), `first_seen_at`, `last_seen_at`, status badge, last action taken
+- Filter rail: status (OPEN / ACCEPTED / DENIED / DEFERRED / OVERDUE), topic, severity range slider, source
+- **UNCERTIFIED banner** — shown when linked catalogs have < 10 ACTIVE entries; informs the team that conformance scoring is not yet active
+
+**Action panel (inline, OPEN and OVERDUE rows — architect+ only):**
+
+```
+[Accept]  [Deny]  [Defer: 30d | 45d | 60d | 90d]
+
+Reason: ________________________________
+        Required. Red border + disabled submit when < 10 chars.
+```
+
+- **Accept** — `POST /api/deviations/:id/action { action_type: "accept", reason }` — acknowledges owned technical debt; still scores against the project (weight 1.0)
+- **Deny** — same route with `action_type: "deny"` — PE formally disputes this global standard applies here; score weight drops to 0.3. If the referenced entry has `confidence > 0.85` and was authored by a `principal_architect`, a contextual hint appears inline: *"This standard was authored by a principal_architect with high confidence. Consider documenting your project's reasoning."* (non-blocking note)
+- **Defer (30d / 45d / 60d / 90d)** — same route with `action_type: "defer"` and `defer_until` — score weight drops to 0.6 during deferral; reverts to 1.0 (OVERDUE) when `defer_until` passes
+
+**Constitutional enforcement at UI level:**
+- Action buttons are PE-only (non-PE users see read-only status, not action buttons)
+- Reason field blocks submit until ≥ 10 chars (matches server-side `enforceReasonRequired`)
+- Deny on a high-confidence PA entry shows the contextual hint — does not block the action
+
+---
+
+### 7. Conformance Card (Stats — v0.4)
+
+The Stats page adds a **ConformanceCard** component alongside the existing domain charts and decay panels.
+
+**What it shows:**
+
+- **Score badge** — `0–100%` score (green >80, amber 50–80, red <50) or `UNCERTIFIED` (grey)
+- **Breakdown bar** — proportional strip showing OPEN / ACCEPTED / DENIED / DEFERRED / RESOLVED deviation counts
+- **Last scan** — ISO timestamp of the most recent conformance scan with a staleness warning badge if > 14 days
+- **Scan count** — total number of scans run (helps interpret score stability)
+- **Catalog list** — each linked global catalog with its `entry_count` (shows which catalogs are thin — potential UNCERTIFIED contributors)
+
+**UNCERTIFIED message variants:**
+
+| Reason | Message shown |
+|--------|---------------|
+| `scan_count = 0` | "No conformance scan has been run yet. Ask Claude to run `quorum:scan`." |
+| No linked catalogs | "No global catalogs linked. Add `globals: [...]` to your `.quorum` config." |
+| < 10 applicable entries | "Global catalog coverage is too sparse to score ({N} applicable entries). Add more entries to the linked catalogs." |
+
+**Why score stability matters:** a project scanned once with 3 findings shows 97%. A project scanned 20 times with the same 3 findings is genuinely 97%. The scan count helps readers distinguish cold-start scores from mature ones.
+
+---
+
+### 8. Config Editor
 
 Replaces "write JSON, upload to S3 manually, wait for poll cycle, hope it worked."
 
@@ -552,6 +619,24 @@ Response:
 }
 ```
 
+### v0.4 Routes
+
+The following routes were added in v0.4 (federation, deviations, conformance, portfolio):
+
+**`GET /api/globals`** — Lists all global catalogs visible to the requesting project, filtered by `global_scope`. Used during project onboarding to present catalog choices.
+
+**`POST /api/deviations`** — Record a single deviation against a global catalog entry. Validates the `catalog_id` is in the project's `globals` list, derives severity server-side, upserts on `(project_id, catalog_id, topic, key)`.
+
+**`POST /api/deviations/batch`** — Record up to 100 deviations in one call (scan output). `Promise.allSettled` — partial success allowed.
+
+**`GET /api/deviations?status=&catalog_id=&topic=&severity_min=&source=&limit=&offset=`** — Returns deviations with computed status (OPEN / ACCEPTED / DENIED / DEFERRED / OVERDUE / RESOLVED) via LATERAL join on `deviation_actions`. No stored status column.
+
+**`POST /api/deviations/:id/action`** — Accept / deny / defer a deviation. Requires `architect+` role (`enforceDeviationActionAuthority`), `reason ≥ 10 chars` (`enforceReasonRequired`), and exactly 30/45/60/90-day defer deadlines (`enforceValidDeferDeadline`).
+
+**`GET /api/conformance`** — Returns project conformance score (0–100) or `UNCERTIFIED` with catalogs breakdown and UNCERTIFIED reason. Scoring formula: `score = (1 - weighted_deviation_ratio) × 100`.
+
+**`GET /api/portfolio?node_id=`** — Executive view: all accessible projects with conformance scores and weighted rollup. Role-gated: `is_admin OR principal_architect OR director OR vp_engineering OR group_executive`.
+
 ---
 
 ## docker-compose Additions
@@ -632,6 +717,7 @@ dashboard/
     │   ├── bump.js              ← POST /bump/:topic/:key
     │   ├── search.js
     │   ├── config.js
+    │   ├── deviations.js        ← useDeviations(filters) + useDeviationAction() (v0.4)
     │   └── health.js
     │
     ├── components/
@@ -668,7 +754,14 @@ dashboard/
     │   │   ├── DomainChart.jsx
     │   │   ├── ConfidenceHistogram.jsx
     │   │   ├── DecayingKnowledge.jsx    ← bump panel — sortable by confidence
-    │   │   └── BumpButton.jsx           ← role-aware, cooldown-enforced
+    │   │   ├── BumpButton.jsx           ← role-aware, cooldown-enforced
+    │   │   └── ConformanceCard.jsx      ← score badge, breakdown bar, scan meta (v0.4)
+    │   │
+    │   ├── deviations/                  ← v0.4
+    │   │   ├── DeviationTable.jsx       ← sortable table with filter rail
+    │   │   ├── DeviationRow.jsx         ← inline action panel for OPEN/OVERDUE rows
+    │   │   ├── DeviationActionForm.jsx  ← reason textarea + accept/deny/defer buttons
+    │   │   └── DenialHint.jsx           ← contextual note for high-confidence PA entries
     │   │
     │   ├── config/
     │   │   ├── ConfigEditor.jsx
@@ -691,6 +784,7 @@ dashboard/
         ├── Audit.jsx
         ├── Stats.jsx
         ├── Config.jsx
+        ├── Deviations.jsx           ← v0.4 — deviation table + action panel
         └── Status.jsx
 ```
 
@@ -719,9 +813,18 @@ The `Knowledge.jsx` page exposes a "+ Add entry" button (PE only) and a `⋯` ro
 | Audit system | ████████████░░ | █████████████░ | Audit timeline + chain status visible |
 | Confidence / decay | ██████░░░░░░░░ | ██████████░░░░ | Decaying Knowledge panel + bump mechanic |
 
-**Remaining gaps after dashboard ships (ignoring external integrations):**
+**v0.4 capability additions (after Waves E–F):**
+
+| Capability bar | Before v0.4 | After v0.4 | What moves it |
+|---------------|-------------|------------|---------------|
+| Conformance visibility | ░░░░░░░░░░░░░░ | ████████████░░ | ConformanceCard in Stats + Deviations page |
+| PE deviation governance | ░░░░░░░░░░░░░░ | ████████████░░ | Deviations page action panel |
+| Portfolio intelligence | ░░░░░░░░░░░░░░ | ████████░░░░░░ | `GET /api/portfolio` (API only; full portfolio UI deferred) |
+| Overdue accountability | ░░░░░░░░░░░░░░ | ████████████░░ | Overdue deferrals section in Pending page |
+
+**Remaining gaps after v0.4 (ignoring external integrations):**
 - Notification system: browser polling covers open-tab scenario — full push (webhook/Slack) is a future enhancement
-- Self-evolution loop: SKILL.md still needs to be designed and deployed
+- Portfolio page: `GET /api/portfolio` ships in v0.4 — full UI (sorting, filtering, CSV export, drill-down) deferred to v0.5
 - Constitutional CI: GAP-02 (minor)
 
 ---

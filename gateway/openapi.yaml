@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Quorum Gateway API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Quorum Gateway — governed engineering memory for Claude Code and AI agents.
 
@@ -186,6 +186,123 @@ components:
         team:    { type: string }
         method:  { type: string }
         base_confidence: { type: number }
+
+    # ── v0.4 — Deviation ─────────────────────────────────────────────────────
+    Deviation:
+      type: object
+      description: A recorded deviation from a global catalog entry.
+      properties:
+        deviation_id:   { type: string, format: uuid }
+        project_id:     { type: string, description: q_project_id of the deviating project }
+        catalog_id:     { type: string, description: group_id of the global catalog deviated from }
+        topic:          { type: string }
+        key:            { type: string }
+        description:    { type: string }
+        evidence:
+          type: object
+          nullable: true
+          properties:
+            files:   { type: array, items: { type: string } }
+            lines:   { type: array, items: { type: string } }
+            excerpt: { type: string }
+        severity:       { type: number, minimum: 0, maximum: 1, description: "confidence × author_authority; PA_AUTHORED_FLOOR = 0.70" }
+        source:         { type: string, enum: [agent, code-review, security-review] }
+        status:
+          type: string
+          enum: [OPEN, ACCEPTED, DENIED, DEFERRED, OVERDUE, RESOLVED]
+          description: Computed from latest deviation_action; not stored directly.
+        first_seen_at:  { type: string, format: date-time }
+        last_seen_at:   { type: string, format: date-time }
+        resolved_at:    { type: string, format: date-time, nullable: true }
+        created_by:     { type: string }
+        last_action:
+          type: object
+          nullable: true
+          description: Most recent action taken on this deviation.
+          properties:
+            action_type:  { type: string, enum: [accept, deny, defer] }
+            actor:        { type: string }
+            actor_role:   { type: string }
+            reason:       { type: string }
+            defer_until:  { type: string, format: date-time, nullable: true }
+            created_at:   { type: string, format: date-time }
+
+    # ── v0.4 — Conformance ───────────────────────────────────────────────────
+    ConformanceScore:
+      type: object
+      description: Project conformance scorecard across all linked global catalogs.
+      properties:
+        score:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+          description: "Weighted conformance score 0–100. Null when status is UNCERTIFIED."
+        status:
+          type: string
+          enum: [CERTIFIED, UNCERTIFIED]
+        applicable_entries:
+          type: integer
+          description: Total ACTIVE catalog entries across all linked globals.
+        scan_count:
+          type: integer
+          description: Number of scans completed for this project.
+        last_scan_at:
+          type: string
+          format: date-time
+          nullable: true
+        breakdown:
+          type: object
+          description: Deviation count by status.
+          properties:
+            open:     { type: integer }
+            accepted: { type: integer }
+            denied:   { type: integer }
+            deferred: { type: integer }
+            overdue:  { type: integer }
+            resolved: { type: integer }
+        catalogs:
+          type: array
+          description: Per-catalog ACTIVE entry counts.
+          items:
+            type: object
+            properties:
+              catalog_id:  { type: string }
+              entry_count: { type: integer }
+
+    # ── v0.4 — Portfolio ─────────────────────────────────────────────────────
+    PortfolioProject:
+      type: object
+      description: Per-project conformance summary for the portfolio view.
+      properties:
+        group_id:       { type: string }
+        q_project_id:   { type: string }
+        display_name:   { type: string }
+        hierarchy_level: { type: string, nullable: true }
+        criticality:    { type: integer, minimum: 1, maximum: 5, description: Used for weighted rollup. }
+        score:          { type: number, nullable: true, minimum: 0, maximum: 100 }
+        status:         { type: string, enum: [CERTIFIED, UNCERTIFIED] }
+        scan_count:     { type: integer }
+        last_scan_at:   { type: string, format: date-time, nullable: true }
+        breakdown:
+          type: object
+          properties:
+            open:     { type: integer }
+            accepted: { type: integer }
+            denied:   { type: integer }
+            deferred: { type: integer }
+            overdue:  { type: integer }
+            resolved: { type: integer }
+
+    PortfolioRollup:
+      type: object
+      nullable: true
+      description: "Weighted rollup over CERTIFIED children: Σ(score×criticality)/Σ(criticality)."
+      properties:
+        score:             { type: number, nullable: true, minimum: 0, maximum: 100 }
+        status:            { type: string, enum: [CERTIFIED, UNCERTIFIED] }
+        certified_count:   { type: integer }
+        uncertified_count: { type: integer }
 
     # ── Error ─────────────────────────────────────────────────────────────────
     ErrorResponse:
@@ -2277,6 +2394,360 @@ paths:
         '404': { description: No ACTIVE knowledge at topic:key, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '429': { description: Bump cooldown active, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
+  # ── v0.4 Federation ───────────────────────────────────────────────────────
+
+  /api/globals:
+    get:
+      summary: List available global catalogs
+      description: |
+        Returns all projects with `is_global: true` visible to the requesting project,
+        filtered by `global_scope`.
+
+        Scope rules:
+        - `org` (default) — visible to all projects
+        - `division:<id>` — visible only to projects whose `hierarchy.parent` ancestry
+          includes that division group_id
+        - `department:<id>` — same, narrower scope
+
+        Used by `quorum:onboard` to present catalog choices during project setup.
+      operationId: listGlobalCatalogs
+      tags: [Federation]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProject'
+      responses:
+        '200':
+          description: Global catalogs visible to this project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    group_id:      { type: string }
+                    display_name:  { type: string, nullable: true }
+                    global_scope:  { type: string, description: "org | division:<id> | department:<id>" }
+                    entry_count:   { type: integer, description: Total ACTIVE entries in this catalog }
+                    globals:
+                      type: array
+                      items: { type: string }
+                      description: Other global catalogs this catalog inherits from.
+        '401': { description: Unauthenticated, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  # ── v0.4 Deviations ───────────────────────────────────────────────────────
+
+  /api/deviations:
+    post:
+      summary: Record a deviation from a global catalog entry
+      description: |
+        Upserts a deviation record on `(q_project_id, catalog_id, topic, key)`.
+        Idempotent — re-scanning the same pattern updates `last_seen_at` rather than
+        creating a new row.
+
+        **Validation:**
+        - `catalog_id` must be in the project's `globals` list
+        - `topic:key` must exist as an ACTIVE entry in the referenced catalog
+        - Severity is derived server-side: `confidence × DEFAULT_ROLE_SCORES[author_role]`
+          with `PA_AUTHORED_FLOOR = 0.70` for principal_architect-authored entries
+
+        **Constitutional enforcement:** `enforceGlobalWriteAuthority` is NOT invoked here —
+        recording a deviation is a read operation against the catalog, not a write.
+      operationId: recordDeviation
+      tags: [Deviations]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [catalog_id, topic, key, description]
+              properties:
+                catalog_id:  { type: string, description: group_id of the global catalog being deviated from }
+                topic:       { type: string, pattern: '^[a-z0-9-]+$' }
+                key:         { type: string, pattern: '^[a-z0-9-]+$' }
+                description: { type: string, maxLength: 500 }
+                evidence:
+                  type: object
+                  nullable: true
+                  properties:
+                    files:   { type: array, items: { type: string } }
+                    lines:   { type: array, items: { type: string } }
+                    excerpt: { type: string, maxLength: 300 }
+                source:      { type: string, enum: [agent, code-review, security-review], default: agent }
+                author:      { type: string }
+      responses:
+        '200':
+          description: Deviation recorded or updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:       { type: string, enum: [recorded, not_linked, not_found] }
+                  deviation_id: { type: string, format: uuid, description: "Present when status=recorded" }
+                  severity:     { type: number, minimum: 0, maximum: 1 }
+                  is_new:       { type: boolean, description: "true = first record; false = last_seen_at updated" }
+                  message:      { type: string }
+        '400': { description: Missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Unauthenticated, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Project not registered, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+    get:
+      summary: List deviations for this project
+      description: |
+        Returns all deviations for the caller's active project, with computed status
+        derived from the latest `deviation_action` record (LATERAL join).
+      operationId: listDeviations
+      tags: [Deviations]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, ACCEPTED, DENIED, DEFERRED, OVERDUE, RESOLVED]
+        - name: catalog_id
+          in: query
+          schema: { type: string }
+        - name: topic
+          in: query
+          schema: { type: string }
+        - name: severity_min
+          in: query
+          schema: { type: number, minimum: 0, maximum: 1 }
+        - name: source
+          in: query
+          schema: { type: string, enum: [agent, code-review, security-review] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: Deviation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deviation' }
+                  total:  { type: integer }
+                  limit:  { type: integer }
+                  offset: { type: integer }
+        '401': { description: Unauthenticated, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/deviations/batch:
+    post:
+      summary: Batch-record deviations (scan output)
+      description: |
+        Upserts up to 100 deviation records in parallel using `Promise.allSettled`.
+        Partial success is allowed — failed records are reported in `results[n].error`
+        without aborting the batch.
+
+        Used by `quorum:scan` after a full code + security review pass.
+      operationId: batchRecordDeviations
+      tags: [Deviations]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviations]
+              properties:
+                deviations:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [catalog_id, topic, key, description]
+                    properties:
+                      catalog_id:  { type: string }
+                      topic:       { type: string }
+                      key:         { type: string }
+                      description: { type: string, maxLength: 500 }
+                      evidence:    { type: object, nullable: true }
+                      source:      { type: string }
+      responses:
+        '200':
+          description: Batch result (partial success possible)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recorded: { type: integer, description: Number of successfully recorded deviations }
+                  failed:   { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:       { type: integer }
+                        status:      { type: string }
+                        deviation_id: { type: string, format: uuid, nullable: true }
+                        error:       { type: string, nullable: true }
+        '400': { description: deviations array missing or empty, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Unauthenticated, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/deviations/{id}/action:
+    post:
+      summary: Action a deviation — accept, deny, or defer
+      description: |
+        Records a governance action on a deviation. Requires `architect+` role
+        (`enforceDeviationActionAuthority`). Executive roles (`director`,
+        `vp_engineering`, `group_executive`) are explicitly excluded.
+
+        **Constitutional enforcement:**
+        - `enforceDeviationActionAuthority(actorRole, action_type)` — role gate
+        - `enforceReasonRequired(reason)` — reason ≥ 10 chars (Rule 3)
+        - `enforceValidDeferDeadline(defer_until)` — defer only; must be exactly
+          30, 45, 60, or 90 days from now
+
+        **Denial hint:** If the referenced global entry has `confidence > 0.85` and
+        `author_role = 'principal_architect'`, a non-blocking contextual note is
+        returned in `denial_hint`. This is informational only — the action is not blocked.
+
+        **Score weights:** OPEN=1.0, OVERDUE=1.0, ACCEPTED=1.0, DEFERRED=0.6, DENIED=0.3, RESOLVED=0.0
+      operationId: actionDeviation
+      tags: [Deviations]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: deviation_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action_type, reason]
+              properties:
+                action_type:
+                  type: string
+                  enum: [accept, deny, defer]
+                reason:
+                  type: string
+                  minLength: 10
+                  description: Mandatory reason (Rule 3 — enforced constitutionally, not just by validation)
+                defer_until:
+                  type: string
+                  format: date-time
+                  description: "Required for defer. Must be exactly 30, 45, 60, or 90 days from now."
+      responses:
+        '200':
+          description: Action recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:      { type: string, enum: [actioned] }
+                  action_id:   { type: string, format: uuid }
+                  action_type: { type: string }
+                  denial_hint: { type: string, nullable: true, description: "Present for deny when global entry confidence > 0.85 and PA-authored" }
+        '400': { description: "Validation error (reason too short, invalid defer_until)", content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: "Role not permitted (executive roles excluded)", content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Deviation not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  # ── v0.4 Conformance ──────────────────────────────────────────────────────
+
+  /api/conformance:
+    get:
+      summary: Project conformance scorecard
+      description: |
+        Returns the project's weighted conformance score (0–100) across all linked
+        global catalogs, a per-status breakdown, and per-catalog ACTIVE entry counts.
+
+        **Scoring formula:**
+        ```
+        score = (1 - weighted_deviation_ratio) × 100
+
+        weighted_deviation_ratio =
+          Σ(deviation.severity × status_weight) / applicable_catalog_entries
+
+        status_weight:
+          OPEN / OVERDUE / ACCEPTED → 1.0
+          DEFERRED                  → 0.6
+          DENIED                    → 0.3
+          RESOLVED                  → 0.0
+        ```
+
+        **UNCERTIFIED gate** — returns `status: 'UNCERTIFIED'` (no numeric score) when:
+        - The project has no linked global catalogs (`globals` array empty or absent)
+        - Total ACTIVE entries across all linked catalogs is fewer than 10
+        - No scan has been run yet (`scan_count = 0`)
+      operationId: getConformanceScore
+      tags: [Conformance]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProjectRequired'
+      responses:
+        '200':
+          description: Conformance scorecard
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConformanceScore' }
+        '404': { description: Project not registered, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  # ── v0.4 Portfolio ────────────────────────────────────────────────────────
+
+  /api/portfolio:
+    get:
+      summary: Portfolio conformance view
+      description: |
+        Returns conformance scores for all accessible projects, optionally scoped
+        to a hierarchy node, with a weighted rollup score.
+
+        **Auth gate:** `is_admin` OR one of:
+        `principal_architect`, `director`, `vp_engineering`, `group_executive`.
+        Returns 403 for all other roles.
+
+        **node_id filter:** When `node_id` is supplied, only projects whose
+        `config.hierarchy.parent === node_id` are included. This selects the
+        direct children of the given hierarchy node (e.g., all services within
+        a department).
+
+        **Rollup formula:** `Σ(score × criticality) / Σ(criticality)` over CERTIFIED
+        projects only. UNCERTIFIED projects are excluded from the score but counted
+        in `uncertified_count`. Rollup is `null` when no projects exist.
+
+        **Staleness:** Each project entry includes `last_scan_at`. Projects with
+        scans older than 30 days should be shown with a "Stale" badge in UI — the
+        API does not filter them out.
+      operationId: getPortfolio
+      tags: [Portfolio]
+      parameters:
+        - $ref: '#/components/parameters/XQuorumProject'
+        - name: node_id
+          in: query
+          schema: { type: string }
+          description: "Hierarchy group_id to scope; returns direct children only."
+      responses:
+        '200':
+          description: Portfolio view with rollup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects, rollup]
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: '#/components/schemas/PortfolioProject' }
+                  rollup: { $ref: '#/components/schemas/PortfolioRollup' }
+        '403': { description: Role not permitted, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
 tags:
   - name: Health
     description: Gateway health check
@@ -2304,3 +2775,11 @@ tags:
     description: LLM-powered governance — conflict detection, reviewer enrichment, knowledge extraction
   - name: Dashboard
     description: Dashboard BFF routes — aggregated data for the React UI (require X-Quorum-Project header)
+  - name: Federation
+    description: "v0.4 — Global catalog discovery. Projects opt into shared knowledge catalogs via the globals[] config field."
+  - name: Deviations
+    description: "v0.4 — Deviation tracking and PE governance. Record, list, and action deviations from global catalog entries."
+  - name: Conformance
+    description: "v0.4 — Project conformance scoring. Weighted score 0–100 across all linked global catalogs."
+  - name: Portfolio
+    description: "v0.4 — Portfolio intelligence. Org-wide conformance view for executive and principal_architect roles."

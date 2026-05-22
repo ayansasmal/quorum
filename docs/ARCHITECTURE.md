@@ -197,6 +197,102 @@ The MCP server discovers its project context by walking up the working-directory
 
 ---
 
+## v0.4 — Federation, Deviation, and Conformance
+
+### Global Catalogs and Federation
+
+Federation lets any project be elevated to a **global catalog** (`is_global: true` in its `.quorum` config). Other projects opt into a catalog by listing its `group_id` in their `globals` array. Once linked:
+
+- `recall()` and `search()` transparently traverse all linked catalogs alongside the project's own knowledge. Results are annotated with `source: 'project' | 'global'` and `catalog_id`.
+- `detectConflict()` is scoped to `[projectId, ...globals]` — a project-local `remember()` that contradicts a global entry triggers conflict detection. Without this, engineers could silently overwrite global standards with local knowledge.
+- `POST /api/deviations` validates that `catalog_id` is in the project's `globals` list before recording — projects can only track deviations against catalogs they have opted into.
+
+**Global scope** (`global_scope` field): `org` (default) — visible to all projects; `division:<id>` or `department:<id>` — visible only to projects in that hierarchy subtree. The gateway's `GET /api/globals` endpoint filters by scope based on the requesting project's `hierarchy.parent` chain.
+
+**Write authority for global catalogs**: `enforceGlobalWriteAuthority` (constitutional layer) requires `architect+` role to write to any project with `is_global: true`. Any such write lands as `DRAFT` — a second `principal_architect` approval is required before the entry becomes `ACTIVE`. This is the same DRAFT→ACTIVE flow as all other knowledge, just with a higher floor on who can write.
+
+**Catalog hierarchy**: global projects can themselves list other global projects in their `globals` array (e.g., a division-level security catalog inheriting from an org-level base catalog). `POST /sync/configs` validates that `globals` entries resolve to `is_global = true` projects and rejects self-references.
+
+### Organisational Hierarchy
+
+Hierarchy is config-driven — no hierarchy logic is hardcoded. The platform config (`configs/.quorum`) defines the valid level names; each project's config declares its position:
+
+```json
+{
+  "group_id": "payments-service",
+  "hierarchy": {
+    "level":        "service",
+    "parent":       "payments-department",
+    "display_name": "Payments Processing Service",
+    "criticality":  4
+  },
+  "globals": ["security-standards", "payments-compliance"]
+}
+```
+
+`criticality` (1–5) weights the project in rollup calculations. A payments service at criticality 4 contributes more to a department's portfolio score than an internal tooling service at criticality 1.
+
+### Deviation Data Model
+
+Deviations are recorded against global catalog entries when an agent's code or security review finds a pattern that matches (or should match) a standard. Two tables:
+
+```
+deviations
+  deviation_id  UUID (PK)
+  project_id    → q_projects
+  catalog_id    group_id of the global catalog
+  topic / key   identifies the catalog entry
+  description   what the agent found
+  evidence      JSON: { files[], lines[], excerpt }
+  severity      confidence × authority (PA_AUTHORED_FLOOR = 0.70)
+  source        agent | code-review | security-review
+  first_seen_at / last_seen_at
+  resolved_at   set when scan no longer surfaces this
+  UNIQUE (project_id, catalog_id, topic, key)  ← idempotent upsert key
+
+deviation_actions
+  action_id    UUID (PK)
+  deviation_id → deviations
+  action_type  accept | deny | defer
+  actor        GitHub username
+  actor_role
+  reason       ≥ 10 chars (Rule 3)
+  defer_until  exactly 30/45/60/90 days from now
+```
+
+**Status is computed, never stored.** The LATERAL join pattern derives:
+- `OPEN` — no action
+- `ACCEPTED` — latest action is `accept`
+- `DENIED` — latest action is `deny`
+- `DEFERRED` — latest `defer` and `defer_until` > NOW()
+- `OVERDUE` — latest `defer` and `defer_until` ≤ NOW()
+- `RESOLVED` — `resolved_at IS NOT NULL`
+
+### Conformance Scoring
+
+```
+score = (1 - weighted_deviation_ratio) × 100
+
+weighted_deviation_ratio =
+  Σ(deviation.severity × status_weight) / applicable_catalog_entries
+
+status_weight:
+  OPEN / OVERDUE / ACCEPTED → 1.0  (owned debt still counts)
+  DEFERRED                  → 0.6  (active remediation intent)
+  DENIED                    → 0.3  (contested standard)
+  RESOLVED                  → 0.0
+```
+
+**UNCERTIFIED gate**: score is withheld (returned as `null`) when the total ACTIVE entries across all linked catalogs is fewer than 10, or when no scan has run yet (`scan_count = 0`), or when the project has no linked catalogs. This prevents meaningless scores during cold-start.
+
+**Portfolio rollup**: `Σ(score × criticality) / Σ(criticality)` over CERTIFIED projects only. UNCERTIFIED projects are counted separately. Rollup is `null` when no projects exist.
+
+### Self-Evolution Loop — Project DRAFT Path
+
+When a conformance scan finds a pattern with no match across any linked global catalog, the agent calls `remember(topic, key, content)` with no `project` override. This creates a project-level DRAFT via the normal knowledge write flow. The PE sees it in the Pending Decisions queue alongside conflict DRAFTs. If the PE judges it globally applicable, they write it directly to a global catalog — same constitutional path as any global write (architect+ required, lands as DRAFT, second PA approval needed). No automatic promotion. Global promotion is always a deliberate human choice.
+
+---
+
 ## Dashboard Architecture
 
 The Dashboard (`dashboard/`) is a React + Vite SPA on port 3002, served via Nginx in production. It is the human surface for everything the MCP server does: browsing the graph, resolving conflicts, approving drafts, walking the audit timeline, and editing project config.
@@ -205,10 +301,11 @@ The Dashboard (`dashboard/`) is a React + Vite SPA on port 3002, served via Ngin
 
 | Page | Renders |
 |---|---|
-| Stats | Aggregate counts (active / superseded / draft / deprecated), confidence histogram, recent activity feed |
+| Stats | Aggregate counts (active / superseded / draft / deprecated), confidence histogram, recent activity feed, conformance scorecard (v0.4) |
 | Knowledge Graph | Cytoscape.js-rendered force-directed graph. Click a node for full detail, supersession chain, and outbound edges |
-| Pending Decisions | DRAFT entries awaiting review and unresolved CONFLICTS_WITH edges. Approve / reject / request_changes inline |
-| Knowledge Browser | Paginated list filterable by topic, domain, status, author. Click through to version history. Knowledge Write (PE: create / promote / supersede) |
+| Pending Decisions | DRAFT entries awaiting review, unresolved conflicts, deprecation requests, and overdue deferrals (v0.4) |
+| Knowledge Browser | Paginated list filterable by topic, domain, status, author. For global catalog projects: `denial_hint_count` badge per entry (v0.4). Knowledge Write (PE: create / promote / supersede) |
+| Deviations | (v0.4) Deviation table with filter rail, inline accept/deny/defer action panel, denial hint. Architect+ role required for governance actions. |
 | Audit Timeline | Append-only feed from PostgreSQL — every `remember`, `forget`, `review`, and conflict resolution with SHA256 chain link |
 | Config Editor | Edit `quorum.config.json` for the current project. Validates against schema before PUT |
 | System Status | Live `/health` probe — PostgreSQL, Graphiti, FalkorDB, S3 component breakdown |

@@ -89,6 +89,11 @@ Edit `my-project.quorum.json`:
 | `domains` | No | Per-domain governance overrides — stricter `conflict_threshold` and `required_reviewer_teams`. |
 | `thresholds` | No | Global conflict and authority thresholds. Defaults: `conflict_threshold: 0.85`, `authority_threshold: 0.20`. |
 | `guest_access` | No | When `true`, any GitHub-authenticated user can browse in read-only guest mode. Default: `false`. |
+| `hierarchy` | No | Position in the org hierarchy. Used for portfolio rollup (v0.4). See Step 5. |
+| `is_global` | No | When `true`, this project is a global catalog — its entries are visible across all linked projects. Requires `architect+` to write; PA to approve. Default: `false`. |
+| `global_scope` | No | Visibility scope when `is_global: true`. One of: `"org"` (all projects), `"division:<group_id>"`, `"department:<group_id>"`. Default: `"org"`. |
+| `is_public` | No | Reserved for future anonymous read access. Define now for forward compatibility; no gateway behaviour change yet. |
+| `globals` | No | List of `group_id` values that are `is_global: true` projects this project links to. Entries from these catalogs appear in `recall()`/`search()` results annotated `source: 'global'`. |
 
 ### IDE validation and autocomplete
 
@@ -245,7 +250,96 @@ on your machine now has the Quorum skill available.
 
 ---
 
-## Step 5 — Verify the connection
+## Step 5 — Link global catalogs (v0.4, optional)
+
+> Skip this step if your organisation has not yet set up any global catalogs,
+> or if your project is the global catalog itself.
+
+### What are global catalogs?
+
+A global catalog is a Quorum project with `is_global: true` in its config. Its
+knowledge entries (decisions, patterns, constraints, requirements) are shared across
+every project that opts in. This is how org-wide standards, compliance rules, and
+architectural patterns propagate to all teams without manual duplication.
+
+Examples of global catalogs: `security-standards`, `payments-compliance`,
+`org-architecture-patterns`.
+
+### Opting your project in
+
+Add a `globals` array to your project config, listing the `group_id` of each
+catalog you want to link:
+
+```json
+{
+  "$schema": "http://localhost:3001/schema/config",
+  "group_id": "my-project",
+  "owner": "alice",
+  "hierarchy": {
+    "level": "service",
+    "parent": "payments-department",
+    "display_name": "My Service",
+    "criticality": 3
+  },
+  "globals": ["security-standards", "payments-compliance"],
+  "members": [ ... ],
+  "domains": { ... }
+}
+```
+
+**`hierarchy` fields:**
+
+| Field | Description |
+|-------|-------------|
+| `level` | Your position in the org hierarchy — e.g. `"service"`, `"platform"`, `"application"`. Valid levels are defined in the platform `.quorum` config. |
+| `parent` | The `group_id` of the parent node (e.g. `"payments-department"`). Used for portfolio rollup. |
+| `display_name` | Human-readable name for the dashboard portfolio view. |
+| `criticality` | Integer 1–5. Higher-criticality services have more weight in department-level conformance rollup. Omit if not relevant. |
+
+After editing the config, re-upload and sync (Step 2 procedure):
+
+```bash
+awslocal s3 cp my-project.quorum.json s3://quorum-configs/my-project.quorum.json
+curl -s -X POST http://localhost:3001/sync/configs \
+  -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
+```
+
+### Checking available global catalogs
+
+The gateway lists all global catalogs your project has access to:
+
+```bash
+curl -s http://localhost:3001/api/globals \
+  -H "Authorization: Bearer <your-jwt>" \
+  -H "X-Quorum-Project: my-project" | python3 -m json.tool
+```
+
+The response shows each catalog's `group_id`, `display_name`, `global_scope`, and
+`entry_count`. Link only catalogs that are relevant to your project's domain — global
+knowledge appears in `recall()` and `search()` results automatically once linked.
+
+### Conformance scanning
+
+After linking global catalogs, Claude Code can run a conformance scan to compare your
+project's implementation against the catalog's entries:
+
+```
+Ask Claude: "Run a quorum:scan on this project."
+```
+
+The scan will:
+1. Check current conformance baseline via `conformance()`
+2. Review changed files for deviations from global catalog entries
+3. Record deviations via `deviate()` or new project knowledge via `remember()`
+4. Return a summary: `{ deviations_new, deviations_confirmed, deviations_resolved }`
+
+**Conformance status** — `GET /api/conformance` returns `UNCERTIFIED` until the linked
+catalogs have at least 10 ACTIVE entries covering your project's topics. This prevents
+a misleading "100%" score during catalog cold-start.
+
+---
+
+## Step 6 — Verify the connection
 
 Start a new Claude Code session in any project directory and ask:
 
@@ -348,7 +442,7 @@ The `project` field in config is display-only and has no effect on routing.
 | 2. Upload | `awslocal s3 cp <group_id>.quorum.json s3://quorum-configs/<group_id>.quorum.json` + sync |
 | 3. Verify | Open `http://localhost:3002` → sign in → confirm your project card appears |
 | 4. MCP | `npx @as-quorum/mcp install` (registers MCP + skill) |
-| 5. Skill | Included in step 4 — or `npx @as-quorum/mcp install --skip-mcp` |
+| 5. Global catalogs | Add `globals: [...]` + `hierarchy` to config, re-upload + sync (optional; v0.4) |
 | 6. Verify | Ask Claude: `"What pending Quorum decisions are there?"` |
 
 ---

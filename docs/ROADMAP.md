@@ -212,40 +212,65 @@ Success criteria met:
 
 ---
 
-## v0.4 — Self-Evolving
-**Goal: The graph grows without manual effort**
+## v0.4 — Federation, Conformance & Portfolio Intelligence ✅ Shipped
+**Goal: Shared knowledge across projects, measurable standards compliance, org-wide visibility**
 
 ```
-Note: PACE framework (Prepare/Assess/Contextualise/Evaluate) is fully
-implemented via SKILL.md + Claude hooks. Session start protocol, pending
-checks, conflict surfacing, and post-task reflect() are all shipped in v0.3.
-All writes carry full provenance via the audit chain — no additional mode
-field needed.
+Wave A — Constitutional + DB Foundation ✅
+  ✅ enforceGlobalWriteAuthority (architect+ for global catalog writes)
+  ✅ enforceDeviationActionAuthority (architect+ to action deviations; execs excluded)
+  ✅ enforceValidDeferDeadline (exactly 30/45/60/90 days)
+  ✅ deviations + deviation_actions + project_scans tables; is_global on q_projects
+  ✅ DeviationStatus, DeviationActionType, VALID_DEFER_DAYS in graph/schema.js (both repos)
+  ✅ QuorumConfigSchema extended: hierarchy, is_global, global_scope, is_public, globals
+  ✅ Executive roles: director, vp_engineering, group_executive (0.75/0.70, tier 3)
 
-Decision Quality Feedback Loop
-  → Outcomes tracked per decision over time
-  → Incidents traceable to knowledge decisions surface in retrospectives
-  → Good track record increases reviewer authority in domain
-  → Rubber stamp detection: decision < 30 seconds flagged for coaching
-  → Decision quality score per engineer per domain — coaching tool, not punishment
+Wave B — Federation ✅
+  ✅ GET /api/globals — discovers is_global=true projects; filters by global_scope
+  ✅ Cross-project reads: graphiti.js injects [project, ...globals] for read ops
+  ✅ search()/recall() annotated: source + catalog_id on every result node
+  ✅ detectConflict() scoped to [projectId, ...globals] — global contradictions detected
+  ✅ POST /sync/configs: self-reference check + is_global validation for globals[]
+  ✅ quorum:onboard skill — catalog selection via GET /api/globals
 
-Governance Health Dashboard
-  → Per domain: decision volume, avg time to decide, rubber stamp rate
-  → Knowledge quality: active nodes, avg confidence, stale count, disputed
-  → Top reviewer by domain (accuracy + volume)
-  → Engineers flagged as needing support
+Wave C — Deviation Write Path ✅
+  ✅ POST /api/deviations — idempotent upsert, server-side severity, PA_AUTHORED_FLOOR
+  ✅ POST /api/deviations/batch — up to 100 records, partial success via Promise.allSettled
+  ✅ deviate() MCP tool — thin proxy; agents record deviations from scan output
 
-Testing — LLM Accuracy
-  → 100+ golden dataset cases
-  → Model version regression tests (no >2% accuracy drop on upgrade)
-  → Production feedback loop: flagged decisions become new test cases
-  → Adversarial suite expanded
+Wave D — PE Governance ✅
+  ✅ GET /api/deviations — computed status via LATERAL join; filters: status/catalog/topic/severity
+  ✅ POST /api/deviations/:id/action — accept/deny/defer with constitutional enforcement
+  ✅ pending() updated: open deviations + overdue deferrals in response
+  ✅ Dashboard Deviations page — filter rail, inline action panel, reason validation, denial hint
+  ✅ Dashboard Pending page — overdue deferrals section
 
-Success criteria:
-  → Knowledge base grows without manual remember() calls
-  → Claude surfaces gaps at every session end
-  → Decision quality improving month-over-month
-  → Rubber stamp rate < 5%
+Wave E — Conformance Scoring ✅
+  ✅ GET /api/conformance — weighted score, UNCERTIFIED gate, per-catalog entry counts
+  ✅ conformance() MCP tool — score + contextual UNCERTIFIED message + include_details
+  ✅ Stats.jsx ConformanceCard — score badge, breakdown bar, staleness warning
+  ✅ quorum:scan skill — incremental scan orchestration (code+security review → deviate/remember)
+
+Wave F — Portfolio Intelligence ✅
+  ✅ GET /api/portfolio — role-gated (exec+), node_id filter, weighted criticality rollup
+  ✅ Knowledge.jsx denial_hint_count — batch query, red pill badge on global entries
+  ✅ getPortfolioScores — Promise.allSettled for per-project failure isolation
+
+Wave G — Documentation ✅
+  ✅ gateway/openapi.yaml v0.4.0 — all new endpoints, schemas, tags
+  ✅ docs/ARCHITECTURE.md — federation model, deviation data model, conformance scoring
+  ✅ docs/ROADMAP.md — v0.4 section complete
+  ✅ docs/ONBOARDING.md — hierarchy config, quorum:onboard step, global catalog linking
+  ✅ docs/FRONTEND.md — Deviations page, Stats update, Pending update, Knowledge update
+  ✅ quorum-mcp SKILL.md + README — deviate/conformance tools, scan/onboard skills
+
+Success criteria met:
+  → Cross-project reads: recall() + search() transparently traverse linked global catalogs
+  → Conformance scores visible per project in Stats page
+  → Deviation governance: PEs can accept/deny/defer with full constitutional enforcement
+  → Portfolio view available to principal_architect + executive roles
+  → UNCERTIFIED state shown clearly; no misleading scores during cold-start
+  → 675 gateway tests + 620 quorum-mcp tests passing
 ```
 
 ---
