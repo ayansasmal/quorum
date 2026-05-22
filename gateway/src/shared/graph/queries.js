@@ -780,3 +780,308 @@ export async function getDomainStats(pg, { qProjectId, author, domain }) {
   )
   return rows[0] ?? null
 }
+
+// ── Deviations (v0.4) ─────────────────────────────────────────────────────────
+
+/**
+ * Look up a q_key_id by project, topic and key without creating one.
+ * Returns null when the key does not exist in this project.
+ * @param {import('pg').Pool} pg
+ * @param {string} qProjectId
+ * @param {string} topic
+ * @param {string} key
+ * @returns {Promise<string | null>}
+ */
+export async function getKeyId(pg, qProjectId, topic, key) {
+  if (typeof pg.getKeyId === 'function') return pg.getKeyId(qProjectId, topic, key)
+  const { rows } = await pg.query(
+    'SELECT q_key_id FROM q_keys WHERE q_project_id = $1 AND topic = $2 AND key = $3 LIMIT 1',
+    [qProjectId, topic, key],
+  )
+  return rows[0]?.q_key_id ?? null
+}
+
+/**
+ * Upsert a deviation record. Idempotent on (q_project_id, catalog_id, topic, key):
+ * re-scanning the same pattern updates last_seen_at without creating a new row.
+ * @param {import('pg').Pool} pg
+ * @param {{
+ *   qProjectId: string,
+ *   catalogId:  string,
+ *   topic:      string,
+ *   key:        string,
+ *   description: string,
+ *   evidence?:  object,
+ *   severity:   number,
+ *   source?:    string,
+ *   entityType?: string,
+ *   createdBy:  string,
+ * }} record
+ * @returns {Promise<{ deviation_id: string, is_new: boolean }>}
+ */
+export async function upsertDeviation(pg, record) {
+  if (typeof pg.upsertDeviation === 'function') return pg.upsertDeviation(record)
+  const { rows } = await pg.query(
+    `INSERT INTO deviations
+       (q_project_id, catalog_id, topic, key, description, evidence,
+        severity, source, entity_type, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (q_project_id, catalog_id, topic, key) DO UPDATE
+       SET last_seen_at = NOW(),
+           description  = EXCLUDED.description,
+           evidence     = COALESCE(EXCLUDED.evidence, deviations.evidence),
+           source       = EXCLUDED.source,
+           severity     = EXCLUDED.severity,
+           resolved_at  = NULL
+     RETURNING deviation_id,
+               (xmax = 0) AS is_new`,
+    [
+      record.qProjectId,
+      record.catalogId,
+      record.topic,
+      record.key,
+      record.description,
+      record.evidence ? JSON.stringify(record.evidence) : null,
+      record.severity,
+      record.source ?? 'agent',
+      record.entityType ?? null,
+      record.createdBy,
+    ],
+  )
+  return { deviation_id: rows[0].deviation_id, is_new: rows[0].is_new }
+}
+
+/**
+ * Batch upsert deviations in a single transaction.
+ * @param {import('pg').Pool} pg
+ * @param {Array<Parameters<typeof upsertDeviation>[1]>} records
+ * @returns {Promise<Array<{ deviation_id: string, is_new: boolean }>>}
+ */
+export async function batchUpsertDeviations(pg, records) {
+  if (typeof pg.batchUpsertDeviations === 'function') return pg.batchUpsertDeviations(records)
+  if (records.length === 0) return []
+  const client = await pg.connect()
+  try {
+    await client.query('BEGIN')
+    const results = []
+    for (const record of records) {
+      const r = await upsertDeviation({ query: (...a) => client.query(...a) }, record)
+      results.push(r)
+    }
+    await client.query('COMMIT')
+    return results
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * Fetch deviations for a project with computed status.
+ * Status is derived from the latest deviation_action row (LATERAL join).
+ * @param {import('pg').Pool} pg
+ * @param {string} qProjectId
+ * @param {{
+ *   status?:      string,
+ *   catalogId?:   string,
+ *   topic?:       string,
+ *   severityMin?: number,
+ *   source?:      string,
+ *   limit?:       number,
+ *   offset?:      number,
+ * }} [filters]
+ * @returns {Promise<Array<Record<string, unknown>>>}
+ */
+export async function getDeviationsByProject(pg, qProjectId, filters = {}) {
+  if (typeof pg.getDeviationsByProject === 'function') return pg.getDeviationsByProject(qProjectId, filters)
+  const { status, catalogId, topic, severityMin, source, limit = 20, offset = 0 } = filters
+  const { rows } = await pg.query(
+    `WITH dws AS (
+       SELECT
+         d.deviation_id, d.q_project_id, d.catalog_id, d.topic, d.key,
+         d.description, d.evidence, d.severity, d.source, d.entity_type,
+         d.first_seen_at, d.last_seen_at, d.resolved_at, d.created_by,
+         CASE
+           WHEN d.resolved_at IS NOT NULL                                        THEN 'RESOLVED'
+           WHEN la.action_type IS NULL                                           THEN 'OPEN'
+           WHEN la.action_type = 'accept'                                        THEN 'ACCEPTED'
+           WHEN la.action_type = 'deny'                                          THEN 'DENIED'
+           WHEN la.action_type = 'defer' AND la.defer_until > NOW()              THEN 'DEFERRED'
+           WHEN la.action_type = 'defer' AND la.defer_until <= NOW()             THEN 'OVERDUE'
+           ELSE 'OPEN'
+         END AS status,
+         la.action_type  AS last_action_type,
+         la.defer_until  AS last_defer_until,
+         la.actor        AS last_actor,
+         la.reason       AS last_reason,
+         la.created_at   AS last_action_at
+       FROM deviations d
+       LEFT JOIN LATERAL (
+         SELECT action_type, defer_until, actor, reason, created_at
+         FROM deviation_actions
+         WHERE deviation_id = d.deviation_id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) la ON true
+       WHERE d.q_project_id = $1
+     )
+     SELECT * FROM dws
+     WHERE ($2::text IS NULL OR status        = $2)
+       AND ($3::text IS NULL OR catalog_id    = $3)
+       AND ($4::text IS NULL OR topic         = $4)
+       AND ($5::numeric IS NULL OR severity  >= $5)
+       AND ($6::text IS NULL OR source        = $6)
+     ORDER BY severity DESC, first_seen_at DESC
+     LIMIT $7 OFFSET $8`,
+    [qProjectId, status ?? null, catalogId ?? null, topic ?? null,
+     severityMin ?? null, source ?? null, limit, offset],
+  )
+  return rows
+}
+
+/**
+ * Insert a deviation action (accept / deny / defer).
+ * Constitutional enforcement (authority check, reason length, defer deadline)
+ * must be called by the route handler BEFORE this function.
+ * @param {import('pg').Pool} pg
+ * @param {{
+ *   deviationId: string,
+ *   actionType:  'accept' | 'deny' | 'defer',
+ *   actor:       string,
+ *   actorRole:   string,
+ *   reason:      string,
+ *   deferUntil?: string | null,
+ * }} record
+ * @returns {Promise<string>} action_id
+ */
+export async function insertDeviationAction(pg, record) {
+  if (typeof pg.insertDeviationAction === 'function') return pg.insertDeviationAction(record)
+  const { rows } = await pg.query(
+    `INSERT INTO deviation_actions
+       (deviation_id, action_type, actor, actor_role, reason, defer_until)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING action_id`,
+    [
+      record.deviationId,
+      record.actionType,
+      record.actor,
+      record.actorRole,
+      record.reason,
+      record.deferUntil ?? null,
+    ],
+  )
+  return rows[0].action_id
+}
+
+/**
+ * Mark a deviation as resolved (scan no longer surfaces it).
+ * @param {import('pg').Pool} pg
+ * @param {string} deviationId
+ * @returns {Promise<void>}
+ */
+export async function resolveDeviation(pg, deviationId) {
+  if (typeof pg.resolveDeviation === 'function') return pg.resolveDeviation(deviationId)
+  await pg.query(
+    `UPDATE deviations SET resolved_at = NOW() WHERE deviation_id = $1`,
+    [deviationId],
+  )
+}
+
+/**
+ * Compute a conformance score (0–100) for a project against its linked catalogs.
+ *
+ * weighted_deviation_ratio = Σ(severity × status_weight) / applicable_entry_count
+ * score = ROUND((1 - ratio) × 100)
+ *
+ * Returns null score with status='UNCERTIFIED' when:
+ *   - no linked catalogs provided
+ *   - total applicable entries < 10
+ *   - no scan has run yet (scan_count = 0)
+ *
+ * @param {import('pg').Pool} pg
+ * @param {string} qProjectId
+ * @param {string[]} catalogGroupIds  - group_ids of linked global catalogs
+ * @returns {Promise<{
+ *   score:              number | null,
+ *   status:             'CERTIFIED' | 'UNCERTIFIED',
+ *   applicable_entries: number,
+ *   scan_count:         number,
+ *   last_scan_at:       string | null,
+ *   breakdown:          { open: number, accepted: number, denied: number, deferred: number, overdue: number, resolved: number },
+ * }>}
+ */
+export async function getConformanceScore(pg, qProjectId, catalogGroupIds = []) {
+  if (typeof pg.getConformanceScore === 'function') return pg.getConformanceScore(qProjectId, catalogGroupIds)
+
+  // Count ACTIVE entries across all linked catalogs (join q_projects to resolve group_id → q_project_id).
+  const { rows: entryRows } = await pg.query(
+    `SELECT COUNT(*) AS cnt
+     FROM knowledge_versions kv
+     JOIN q_keys qk ON kv.q_key_id = qk.q_key_id
+     JOIN q_projects qp ON qk.q_project_id = qp.q_project_id
+     WHERE qp.group_id = ANY($1)
+       AND kv.status = 'ACTIVE'`,
+    [catalogGroupIds.length ? catalogGroupIds : ['__none__']],
+  )
+  const applicableEntries = parseInt(entryRows[0]?.cnt ?? '0', 10)
+
+  // Scan metadata.
+  const { rows: scanRows } = await pg.query(
+    `SELECT COUNT(*) AS scan_count, MAX(scanned_at) AS last_scan_at
+     FROM project_scans
+     WHERE q_project_id = $1`,
+    [qProjectId],
+  )
+  const scanCount  = parseInt(scanRows[0]?.scan_count ?? '0', 10)
+  const lastScanAt = scanRows[0]?.last_scan_at ?? null
+
+  const UNCERTIFIED = { score: null, status: 'UNCERTIFIED', applicable_entries: applicableEntries,
+                        scan_count: scanCount, last_scan_at: lastScanAt,
+                        breakdown: { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 } }
+
+  if (!catalogGroupIds.length || applicableEntries < 10 || scanCount === 0) return UNCERTIFIED
+
+  // Compute weighted sum from unresolved deviations with LATERAL status join.
+  const { rows: devRows } = await pg.query(
+    `SELECT
+       CASE
+         WHEN d.resolved_at IS NOT NULL                               THEN 'RESOLVED'
+         WHEN la.action_type IS NULL                                  THEN 'OPEN'
+         WHEN la.action_type = 'accept'                               THEN 'ACCEPTED'
+         WHEN la.action_type = 'deny'                                 THEN 'DENIED'
+         WHEN la.action_type = 'defer' AND la.defer_until > NOW()     THEN 'DEFERRED'
+         WHEN la.action_type = 'defer' AND la.defer_until <= NOW()    THEN 'OVERDUE'
+         ELSE 'OPEN'
+       END AS computed_status,
+       d.severity
+     FROM deviations d
+     LEFT JOIN LATERAL (
+       SELECT action_type, defer_until
+       FROM deviation_actions
+       WHERE deviation_id = d.deviation_id
+       ORDER BY created_at DESC LIMIT 1
+     ) la ON true
+     WHERE d.q_project_id = $1
+       AND d.catalog_id = ANY($2)`,
+    [qProjectId, catalogGroupIds],
+  )
+
+  const STATUS_WEIGHT = { OPEN: 1.0, OVERDUE: 1.0, ACCEPTED: 1.0, DEFERRED: 0.6, DENIED: 0.3, RESOLVED: 0.0 }
+  const breakdown = { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 }
+  let weightedSum = 0
+  for (const row of devRows) {
+    const s = row.computed_status
+    const w = STATUS_WEIGHT[s] ?? 1.0
+    weightedSum += parseFloat(row.severity) * w
+    const k = s.toLowerCase()
+    if (k in breakdown) breakdown[k]++
+  }
+
+  const ratio = applicableEntries > 0 ? Math.min(weightedSum / applicableEntries, 1) : 0
+  const score = Math.max(0, Math.round((1 - ratio) * 100))
+
+  return { score, status: 'CERTIFIED', applicable_entries: applicableEntries,
+           scan_count: scanCount, last_scan_at: lastScanAt, breakdown }
+}
