@@ -41,12 +41,19 @@ function extractScenarioId(titlePath) {
 /**
  * Merge two status values, keeping the worse one.
  * Severity order: failed > correlated > flaky > skipped > passed
- * @param {string} a
- * @param {string} b
- * @returns {string}
+ *
+ * null is used as the "not-yet-seen" sentinel in onBegin and maps to rank 0
+ * (below every real status). This ensures that any real test result — even
+ * `passed` — overrides the initial null, so scenarios with all-passing tests
+ * correctly surface as `passed` rather than remaining at the initial value.
+ *
+ * @param {string|null} a
+ * @param {string|null} b
+ * @returns {string|null}
  */
 function worstStatus(a, b) {
   const rank = { failed: 5, correlated: 4, flaky: 3, skipped: 2, passed: 1 }
+  // null → 0: any real status wins over the uninitialised sentinel
   return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b
 }
 
@@ -114,8 +121,10 @@ function propagateCorrelations(results) {
       const target = results.get(targetId)
       if (!target) continue
 
-      // Mark correlated only if the target's own tests didn't fail independently
-      if (target.status === 'passed' || target.status === 'skipped' || target.status === 'flaky') {
+      // Mark correlated only if the target's own tests didn't fail independently.
+      // null (not yet seen) is treated the same as skipped here — it means the
+      // scenario has no independent failure and can be attributed to the source.
+      if (target.status === null || target.status === 'passed' || target.status === 'skipped' || target.status === 'flaky') {
         target.status = 'correlated'
         target.correlatedFrom = sourceId
         queue.push(targetId)  // propagate transitively
@@ -139,6 +148,7 @@ function computeGate(results) {
 
   for (const node of NODES) {
     const result = results.get(node.id)
+    // Resolve null sentinel to 'skipped' for gate computation
     const status = result?.status ?? 'skipped'
     const pillar = PILLARS[node.pillar]
 
@@ -200,7 +210,9 @@ function buildReport(results, durationMs) {
   }
 
   const nodes = NODES.map(node => {
-    const result = results.get(node.id) ?? { status: 'skipped', durationMs: 0, errors: [], correlatedFrom: null }
+    const result = results.get(node.id) ?? { status: null, durationMs: 0, errors: [], correlatedFrom: null }
+    // Resolve null sentinel (no tests ran for this scenario) to 'skipped' for output.
+    const effectiveStatus = result.status ?? 'skipped'
     return {
       id:             node.id,
       label:          node.label,
@@ -213,7 +225,7 @@ function buildReport(results, durationMs) {
       frequencyTier:  node.frequencyTier,
       criticality:    node.criticality,
       detectionLag:   node.detectionLag,
-      status:         result.status,
+      status:         effectiveStatus,
       durationMs:     result.durationMs,
       correlatedFrom: result.correlatedFrom ?? null,
       correlatesTo:   edgesBySource.get(node.id) ?? [],
@@ -290,9 +302,12 @@ export default class GraphReporter {
   onBegin(_config, _suite) {
     this._suiteStartMs = Date.now()
 
-    // Pre-populate every scenario as 'skipped'
+    // Pre-populate every scenario with null status (sentinel = "not yet seen").
+    // worstStatus(null, anyRealStatus) always returns anyRealStatus because
+    // null maps to rank 0, below every named status. Scenarios that receive no
+    // test results are resolved to 'skipped' in buildReport at emit time.
     for (const node of NODES) {
-      this._results.set(node.id, { status: 'skipped', durationMs: 0, errors: [], correlatedFrom: null })
+      this._results.set(node.id, { status: null, durationMs: 0, errors: [], correlatedFrom: null })
     }
   }
 
@@ -365,14 +380,37 @@ const STATUS_COLOR = {
 }
 
 /**
- * Generates a self-contained HTML file embedding the full report as JSON.
- * No external dependencies — opens directly from the filesystem.
+ * Pillar → border colour for Cytoscape nodes and the HTML legend.
+ * Each pillar gets a distinct vivid colour visible against the dark background.
+ */
+const PILLAR_COLOR = {
+  governance_integrity:    '#a78bfa',  // violet-400
+  security:                '#f87171',  // red-400
+  data_integrity:          '#34d399',  // emerald-400
+  functional_correctness:  '#60a5fa',  // blue-400
+  federation:              '#818cf8',  // indigo-400
+  operational_reliability: '#fbbf24',  // amber-400
+  observability:           '#2dd4bf',  // teal-400
+  developer_experience:    '#fb923c',  // orange-400
+}
+
+/**
+ * Generates a self-contained HTML file embedding the full report as JSON and
+ * a Cytoscape.js DAG visualisation of the scenario correlation graph.
+ *
+ * Cytoscape 3.33.4 is loaded from the unpkg CDN (requires internet when opening
+ * the report). If the CDN is unavailable the graph panel shows a text fallback
+ * but all table-based content remains fully functional.
+ *
+ * All client-side JS uses DOM methods (createElement / textContent / appendChild)
+ * instead of innerHTML so that error messages from Playwright are handled safely
+ * regardless of their content.
  *
  * @param {object} report - the report object from buildReport()
  * @returns {string} complete HTML document
  */
 function generateHtml(report) {
-  const { deploymentStatus, scoreGate, counts, pillarHealth, fixQueue, nodes, timestamp, durationMs } = report
+  const { deploymentStatus, scoreGate, counts, pillarHealth, fixQueue, nodes, edges, timestamp, durationMs } = report
 
   const gateColor = {
     SAFE: '#22c55e', WARNING: '#f59e0b', BLOCKED: '#ef4444', HARD_BLOCK: '#dc2626',
@@ -381,7 +419,7 @@ function generateHtml(report) {
   const durationSec = (durationMs / 1000).toFixed(1)
   const ts          = new Date(timestamp).toLocaleString()
 
-  // Fix queue rows
+  // ── Fix queue rows ────────────────────────────────────────────────────────
   const fixRows = fixQueue.map(f => `
     <tr>
       <td>${f.rank}</td>
@@ -393,7 +431,7 @@ function generateHtml(report) {
       <td>${f.specFile ? f.specFile.replace('tests/e2e/scenarios/', '') : '—'}</td>
     </tr>`).join('')
 
-  // Node grid rows (all 31 scenarios)
+  // ── All-scenarios table rows ──────────────────────────────────────────────
   const nodeRows = nodes.map(n => {
     const color   = STATUS_COLOR[n.status] ?? '#94a3b8'
     const deps    = n.correlatesTo.length > 0 ? n.correlatesTo.join(', ') : '—'
@@ -413,22 +451,60 @@ function generateHtml(report) {
     </tr>`
   }).join('')
 
-  // Pillar health bars
+  // ── Pillar health bars ────────────────────────────────────────────────────
   const pillarBars = Object.entries(pillarHealth).map(([key, pct]) => {
     const barColor = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444'
     return `
       <div class="pillar-row">
-        <span class="pillar-name">${key}</span>
+        <span class="pillar-name">${key.replace(/_/g, ' ')}</span>
         <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
         <span class="pillar-pct">${pct}%</span>
       </div>`
   }).join('')
+
+  // ── Graph legend chips ────────────────────────────────────────────────────
+  const statusLegend = Object.entries(STATUS_COLOR).map(([s, c]) =>
+    `<div class="legend-chip"><div class="legend-swatch" style="background:${c}"></div>${s}</div>`
+  ).join('')
+
+  const pillarLegend = Object.entries(PILLAR_COLOR).map(([p, c]) =>
+    `<div class="legend-chip"><div class="legend-ring" style="border-color:${c}"></div>${p.replace(/_/g, ' ')}</div>`
+  ).join('')
+
+  // ── Embed report data as safe inline JSON ─────────────────────────────────
+  // Escape the closing tag so the literal is safe inside a <script> block.
+  const safeJson = v => JSON.stringify(v).replace(/<\/script>/gi, '<\\/script>')
+
+  const cyNodes = safeJson(nodes.map(n => ({
+    id:             n.id,
+    fullLabel:      n.label,
+    journey:        n.journey,
+    pillar:         n.pillar,
+    status:         n.status,
+    ownScore:       n.ownScore,
+    failureCost:    n.failureCost,
+    leafCount:      n.leafCount,
+    zeroTolerance:  n.zeroTolerance,
+    durationMs:     n.durationMs,
+    correlatesTo:   n.correlatesTo,
+    correlatedBy:   n.correlatedBy,
+    correlatedFrom: n.correlatedFrom,
+    logs:           n.logs,
+    specFile:       n.specFile,
+  })))
+
+  const cyEdges = safeJson(edges.map(e => ({
+    source:         e.source,
+    target:         e.target,
+    sharedCodePath: e.sharedCodePath,
+  })))
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Quorum E2E Suite Graph — ${deploymentStatus}</title>
+<script src="https://unpkg.com/cytoscape@3.33.4/dist/cytoscape.min.js"><\/script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: system-ui, sans-serif; font-size: 14px; background: #0f172a; color: #e2e8f0; padding: 24px; }
@@ -440,26 +516,52 @@ function generateHtml(report) {
   .count-chip { padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-  th { background: #1e293b; padding: 8px 10px; text-align: left; font-size: 12px; color: #94a3b8; position: sticky; top: 0; }
-  td { padding: 7px 10px; border-bottom: 1px solid #1e293b; vertical-align: top; font-size: 13px; }
-  tr:hover td { background: #1e293b44; }
+  th { background: #0f172a; padding: 8px 10px; text-align: left; font-size: 12px; color: #94a3b8; position: sticky; top: 0; }
+  td { padding: 7px 10px; border-bottom: 1px solid #0f172a; vertical-align: top; font-size: 13px; }
+  tr:hover td { background: #1e293b88; }
   .err { color: #fca5a5; font-size: 11px; font-family: monospace; margin-top: 2px; white-space: pre-wrap; word-break: break-all; }
   .section { background: #1e293b; border-radius: 8px; padding: 16px; margin-bottom: 20px; overflow-x: auto; }
   .pillar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-  .pillar-name { width: 180px; font-size: 12px; color: #94a3b8; flex-shrink: 0; }
+  .pillar-name { width: 200px; font-size: 12px; color: #94a3b8; flex-shrink: 0; text-transform: capitalize; }
   .bar-bg { flex: 1; height: 10px; background: #334155; border-radius: 5px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 5px; transition: width .3s; }
+  .bar-fill { height: 100%; border-radius: 5px; }
   .pillar-pct { width: 36px; text-align: right; font-size: 12px; font-weight: 600; }
   .score-line { font-size: 13px; margin-bottom: 12px; }
   .score-line span { font-weight: 700; color: ${gateColor}; }
   a { color: #60a5fa; text-decoration: none; }
   a:hover { text-decoration: underline; }
+
+  /* ── Graph canvas ──────────────────────────────────────────────────────── */
+  #cy { height: 500px; width: 100%; background: #080f1e; border-radius: 6px; cursor: grab; }
+  #cy:active { cursor: grabbing; }
+  .graph-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .ctrl-btn { padding: 4px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #94a3b8; font-size: 12px; cursor: pointer; user-select: none; }
+  .ctrl-btn:hover { background: #334155; color: #e2e8f0; }
+  .graph-hint { font-size: 11px; color: #475569; margin-left: 6px; }
+  .graph-legend { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #334155; }
+  .legend-group { display: flex; flex-direction: column; gap: 6px; }
+  .legend-title { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .08em; }
+  .legend-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .legend-chip { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #94a3b8; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .legend-ring { width: 13px; height: 13px; border-radius: 3px; border: 3px solid; flex-shrink: 0; }
+
+  /* ── Node detail panel ─────────────────────────────────────────────────── */
+  #node-detail { display: none; margin-top: 14px; padding: 14px 16px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; }
+  .detail-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .detail-id { font-size: 16px; font-weight: 700; }
+  .detail-lbl { font-size: 13px; color: #94a3b8; }
+  .detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 24px; font-size: 12px; margin: 10px 0; }
+  .detail-cell > span { display: block; font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1px; }
+  .detail-spec { font-size: 11px; color: #475569; margin-top: 6px; font-family: monospace; }
+  .detail-err { margin-top: 10px; }
+  .detail-cor { font-size: 12px; color: #f97316; margin-top: 6px; }
 </style>
 </head>
 <body>
 
 <h1>Quorum E2E Suite Graph</h1>
-<div class="meta">${ts} &nbsp;·&nbsp; ${durationSec}s &nbsp;·&nbsp; ${nodes.length} scenarios</div>
+<div class="meta">${ts} &nbsp;&middot;&nbsp; ${durationSec}s &nbsp;&middot;&nbsp; ${nodes.length} scenarios</div>
 
 <div class="gate">${deploymentStatus}</div>
 ${report.blockReason ? `<div style="color:#fca5a5;margin:6px 0 12px;font-size:13px;">⚠ ${escHtml(report.blockReason)}</div>` : ''}
@@ -474,11 +576,33 @@ ${report.blockReason ? `<div style="color:#fca5a5;margin:6px 0 12px;font-size:13
 
 <div class="score-line">
   Fail score: <span>${scoreGate.failingOwnScore} / ${report.totalOwnScore} (${scoreGate.failurePct}%)</span>
-  &nbsp;·&nbsp; gate at 5% (warning) / 10% (blocked)
+  &nbsp;&middot;&nbsp; gate at 5% (warning) / 10% (blocked)
+</div>
+
+<h2>Dependency Graph</h2>
+<div class="section">
+  <div class="graph-controls">
+    <button class="ctrl-btn" id="btn-fit">Fit</button>
+    <button class="ctrl-btn" id="btn-zoomin">+</button>
+    <button class="ctrl-btn" id="btn-zoomout">−</button>
+    <span class="graph-hint">Scroll to zoom · drag to pan · click node for details · click background to dismiss</span>
+  </div>
+  <div id="cy"></div>
+  <div class="graph-legend">
+    <div class="legend-group">
+      <div class="legend-title">Status (fill)</div>
+      <div class="legend-items">${statusLegend}</div>
+    </div>
+    <div class="legend-group">
+      <div class="legend-title">Pillar (border)</div>
+      <div class="legend-items">${pillarLegend}</div>
+    </div>
+  </div>
+  <div id="node-detail"></div>
 </div>
 
 <h2>Pillar Health</h2>
-<div class="section" style="max-width:600px">${pillarBars}</div>
+<div class="section" style="max-width:640px">${pillarBars}</div>
 
 ${fixQueue.length > 0 ? `
 <h2>Fix Queue (${fixQueue.length} items)</h2>
@@ -497,6 +621,195 @@ ${fixQueue.length > 0 ? `
 </table>
 </div>
 
+<script>
+(function () {
+  // ── Embedded report data ──────────────────────────────────────────────
+  var _nodes = ${cyNodes};
+  var _edges = ${cyEdges};
+
+  // ── Colour maps — must mirror the server-side constants ───────────────
+  var SC = { passed:'#22c55e', flaky:'#f59e0b', failed:'#ef4444', correlated:'#f97316', skipped:'#94a3b8' };
+  var PC = {
+    governance_integrity:'#a78bfa', security:'#f87171', data_integrity:'#34d399',
+    functional_correctness:'#60a5fa', federation:'#818cf8', operational_reliability:'#fbbf24',
+    observability:'#2dd4bf', developer_experience:'#fb923c',
+  };
+
+  // ── Helper: create an element with optional class, style, text ────────
+  function el(tag, opts, txt) {
+    var e = document.createElement(tag);
+    if (opts && opts.cls)   e.className    = opts.cls;
+    if (opts && opts.style) e.style.cssText = opts.style;
+    if (txt !== undefined)  e.textContent  = txt;
+    return e;
+  }
+
+  // ── Graceful degradation when CDN script failed to load ───────────────
+  if (typeof cytoscape === 'undefined') {
+    var cyEl = document.getElementById('cy');
+    cyEl.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:8px';
+    cyEl.appendChild(el('span', {style:'color:#64748b;font-size:13px'}, 'Cytoscape.js could not be loaded.'));
+    cyEl.appendChild(el('span', {style:'color:#475569;font-size:11px'}, 'Open this file in a browser with internet access to view the graph.'));
+    return;
+  }
+
+  // ── Build Cytoscape element list ──────────────────────────────────────
+  var elems = [];
+  _nodes.forEach(function (n) {
+    elems.push({ group:'nodes', data:{
+      id:            n.id,
+      status:        n.status,
+      statusColor:   SC[n.status]   || '#334155',
+      pillarColor:   PC[n.pillar]   || '#475569',
+      fullLabel:     n.fullLabel,
+      journey:       n.journey,
+      pillar:        n.pillar,
+      ownScore:      n.ownScore,
+      failureCost:   n.failureCost,
+      leafCount:     n.leafCount,
+      zeroTolerance: n.zeroTolerance,
+      durationMs:    n.durationMs,
+      correlatesTo:  n.correlatesTo,
+      correlatedBy:  n.correlatedBy,
+      correlatedFrom:n.correlatedFrom,
+      logs:          n.logs,
+      specFile:      n.specFile,
+    }});
+  });
+  _edges.forEach(function (e) {
+    elems.push({ group:'edges', data:{
+      id: e.source + '__' + e.target,
+      source: e.source, target: e.target,
+      sharedCodePath: e.sharedCodePath,
+    }});
+  });
+
+  // ── Initialise Cytoscape ──────────────────────────────────────────────
+  var cy = window._cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements:  elems,
+    style: [
+      { selector:'node', style:{
+          label:'data(id)', 'text-valign':'center', 'text-halign':'center',
+          color:'#f8fafc', 'font-size':11, 'font-weight':700,
+          width:66, height:30, shape:'round-rectangle',
+          'background-color':'data(statusColor)',
+          'border-color':'data(pillarColor)', 'border-width':3,
+      }},
+      { selector:'node[status = "skipped"]', style:{ color:'#475569' }},
+      { selector:'node:selected',            style:{ 'border-width':5, 'border-color':'#f8fafc' }},
+      { selector:'edge', style:{
+          width:2, 'line-color':'#334155', 'target-arrow-color':'#334155',
+          'target-arrow-shape':'triangle', 'curve-style':'bezier',
+          'arrow-scale':0.85, opacity:0.7,
+      }},
+      { selector:'edge.lit', style:{
+          'line-color':'#64748b', 'target-arrow-color':'#64748b', width:2.5, opacity:1,
+      }},
+    ],
+    // cose (Compound Spring Embedder) handles disconnected components naturally:
+    // spring forces pull linked nodes together while node repulsion spreads
+    // isolated nodes. randomize:false gives deterministic output across runs.
+    layout:{
+      name:'cose', fit:true, padding:40, randomize:false, animate:false,
+      componentSpacing:90, nodeRepulsion:450000, nodeOverlap:20,
+      idealEdgeLength:110, edgeElasticity:90, nestingFactor:5,
+      gravity:70, numIter:1000, initialTemp:220, coolingFactor:0.95, minTemp:1.0,
+    },
+    minZoom:0.25, maxZoom:4,
+    userZoomingEnabled:true, userPanningEnabled:true, boxSelectionEnabled:false,
+  });
+
+  // ── Toolbar button wiring ─────────────────────────────────────────────
+  document.getElementById('btn-fit').addEventListener('click', function () {
+    document.getElementById('node-detail').style.display = 'none';
+    cy.fit(undefined, 40);
+  });
+  document.getElementById('btn-zoomin').addEventListener('click', function () {
+    cy.zoom({ level: cy.zoom() * 1.25, renderedPosition:{ x: cy.width()/2, y: cy.height()/2 }});
+  });
+  document.getElementById('btn-zoomout').addEventListener('click', function () {
+    cy.zoom({ level: cy.zoom() / 1.25, renderedPosition:{ x: cy.width()/2, y: cy.height()/2 }});
+  });
+
+  // ── Edge highlight on node hover ──────────────────────────────────────
+  cy.on('mouseover', 'node', function (evt) { evt.target.connectedEdges().addClass('lit'); });
+  cy.on('mouseout',  'node', function (evt) { evt.target.connectedEdges().removeClass('lit'); });
+
+  // ── Node detail panel — built with DOM methods (no innerHTML) ─────────
+  cy.on('tap', 'node', function (evt) {
+    var d = evt.target.data();
+    var panel = document.getElementById('node-detail');
+
+    // Clear previous content
+    while (panel.firstChild) panel.removeChild(panel.firstChild);
+    panel.style.display = 'block';
+
+    // Header: badge + id + description
+    var hdr = el('div', {cls:'detail-header'});
+    var badge = el('span', {cls:'badge', style:'background:' + (SC[d.status] || '#94a3b8')}, d.status);
+    hdr.appendChild(badge);
+    hdr.appendChild(el('span', {cls:'detail-id'}, d.id));
+    hdr.appendChild(el('span', {cls:'detail-lbl'}, d.fullLabel || ''));
+    panel.appendChild(hdr);
+
+    // Data grid
+    var grid = el('div', {cls:'detail-grid'});
+    var dur = d.durationMs ? (d.durationMs / 1000).toFixed(2) + 's' : '—';
+    var corTo  = d.correlatesTo  && d.correlatesTo.length  ? d.correlatesTo.join(', ')  : '—';
+    var corBy  = d.correlatedBy  && d.correlatedBy.length  ? d.correlatedBy.join(', ')  : '—';
+
+    var cells = [
+      ['Journey',        d.journey  || '—'],
+      ['Pillar',         (d.pillar  || '—').replace(/_/g, ' ')],
+      ['Zero-tolerance', d.zeroTolerance ? 'yes 🛑' : 'no'],
+      ['Own Score',      d.ownScore    != null ? String(d.ownScore)    : '—'],
+      ['Failure Cost',   d.failureCost != null ? String(d.failureCost) : '—'],
+      ['Leaf Count',     d.leafCount   != null ? String(d.leafCount)   : '—'],
+      ['Duration',       dur],
+      ['Correlates to',  corTo],
+      ['Correlated by',  corBy],
+    ];
+
+    cells.forEach(function (pair) {
+      var cell = el('div', {cls:'detail-cell'});
+      cell.appendChild(el('span', null, pair[0]));
+      cell.appendChild(document.createTextNode(pair[1]));
+      grid.appendChild(cell);
+    });
+    panel.appendChild(grid);
+
+    // Correlated-from warning
+    if (d.correlatedFrom) {
+      var cf = el('div', {cls:'detail-cor'});
+      cf.textContent = '⊘ Status inherited from failed node: ' + d.correlatedFrom;
+      panel.appendChild(cf);
+    }
+
+    // Spec file path
+    if (d.specFile) {
+      panel.appendChild(el('div', {cls:'detail-spec'}, d.specFile.replace('tests/e2e/scenarios/', '')));
+    }
+
+    // Error logs (each line is a textContent assignment — no HTML injection risk)
+    if (d.logs && d.logs.length) {
+      var errWrap = el('div', {cls:'detail-err'});
+      d.logs.forEach(function (entry) {
+        errWrap.appendChild(el('div', {cls:'err'}, String(entry.message || '').slice(0, 300)));
+      });
+      panel.appendChild(errWrap);
+    }
+  });
+
+  // Dismiss panel when clicking the canvas background
+  cy.on('tap', function (evt) {
+    if (evt.target === cy) {
+      document.getElementById('node-detail').style.display = 'none';
+    }
+  });
+
+})();
+<\/script>
 </body>
 </html>`
 }
