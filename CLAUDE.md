@@ -129,6 +129,8 @@ graph TD
 - `quorum-mcp/skill/SKILL.md`: Conformance Scanning section (deviate(), conformance(), quorum:scan orchestration, pending() deviation handling), updated quick reference, references/scan.md added
 - `quorum-mcp/README.md`: tool count 12→14, test count 559→620, 14-tool table, v0.4 governance rules
 
+**E2E suite infrastructure (in progress):** `tests/e2e/scenarios/` + `tests/e2e/helpers/` created. Playwright helpers: `api.js`, `jwt.js` (corrected: `tokens.pe` = test-pe = principal_architect, no phantom test-pa), `seed.js`, `graphiti.js`, `data.js`, `setup.js` (globalSetup: T0 probes + fixture upload). First spec: `01-global-catalog-onboarding.spec.js` (S-01, 13 tests). Search route G-8 fix: `GET /api/search` now loads project `globals`, passes `groupIds: [project, ...globals]` to Graphiti, joins `q_projects` in postgres fallback, annotates each result with `source: 'project'|'global'` and `catalog_id: string|null`; `normalizeGroupId` imported and reverse-mapped for Graphiti node annotation. 675 gateway tests still pass.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)

@@ -37,7 +37,7 @@ import {
   getPortfolioScores,
 } from '../shared/graph/queries.js'
 import { DEFAULT_ROLE_SCORES } from '../shared/governance/authority.js'
-import { searchNodes, searchFacts } from '../shared/graph/client.js'
+import { searchNodes, searchFacts, normalizeGroupId } from '../shared/graph/client.js'
 import { writeAuditEntry } from '../shared/audit/secondary.js'
 import { loadProjectConfig } from '../config-cache.js'
 import {
@@ -580,10 +580,10 @@ router.get('/knowledge/:topic/:key', async (req, res, next) => {
  * Query params: q (required), domain (optional exact-match scope), limit (default 10)
  */
 router.get('/search', async (req, res, next) => {
-  const groupId   = req.user.project ?? 'default'
-  const query     = req.query.q
-  const domain    = req.query.domain
-  const limit     = Math.min(50, Math.max(1, parseInt(req.query.limit ?? '10', 10)))
+  const groupId = req.user.project ?? 'default'
+  const query   = req.query.q
+  const domain  = req.query.domain
+  const limit   = Math.min(50, Math.max(1, parseInt(req.query.limit ?? '10', 10)))
 
   if (!query || query.trim().length < 2) {
     return res.status(400).json({ error: 'query_required', message: 'q must be at least 2 characters' })
@@ -594,23 +594,40 @@ router.get('/search', async (req, res, next) => {
     const qProjectId = await resolveQProjectId(req, res)
     if (!qProjectId) return
 
-    const pattern = `%${query}%`
-    const pgParams = domain ? [qProjectId, pattern, domain] : [qProjectId, pattern]
-    const domainFilter = domain ? `AND topic = $3` : ''
+    // Load project config to resolve linked global catalogs.
+    // Graceful fallback: if config is unavailable, search remains project-scoped.
+    const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    const globals       = projectConfig?.globals ?? []
+
+    // All group_id slugs to search across (project + every linked global catalog).
+    const allGroupIds = [groupId, ...globals]
+
+    // Reverse map for annotation: normalizedGroupId → original group_id slug.
+    // Needed because Graphiti stores nodes under the normalised form (hyphens → underscores).
+    const globalIdMap = new Map(globals.map(g => [normalizeGroupId(g), g]))
+
+    const graphitiQuery = domain ? `[${domain}] ${query}` : query
+    const pattern       = `%${query}%`
+    const domainFilter  = domain ? 'AND kv.topic = $3' : ''
+    const pgParams      = domain ? [allGroupIds, pattern, domain] : [allGroupIds, pattern]
 
     // Run Graphiti semantic search and postgres keyword search in parallel.
     // allSettled ensures a Graphiti failure never suppresses postgres results.
     const [graphitiOutcome, pgOutcome] = await Promise.allSettled([
-      searchNodes(domain ? `[${domain}] ${query}` : query, { groupId, limit }),
+      searchNodes(graphitiQuery, { groupIds: allGroupIds, limit }),
       pool.query(
-        `SELECT topic, key, entity_type, summary, tags, status, confidence, author, created_at
-         FROM knowledge_versions
-         WHERE q_project_id = $1
-           AND (summary ILIKE $2 OR key ILIKE $2 OR topic ILIKE $2
-                OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE t ILIKE $2))
-           AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
+        // JOIN q_projects to resolve source_group_id for catalog annotation.
+        // WHERE qp.group_id = ANY($1) covers project + all linked global catalogs in one query.
+        `SELECT kv.topic, kv.key, kv.entity_type, kv.summary, kv.tags,
+                kv.confidence, kv.author, kv.created_at, qp.group_id AS source_group_id
+         FROM knowledge_versions kv
+         JOIN q_projects qp ON qp.q_project_id = kv.q_project_id
+         WHERE qp.group_id = ANY($1)
+           AND (kv.summary ILIKE $2 OR kv.key ILIKE $2 OR kv.topic ILIKE $2
+                OR EXISTS (SELECT 1 FROM unnest(kv.tags) t WHERE t ILIKE $2))
+           AND kv.status NOT IN ('DRAFT','DEPRECATED','REJECTED')
            ${domainFilter}
-         ORDER BY confidence DESC, created_at DESC
+         ORDER BY kv.confidence DESC, kv.created_at DESC
          LIMIT ${limit}`,
         pgParams,
       ),
@@ -624,29 +641,35 @@ router.get('/search', async (req, res, next) => {
     const pgRows =
       pgOutcome.status === 'fulfilled' ? pgOutcome.value.rows : []
 
-    // Build Graphiti results and track seen topic:key pairs for deduplication
+    // Build results annotated with source (project vs global) and catalog_id.
+    // Deduplication: Graphiti results take precedence; postgres fills gaps.
     const seen = new Set()
     const results = graphitiNodes.map((n) => {
-      const topicKey = `${n.topic ?? n.group_id ?? ''}:${n.key ?? n.name ?? ''}`
+      const topicKey    = `${n.topic ?? ''}:${n.key ?? n.name ?? ''}`
       seen.add(topicKey)
+      const nodeGroupId = n.group_id ?? ''
+      const catalogId   = globalIdMap.get(nodeGroupId) ?? null
       return {
-        topic:       n.topic       ?? n.group_id ?? '',
-        key:         n.key         ?? n.name     ?? '',
+        topic:       n.topic       ?? '',
+        key:         n.key         ?? n.name ?? '',
         entity_type: n.entity_type ?? 'unknown',
-        summary:     n.summary     ?? n.name     ?? '',
+        summary:     n.summary     ?? n.name ?? '',
         tags:        n.tags        ?? [],
         confidence:  n.confidence  ?? null,
         score:       n.score       ?? n.distance ?? null,
         author:      n.author      ?? null,
         updated_at:  n.created_at  ?? n.updated_at ?? null,
+        source:      catalogId ? 'global' : 'project',
+        catalog_id:  catalogId,
       }
     })
 
-    // Append postgres matches not already covered by Graphiti
+    // Append postgres matches not already covered by Graphiti.
     for (const r of pgRows) {
       const topicKey = `${r.topic}:${r.key}`
       if (!seen.has(topicKey)) {
         seen.add(topicKey)
+        const catalogId = globals.includes(r.source_group_id) ? r.source_group_id : null
         results.push({
           topic:       r.topic,
           key:         r.key,
@@ -657,15 +680,17 @@ router.get('/search', async (req, res, next) => {
           score:       null,
           author:      r.author ?? null,
           updated_at:  r.created_at ?? null,
+          source:      catalogId ? 'global' : 'project',
+          catalog_id:  catalogId,
         })
       }
     }
 
-    const source = graphitiNodes.length > 0 && pgRows.length > 0
+    const backend = graphitiNodes.length > 0 && pgRows.length > 0
       ? 'graphiti+postgres'
       : graphitiNodes.length > 0 ? 'graphiti' : 'postgres'
 
-    res.json({ results, source })
+    res.json({ results, source: backend })
   } catch (err) {
     next(err)
   }
