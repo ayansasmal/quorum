@@ -1,8 +1,8 @@
 # J13 — Config Management & Governance
 
 **Scenario ID:** S-13
-**Weight:** 16 (16 raw leaves × F1)
-**Blast radius:** 1.7% of suite — Low
+**Weight:** 20 (20 raw leaves × F1) — updated: +4 leaves from Part F (config route reason enforcement)
+**Blast radius:** 1.9% of suite (recalculated against 1045.5 suite total)
 **Frequency tier:** F1 (one-time / rare — config changes are infrequent lifecycle events)
 **Spec file:** `tests/e2e/scenarios/13-config-governance.spec.js`
 
@@ -112,7 +112,53 @@ No prior state. Uses unique `group_id` suffixed with scenario ID to avoid confli
 
 ---
 
-## Pass Criteria
+---
+
+### Part F — Reason Enforcement on Config Governance Routes
+
+> **Code fix required before this part can pass:** `routes/config.js` `transfer-ownership`
+> and `update-role` currently use a manual check returning `{ error: 'missing_param' }` instead
+> of calling `enforceReasonRequired(reason)`. They must be updated to return
+> `{ rule: 'REASON_REQUIRED' }` consistent with all other governance endpoints.
+> This part documents the desired behavior — implement the fix, then run this part to verify.
+>
+> Once fixed, add `POST /config/transfer-ownership` and `POST /config/update-role` to J15's
+> endpoint coverage matrix.
+
+13. `POST /config/transfer-ownership` as `test-pe` with placeholder reason:
+    ```json
+    { "to": "test-architect", "reason": "ok" }
+    ```
+    - Assert: `400`
+    - Assert: `rule: "REASON_REQUIRED"` in response body (not `error: "missing_param"`)
+
+14. Same call with short reason (< 10 chars):
+    ```json
+    { "to": "test-architect", "reason": "short" }
+    ```
+    - Assert: `400`, `rule: "REASON_REQUIRED"`
+
+15. Same call with valid reason:
+    ```json
+    { "to": "test-architect", "reason": "Architecture team taking ownership after platform migration" }
+    ```
+    - Assert: `200`, `{ ok: true, from: "test-pe", to: "test-architect" }`
+
+16. `POST /config/update-role` as `test-architect` (now owner) with placeholder reason:
+    ```json
+    { "github_username": "test-engineer", "role": "architect", "reason": "tbd" }
+    ```
+    - Assert: `400`, `rule: "REASON_REQUIRED"` (not `error: "missing_param"`)
+
+17. Same call with valid reason:
+    ```json
+    { "github_username": "test-engineer", "role": "architect", "reason": "Promoted after completing platform migration project" }
+    ```
+    - Assert: `200`, `{ ok: true, github_username: "test-engineer", role: "architect" }`
+
+---
+
+## Pass Criteria (updated)
 
 - [ ] Config validation works without authentication
 - [ ] Missing required field (`group_id`) fails validation with field-level error
@@ -123,3 +169,7 @@ No prior state. Uses unique `group_id` suffixed with scenario ID to avoid confli
 - [ ] Role update reflects on next authenticated request (cache invalidated)
 - [ ] Non-global project in `globals` → `200` with `globals_warnings` (not a hard error)
 - [ ] `globals` self-reference → `400 self_reference_in_globals`
+- [ ] transfer-ownership with placeholder reason (`"ok"`) → `400 REASON_REQUIRED`
+- [ ] transfer-ownership with short reason (< 10 chars) → `400 REASON_REQUIRED`
+- [ ] update-role with placeholder reason (`"tbd"`) → `400 REASON_REQUIRED`
+- [ ] Both config routes return `rule: "REASON_REQUIRED"` (not `error: "missing_param"`) on rejection

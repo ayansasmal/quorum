@@ -1,8 +1,8 @@
 # J15 — Reason / Placeholder Rejection (Constitutional Rule 3)
 
 **Scenario ID:** S-15
-**Weight:** 45 (15 raw leaves × F3)
-**Blast radius:** 4.8% of suite
+**Weight:** 63 (21 raw leaves × F3) — updated: +6 leaves from 3 new endpoints (bulk deprecate, transfer-ownership, update-role)
+**Blast radius:** 6.0% of suite (recalculated against 1045.5 suite total)
 **Frequency tier:** F3 (daily — reason validation fires on every governance action)
 **Spec file:** `tests/e2e/scenarios/15-reason-placeholder.spec.js`
 
@@ -54,6 +54,13 @@ Seed the necessary state for each endpoint test:
 | `POST /api/knowledge/:t/:k/deprecate` | `reason` | `"n/a"` |
 | `POST /api/deviations/:id/action` | `reason` | `"."` |
 | `POST /admin/users` | `reason` | `"yes"` |
+| `POST /api/knowledge/deprecate/bulk` | `reason` | `"na"` |
+| `POST /config/transfer-ownership` | `reason` | `"ok"` |
+| `POST /config/update-role` | `reason` | `"tbd"` |
+
+> **Note on rows 9–10:** `transfer-ownership` and `update-role` currently use a manual reason check
+> returning `{ error: 'missing_param' }`. These rows require the code fix from J13 Part F before they
+> can pass. The desired behavior is `{ rule: 'REASON_REQUIRED' }` consistent with all other endpoints.
 
 ---
 
@@ -123,6 +130,39 @@ Call the same endpoint with a legitimate reason (≥ 10 chars, not a placeholder
 7b. Same with `reason: "Adding admin user to support expanded platform team operations"`:
    - Assert: `200`, admin user added
 
+8. `POST /api/knowledge/deprecate/bulk` as `test-pe` with `reason: "na"` (placeholder, ≥ 10 chars when repeated: `"na na na na"` — 12 chars but matches `n/a` pattern):
+   ```json
+   { "entries": [{ "topic": "testing", "key": "placeholder-bulk-dep" }], "reason": "na na na na" }
+   ```
+   - Assert: `400`
+   - Assert: response body contains `rule: "REASON_REQUIRED"` (not `error: "reason_required"` — see note)
+
+   > **Code inconsistency note (G-6):** bulk deprecate currently catches `ValidationError` and returns
+   > `{ error: 'reason_required' }` rather than letting `enforceReasonRequired` throw a constitutional
+   > violation. This step defines the desired behavior. The catch block must be updated to return
+   > `{ rule: 'REASON_REQUIRED' }` consistent with all other endpoints.
+
+8b. Same with `reason: "Entry deprecated following team decision to remove legacy pattern"`:
+    - Assert: `200`, bulk deprecate succeeds
+
+9. `POST /config/transfer-ownership` as `test-pe` with `reason: "ok"`:
+   ```json
+   { "to": "test-architect", "reason": "ok" }
+   ```
+   - Assert: `400`, `rule: "REASON_REQUIRED"` (requires J13 Part F code fix)
+
+9b. Same with `reason: "Architecture team taking ownership after platform migration"`:
+    - Assert: `200`, transfer succeeds
+
+10. `POST /config/update-role` as `test-pe` (or owner) with `reason: "tbd"`:
+    ```json
+    { "github_username": "test-engineer", "role": "architect", "reason": "tbd" }
+    ```
+    - Assert: `400`, `rule: "REASON_REQUIRED"` (requires J13 Part F code fix)
+
+10b. Same with `reason: "Promoted after completing platform migration project"`:
+     - Assert: `200`, role updated
+
 ---
 
 ## Pass Criteria
@@ -134,8 +174,11 @@ Call the same endpoint with a legitimate reason (≥ 10 chars, not a placeholder
 - [ ] `"n/a"` rejected on deprecate → `400 REASON_REQUIRED`
 - [ ] `"."` rejected on deviation action → `400 REASON_REQUIRED`
 - [ ] `"yes"` rejected on admin users → `400 REASON_REQUIRED`
+- [ ] Placeholder on bulk deprecate → `400 REASON_REQUIRED` (requires code fix — currently `error: "reason_required"`)
+- [ ] Placeholder on transfer-ownership → `400 REASON_REQUIRED` (requires J13 Part F code fix)
+- [ ] Placeholder on update-role → `400 REASON_REQUIRED` (requires J13 Part F code fix)
 - [ ] Valid non-placeholder reason ≥ 10 chars accepted on all same endpoints
-- [ ] `rule: "REASON_REQUIRED"` present in every `400` response body
+- [ ] `rule: "REASON_REQUIRED"` present in every `400` response body (all 10 endpoints)
 - [ ] State unchanged after each rejected call — no partial writes
 
 ---
