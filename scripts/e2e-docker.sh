@@ -31,9 +31,13 @@ COMPOSE="docker compose -f $PROJECT_ROOT/docker-compose.e2e.yml"
 #
 # --wait blocks until gateway's healthcheck passes (which requires all deps healthy).
 # --build rebuilds images if Dockerfiles or build contexts have changed.
+# We build ALL services first so test-runner picks up any CMD/Dockerfile changes,
+# then bring infrastructure up (gateway + deps) and wait for healthy.
 _up() {
-  echo "▶ [E2E] Building images and starting infrastructure..."
-  $COMPOSE up -d --build --wait gateway
+  echo "▶ [E2E] Building all images (gateway + test-runner)..."
+  $COMPOSE build
+  echo "▶ [E2E] Starting infrastructure..."
+  $COMPOSE up -d --wait gateway
   echo "✓ [E2E] Infrastructure healthy — gateway is ready at http://gateway:3001 (internal)"
 }
 
