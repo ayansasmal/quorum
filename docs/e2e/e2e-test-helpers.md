@@ -12,9 +12,10 @@ Concretely:
 - We do **not** assert embedding quality, similarity scores, cache TTLs, or graph
   index accuracy — those are the libraries' responsibilities.
 
-This means **23 of 27 scenarios are pure HTTP/PostgreSQL tests** with no timing
+This means **26 of 30 scenarios are pure HTTP/PostgreSQL tests** with no timing
 dependencies. `graphitiSettle()` is only needed for the 4 scenarios that test
-our code's write-then-read pipeline through Graphiti.
+our code's write-then-read pipeline through Graphiti, plus S-17 Part C which
+triggers cross-catalog conflict detection after a global catalog write.
 
 ---
 
@@ -272,17 +273,19 @@ export async function deviation({ catalogId, topic, key, description }) {
 ## `graphiti.js`
 
 Only needed for scenarios that test our code's **write-then-read pipeline through
-Graphiti**. These are exactly 4 of the 27 scenarios:
+Graphiti**. These are 5 of the 30 scenarios (3 call it directly; 2 via `seed.conflict()`):
 
-| Scenario | Why needed |
-|----------|------------|
-| S-01 Global Catalog Onboarding | Global write → cross-catalog search |
-| S-02.1 Write + Recall | `remember()` → `recall()` reads from Graphiti |
-| S-02.2 Conflict Detection | First write indexed → second write triggers searchNodes |
-| S-06 Multi-User Conflict | Concurrent writes both need to be indexed before conflict check |
+| Scenario | Why needed | Called |
+|----------|------------|--------|
+| S-01 Global Catalog Onboarding | Global write → cross-catalog search | directly |
+| S-02.1 Write + Recall | `remember()` → `recall()` reads from Graphiti | directly |
+| S-02.2 Conflict Detection | First write indexed → second write triggers searchNodes | via `seed.conflict()` |
+| S-06 Multi-User Conflict | Concurrent writes both need to be indexed before conflict check | via `seed.conflict()` |
+| S-17 Part C Cross-catalog Conflict | Global catalog entry written → project write triggers cross-catalog conflict detection | directly |
 
 All other scenarios are pure HTTP/PostgreSQL and do not call `graphitiSettle()`.
 `seed.conflict()` calls it internally, so its callers are also covered.
+S-15 uses `seed.conflict()` and is covered transitively.
 
 ```javascript
 /**
@@ -292,8 +295,10 @@ All other scenarios are pure HTTP/PostgreSQL and do not call `graphitiSettle()`.
  * 5 seconds is conservative — revisit once timing behaviour under
  * mock-openai is understood.
  *
- * Do NOT call this in scenarios that do not read from Graphiti.
- * Do NOT call this after seed.conflict() — it calls this internally.
+ * Call directly in: S-01, S-02.1, S-17 Part C.
+ * Do NOT call in scenarios that do not read from Graphiti.
+ * Do NOT call after seed.conflict() — it calls this internally.
+ * Do NOT call in S-02.2, S-06, S-15, or S-17 Parts A/B — not needed.
  */
 export async function graphitiSettle() {
   await new Promise(r => setTimeout(r, 5_000))
@@ -334,6 +339,9 @@ export const DOMAINS = {
   'S-14':   'dashboard-visual-test',
   'S-15':   'reason-placeholder-test',
   'S-16':   'knowledge-history-test',
+  'S-17':   'conflict-edge-cases-test',    // auto_supersede, PENDING_CONFLICT_CHECK, cross-catalog
+  'S-18':   'governance-route-test',       // direct /governance/* endpoint coverage
+  'S-19':   'auth-lifecycle-test',         // JWT boundaries, JWKS, project scoping, PAT
 }
 ```
 
@@ -374,9 +382,13 @@ Which helpers each scenario needs at a glance.
 | S-14 | ✓ | ✓ | `activeEntry` × 3 | — |
 | S-15 | ✓ | ✓ | `activeEntry` + `draftEntry` + `conflict` + `deviation` | — (via seed.conflict) |
 | S-16 | ✓ | ✓ (pa) | — | — |
+| S-17 | ✓ | ✓ (pa, pe) | `activeEntry` (Part C global write) | ✓ (Part C, directly) |
+| S-18 | ✓ | ✓ (pe) | — | — |
+| S-19 | ✓ | ✓ (all roles + fabricated tokens) | — | — |
 
-> `graphitiSettle` is called **directly** only in S-01 and S-02.1.
+> `graphitiSettle` is called **directly** in S-01, S-02.1, and S-17 Part C.
 > S-02.2, S-06, and S-15 use `seed.conflict()` which calls it internally.
+> S-17 Parts A and B are pure PostgreSQL/HTTP — only Part C (cross-catalog conflict) touches Graphiti.
 > Every other scenario is a synchronous HTTP + PostgreSQL test.
 
 ---

@@ -10,13 +10,15 @@
 |---------|------------------|
 | [1. MCP Tool Coverage Map](#1-mcp-tool-coverage-map) | All journeys |
 | [2. Knowledge Status State Machine](#2-knowledge-status-state-machine) | S-12, S-02.x |
-| [3. Conflict Detection & Resolution Flow](#3-conflict-detection--resolution-flow) | S-02.2 – S-02.8, S-06 |
+| [3. Conflict Detection & Resolution Flow](#3-conflict-detection--resolution-flow) | S-02.2 – S-02.8, S-06, S-17 |
 | [4. Deprecation Workflow](#4-deprecation-workflow) | S-03, S-05.3, S-05.5 |
 | [5. Deviation Governance Lifecycle](#5-deviation-governance-lifecycle) | S-04, S-05.5, S-07 |
 | [6. Conformance Scoring Model](#6-conformance-scoring-model) | S-07, S-04 |
 | [7. RBAC Authority Boundaries](#7-rbac-authority-boundaries) | S-05.1 – S-05.6 |
 | [8. Federation & Global Catalog Flow](#8-federation--global-catalog-flow) | S-01, S-05.4, S-11 |
 | [9. Audit Chain Model](#9-audit-chain-model) | S-10, S-02.3 |
+| [10. Authentication Lifecycle](#10-authentication-lifecycle) | S-19 |
+| [11. Governance Edge Cases](#11-governance-edge-cases) | S-17 |
 
 ---
 
@@ -72,7 +74,7 @@ graph LR
 
 ## 2. Knowledge Status State Machine
 
-Source: S-12. Every valid and invalid transition tested.
+Source: S-12 (Parts 1–G). Every valid, invalid, and coexistence transition tested.
 
 ```mermaid
 stateDiagram-v2
@@ -86,8 +88,18 @@ stateDiagram-v2
     ACTIVE --> DEPRECATED : deprecate (PA only)\nor PA forget()
 
     note right of SUPERSEDED
+        TERMINAL — no further transitions.
         Never deleted — provenance preserved.
         Audit lineage references both versions.
+        Deprecate / supersede routes operate
+        on ACTIVE only; SUPERSEDED is read-only.
+    end note
+
+    note right of DEPRECATED
+        TERMINAL — no further transitions.
+        Supersede returns 404 (no ACTIVE to replace).
+        Promote returns 404 no_draft (not promotable).
+        Entry disappears from Knowledge browser.
     end note
 
     note right of REJECTED
@@ -96,10 +108,19 @@ stateDiagram-v2
     end note
 
     note right of DRAFT
+        Non-PA write to key with existing ACTIVE:
+        lands as DRAFT (not 409 already_exists).
+        DRAFT and ACTIVE coexist for the same key.
+        Only PA writes return 409 on duplicate ACTIVE.
+
         Global catalog writes:
-        ALL roles land as DRAFT
-        regardless of role.
+        ALL roles land as DRAFT regardless of role.
         (enforceGlobalWriteAuthority)
+
+        GET /api/drafts — PE queue view:
+        returns DRAFT entries awaiting review.
+        ACTIVE entries excluded from this endpoint.
+        After promotion, entry leaves the drafts list.
     end note
 ```
 
@@ -394,7 +415,7 @@ sequenceDiagram
 
 ## 9. Audit Chain Model
 
-Source: S-10 (chain integrity), S-02.3 (lineage after supersede).
+Source: S-10 (Parts A–C: chain integrity, append-only, BLOCKED_METHODS), S-02.3 (lineage after supersede).
 
 ```mermaid
 flowchart LR
@@ -407,10 +428,24 @@ flowchart LR
 
     W1 --> W2 --> W3 --> W4
 
-    subgraph CHAIN_PROPERTIES["Chain properties (verified in S-10)"]
+    subgraph CHAIN_PROPERTIES["Chain properties — S-10 Part A"]
         CP1["Sequential integers — no gaps\nNo duplicate chain_positions\nEven after concurrent writes"]
         CP2["Hash chain: each entry's prev_hash\n= entry_hash of position N-1\nTamper detection: any edit breaks the chain"]
-        CP3["Append-only: updateEntry() and\ndeleteEntry() always throw\n(constitutional rule 2)"]
+        CP3["total_entries only increases\n(GET /pg/audit/stats called twice\n→ second call ≥ first)"]
+    end
+
+    subgraph APPEND_ONLY["Append-only enforcement — S-10 Part B (Rule 2)"]
+        AO1["PATCH /pg/audit/:id → 404 or 405\nNo modification route exists"]
+        AO2["DELETE /pg/audit/:id → 404 or 405\nNo deletion route exists"]
+        AO3["Entry hash unchanged after\nboth failed attempts\n(read lineage to verify)"]
+        AO4["updateEntry() / deleteEntry()\nalways throw in audit/secondary.js\n(100% constitutional test coverage)"]
+    end
+
+    subgraph BLOCKED_METHODS["No hard delete — S-10 Part C (Rule 1)"]
+        BM1["POST /graphiti/mcp\n{ method: 'tools/call',\n  params: { name: 'delete_entity', ... } }\n→ 400 or 403"]
+        BM2["Gateway blocks before\nrequest reaches Graphiti.\nBLOCKED_METHODS list:\ndelete_entity / delete_fact /\ndelete_episode / delete_memory"]
+        BM3["Entry remains ACTIVE after\nblocked attempt\n(no partial deletion side effect)"]
+        BM4["No audit entry created\nfor a blocked call"]
     end
 
     subgraph LINEAGE_API["Audit lineage endpoint"]
@@ -426,18 +461,109 @@ flowchart LR
 
 ---
 
+## 10. Authentication Lifecycle
+
+Source: S-19. Automated boundary testing for JWT, JWKS, project scoping, token refresh, and PAT.
+
+```mermaid
+flowchart TD
+    subgraph JWT_VALIDATION["JWT Validation — S-19 Part A"]
+        JV1["Valid ES256 token\n→ 200 / 404 (not 401)"]
+        JV2["Missing Authorization header\n→ 401"]
+        JV3["Expired token (exp in past)\n→ 401"]
+        JV4["Tampered payload + original signature\n→ 401 (signature mismatch)"]
+        JV5["HS256-signed token\n→ 401 (algorithm enforcement — ES256 only)"]
+        JV6["Valid signature but unknown sub\nnot in DDB user-projects table\n→ 401"]
+    end
+
+    subgraph JWKS["JWKS Endpoint — S-19 Part B"]
+        JK1["GET /.well-known/jwks.json\n→ 200, no auth required"]
+        JK2["kty: 'EC'\nalg: 'ES256'\ncrv: 'P-256'\nuse: 'sig'\nkid: present"]
+        JK3["No HS256 or RSA keys\nin the key set"]
+    end
+
+    subgraph PROJECT_SCOPING["Project Scoping — S-19 Part C"]
+        PS1["Valid JWT + member project\n→ 200"]
+        PS2["Valid JWT + non-member project\n→ 403 or 404"]
+        PS3["Valid JWT + missing X-Quorum-Project\n→ 400 missing_header"]
+    end
+
+    subgraph TOKEN_REFRESH["Token Refresh — S-19 Part D"]
+        TR1["Valid refresh token\n→ 200, new JWT with future expiry"]
+        TR2["Expired refresh token\n→ 401"]
+        TR3["Fabricated refresh token\n→ 401"]
+    end
+
+    subgraph PAT["PAT Authentication — S-19 Part E"]
+        PA1["Valid PAT in Authorization header\n→ 200 (same routes as JWT)"]
+        PA2["Invalid / revoked PAT\n→ 401"]
+    end
+
+    subgraph MANUAL["Manual Tests (not automatable)"]
+        MT11["MT-11: GitHub OAuth browser flow\nRedirect → callback → JWT issue\nrequires live GitHub OAuth app"]
+        MT12["MT-12: PKCE OAuth 2.1 MCP client\nauthorization_code + code_verifier\nrequires live MCP client (stdio)"]
+    end
+```
+
+---
+
+## 11. Governance Edge Cases
+
+Source: S-17 (Parts A–D). Auto-supersede, PENDING_CONFLICT_CHECK fallback, cross-catalog conflict, enrichment shape.
+
+```mermaid
+flowchart TD
+    subgraph AUTO_SUPERSEDE["Auto-Supersede — S-17 Part A (GV-1)"]
+        AS1["PA writes entry\nconfidence: 0.50 → ACTIVE v1"]
+        AS2["PA writes same key again\nconfidence: 0.95\nshouldAutoSupersede() fires\n(authority delta > AUTHORITY_THRESHOLD)"]
+        AS3["supersede() called directly\nNO pending_decision created\nNO human review step"]
+        AS4["v1 → SUPERSEDED\nv2 → ACTIVE\naudit: conflict_resolution='auto_supersede'\nno reviewer field"]
+        AS5["GET /pg/pending: no new decision\nfor this topic:key (auto-resolved)"]
+        AS1 --> AS2 --> AS3 --> AS4 --> AS5
+    end
+
+    subgraph PENDING_CC["PENDING_CONFLICT_CHECK — S-17 Part B (GV-2)"]
+        PC1["Graphiti service unavailable\n(docker pause or unreachable URL)"]
+        PC2["remember() call still succeeds\nentry stored with\nstatus: 'PENDING_CONFLICT_CHECK'\n(write must never fail due to\nGraphiti outage)"]
+        PC3["Graphiti service resumed"]
+        PC4["GET /pg/pending shows entry\nwith status: 'PENDING_CONFLICT_CHECK'\nfor PE to manually review"]
+        PC1 --> PC2 --> PC3 --> PC4
+    end
+
+    subgraph CROSS_CATALOG["Cross-Catalog Conflict — S-17 Part C (Wave B fix)"]
+        CC1["Global catalog has ACTIVE entry\n(security:tls-minimum-version)\nindexed in Graphiti"]
+        CC2["graphitiSettle() — wait for indexing"]
+        CC3["Project write: content contradicts\nthe global catalog entry\n(project linked via globals: [quorum-test-catalog])"]
+        CC4["detectConflict() searches\ngroupIds: [project, quorum-test-catalog]\n→ match found in global catalog"]
+        CC5["status: 'conflict_detected'\nconflicting entry has\nsource: 'global'\ncatalog_id: 'quorum-test-catalog'"]
+        CC1 --> CC2 --> CC3 --> CC4 --> CC5
+    end
+
+    subgraph ENRICHMENT["Enrichment Shape — S-17 Part D (GV-4)"]
+        EN1["POST /api/review/:id (conflict action)\nLLM enrichment triggered async"]
+        EN2["GET /pg/pending — conflict entry\nenrichment object shape:"]
+        EN3["enrichment.analysis: non-empty string\nenrichment.risks_if_approved: Array (2–4 items)\nenrichment.questions_for_reviewer: Array (2–3 items)"]
+        EN1 --> EN2 --> EN3
+    end
+
+    subgraph WEBHOOK["MT-08 — fireWebhookAsync (manual)"]
+        WH1["Conflict detected → async webhook fired\nNon-blocking: response does NOT wait\nConfigure QUORUM_WEBHOOK_URL\nVerify payload: { event: 'conflict_detected',\ntopic, key, conflict_brief }"]
+    end
+```
+
+---
+
 ## Appendix: Suite Weight Summary
 
 | Tier | Scenarios | Weight | Notes |
 |------|-----------|--------|-------|
 | F4 — core agent workflow | S-02.1–8, S-11 | 156 | every interaction |
-| F3 — daily governance/security | S-05.1–6, S-06, S-15 | 378 | every governance action |
-| F2 — weekly operational | S-03, S-04, S-07, S-08, S-12 | 232 | deviations, deprecations, scoring |
-| F1.5 — periodic | S-10, S-14, S-16 | 61.5 | audits, visual, history |
-| F1 — one-time / rare | S-01, S-09, S-13 | 43 | setup, admin, config |
-| L1 — auth baseline | auth.spec.js | 24 | prerequisite |
+| F3 — daily governance/security | S-05.1–6, S-06, S-15, S-19 | 423 | governance + auth lifecycle |
+| F2 — weekly operational | S-03, S-04, S-07, S-08, S-12, S-17 | 264 | deviations, deprecations, scoring, conflict edge cases |
+| F1.5 — periodic | S-10, S-14, S-16, S-18 | 79.5 | audits, visual, history, governance routes |
+| F1 — one-time / rare | S-01, S-09, S-13 | 49 | setup, admin, config |
 
-**Total: 894.5 + 57 (J16 + S-02.1 search amendment) ≈ 951.5**
-**10% gate: 95.2 | Max single blast radius: 7.6% (S-05.1)**
+**Total suite weight: 1107 | 10% gate: 110.7 | Max single blast radius: 7.1% (S-05.1)**
 
+> Suite total recalculated after adding J17 (32), J18 (18), J19 (45) and extending J04 (+4), J09 (+2), J10 (+10.5), J12 (+22), J13 (+4), J15 (+12).
 > See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full binary tree and gate derivation.
