@@ -63,13 +63,13 @@ services:
       mock-openai:
         condition: service_healthy
 
-  # Remap LocalStack host port 4566 → 4567 to avoid conflicts with a dev
-  # LocalStack that may already be bound to 127.0.0.1:4566.
-  # The gateway and other services connect via the Docker-internal address
-  # http://localstack:4566 (container port) — this override is host-only.
+  # Suppress the localstack container entirely — the test stack reuses the
+  # LocalStack already running on the host (reached via host.docker.internal:4566).
+  # Assigning a profile prevents Docker Compose from starting this service by
+  # default, even when another service lists it under depends_on with required:false.
   localstack:
-    ports:
-      - "4567:4566"
+    profiles:
+      - localstack
 
   # Minimal OpenAI API mock — returns deterministic embedding vectors and canned
   # chat completions. Enables Graphiti/FalkorDB indexing without a real API key.
