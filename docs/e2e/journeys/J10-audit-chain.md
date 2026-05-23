@@ -1,8 +1,8 @@
 # J10 — Audit Chain Integrity
 
 **Scenario ID:** S-10
-**Weight:** 25.5 (17 raw leaves × F1.5) — updated: +4 leaves from Part B append-only enforcement
-**Blast radius:** 2.4% of suite (recalculated against 1045.5 suite total)
+**Weight:** 30 (20 raw leaves × F1.5) — updated: +4 leaves Part B, +3 leaves Part C
+**Blast radius:** 2.7% of suite (recalculated against 1107 suite total)
 **Frequency tier:** F1.5 (periodic — chain integrity checked on scheduled compliance runs)
 **Spec file:** `tests/e2e/scenarios/10-audit-chain.spec.js`
 
@@ -161,3 +161,59 @@ the actual hashes require DB access to verify.
 **Part B uses HTTP surface testing** to confirm Rule 2 enforcement at the route level. The
 constitutional enforcement (`updateEntry()` / `deleteEntry()` always throw) is covered at 100%
 in the unit test suite — Part B confirms no HTTP route inadvertently exposes a bypass.
+
+---
+
+## Part C — No Hard Delete: Graphiti Proxy BLOCKED_METHODS (Constitutional Rule 1)
+
+> Rule 1: no hard delete. `BLOCKED_METHODS` in `gateway/src/shared/graph/client.js` prevents
+> the gateway proxy from forwarding delete tool calls to Graphiti. The methods blocked include
+> `delete_entity`, `delete_fact`, `delete_episode`, `delete_memory`. The gateway must reject
+> these before the call reaches Graphiti.
+>
+> Note: this is also enforced at the MCP layer (`quorum-mcp/src/graph/client.js`). This part
+> tests the gateway proxy layer — the first line of defence.
+
+12. Write a knowledge entry to establish a node in Graphiti:
+    - `POST /pg/versions` as `test-pe`: `topic: "infra"`, `key: "no-delete-test-s10"`
+    - Assert: `status: "ACTIVE"` — node stored in both PostgreSQL and Graphiti graph
+
+13. Attempt to call `delete_entity` via the Graphiti MCP proxy:
+    ```json
+    POST /graphiti/mcp
+    {
+      "method": "tools/call",
+      "params": {
+        "name": "delete_entity",
+        "arguments": { "uuid": "any-test-uuid" }
+      }
+    }
+    ```
+    - Assert: `400` or `403` — gateway blocks the call before it reaches Graphiti
+    - Assert: response body includes an error indicating this method is not permitted
+    - Assert: response does NOT include a `200` or Graphiti confirmation of deletion
+
+14. Verify the entry survives the blocked attempt:
+    - `GET /pg/versions/infra/no-delete-test-s10`
+    - Assert: `status: "ACTIVE"` — entry unchanged (no partial delete side effect)
+    - `GET /pg/audit/lineage/infra/no-delete-test-s10`
+    - Assert: no audit entry for a delete operation (blocked calls do not audit)
+
+---
+
+## Pass Criteria (updated)
+
+- [ ] Every `remember()` call produces exactly 2 audit entries (INTENT + OUTCOME)
+- [ ] Chain positions are sequential integers — no gaps after 3 concurrent writes
+- [ ] No duplicate chain positions
+- [ ] Each `prev_hash` matches the `entry_hash` of the immediately preceding entry
+- [ ] Lineage endpoint returns complete bidirectional audit trail for a topic:key
+- [ ] Audit timeline page shows new entries in correct order with correct fields
+- [ ] Expanded audit entry shows governance_json and outcome_json
+- [ ] `PATCH /pg/audit/:id` → `404` or `405` (no modification route exposed)
+- [ ] `DELETE /pg/audit/:id` → `404` or `405` (no deletion route exposed)
+- [ ] Entry hash is unchanged after failed modification attempts
+- [ ] `GET /pg/audit/stats` total_entries never decreases between calls
+- [ ] `delete_entity` via `/graphiti/mcp` proxy → `400` or `403` (BLOCKED_METHODS enforced)
+- [ ] Entry survives the blocked delete attempt — no partial deletion side effect
+- [ ] No audit entry created for the blocked delete call

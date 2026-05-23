@@ -1,8 +1,8 @@
 # J12 — Knowledge Status State Machine
 
 **Scenario ID:** S-12
-**Weight:** 40 (20 raw leaves × F2) — updated: +8 leaves from Parts E-F (non-PE alongside ACTIVE, SUPERSEDED immutability)
-**Blast radius:** 3.8% of suite (recalculated against 1045.5 suite total)
+**Weight:** 46 (23 raw leaves × F2) — updated: +8 leaves Parts E-F, +3 leaves Part G
+**Blast radius:** 4.2% of suite (recalculated against 1107 suite total)
 **Frequency tier:** F2 (weekly — state transitions happen on every governance action)
 **Spec file:** `tests/e2e/scenarios/12-state-machine.spec.js`
 
@@ -185,3 +185,50 @@ No prior state. Each transition test uses a fresh unique key to prevent state le
 - [ ] SUPERSEDED entry is not affected by deprecate route (route targets ACTIVE only)
 - [ ] Supersede on a DEPRECATED key → `404` (no ACTIVE version to supersede)
 - [ ] Promote on a DEPRECATED key → `404 no_draft` (DEPRECATED is not promotable)
+
+---
+
+## Part G — `GET /api/drafts` Endpoint
+
+> `GET /api/drafts` returns DRAFT entries awaiting PE review. This endpoint drives the PE's
+> Pending Decisions workflow — if it is broken or incomplete, PEs miss work that needs review.
+> Not covered in any other journey.
+
+17. Engineer writes `testing:draft-listing-s12` → assert `DRAFT`
+
+18. PA writes `testing:active-not-a-draft-s12` → assert `ACTIVE`
+
+19. `GET /api/drafts` as `test-pe`:
+    - Assert: `200`, `drafts` array is present
+    - Assert: `testing:draft-listing-s12` appears in the response with `status: "DRAFT"`
+    - Assert: `testing:active-not-a-draft-s12` does NOT appear (ACTIVE entries excluded)
+    - Assert: each draft entry has `topic`, `key`, `content`, `author`, `version` present
+
+20. PA promotes `testing:draft-listing-s12`:
+    - `POST /api/knowledge/testing/draft-listing-s12/promote` with valid note
+    - Assert: `200`, entry transitions to `ACTIVE`
+
+21. `GET /api/drafts` as `test-pe`:
+    - Assert: `testing:draft-listing-s12` no longer appears (it is now ACTIVE — not a draft)
+
+---
+
+## Pass Criteria (updated)
+
+- [ ] DRAFT → ACTIVE via promote works, version number increments
+- [ ] DRAFT → REJECTED works, no ACTIVE entry exists after
+- [ ] ACTIVE → SUPERSEDED: old version preserved (no hard delete), new version ACTIVE
+- [ ] ACTIVE → DEPRECATED: entry disappears from Knowledge browser
+- [ ] Promote when no DRAFT → `404 no_draft`
+- [ ] Duplicate ACTIVE write as PE → `409 already_exists`
+- [ ] Promote an already-ACTIVE entry → `404 no_draft`
+- [ ] Supersede is atomic: never a moment with zero ACTIVE versions for the same key
+- [ ] Never two ACTIVE versions exist simultaneously for the same topic:key
+- [ ] Non-PE write to a key with an existing ACTIVE → `DRAFT` (not `409`)
+- [ ] Non-PE DRAFT and PA ACTIVE can coexist for the same topic:key simultaneously
+- [ ] SUPERSEDED entry is not affected by deprecate route (route targets ACTIVE only)
+- [ ] Supersede on a DEPRECATED key → `404` (no ACTIVE version to supersede)
+- [ ] Promote on a DEPRECATED key → `404 no_draft` (DEPRECATED is not promotable)
+- [ ] `GET /api/drafts` returns DRAFT entries with required fields
+- [ ] `GET /api/drafts` excludes ACTIVE entries
+- [ ] After promotion, entry no longer appears in `GET /api/drafts`

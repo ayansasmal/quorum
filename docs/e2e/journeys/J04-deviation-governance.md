@@ -1,8 +1,8 @@
 # J04 — Deviation Governance Lifecycle
 
 **Scenario ID:** S-04
-**Weight:** 70 (35 raw leaves × F2)
-**Blast radius:** 7.5% of suite — High
+**Weight:** 74 (37 raw leaves × F2) — updated: +2 leaves for denial_hint_count badge in Part F
+**Blast radius:** 6.7% of suite (recalculated against 1107 suite total)
 **Frequency tier:** F2 (weekly operational — deviations recorded on every code scan)
 **Spec file:** `tests/e2e/scenarios/04-deviation-governance.spec.js`
 
@@ -109,7 +109,7 @@ Also register a `project_scans` entry to set `scan_count = 1` (required for CERT
     - Type valid reason: `"Acknowledged — migration to TLS 1.3 tracked in JIRA-4521"`
     - Submit → deviation row shows `ACCEPTED` status badge
 
-### Part F — Deny path with denial hint
+### Part F — Deny path with denial hint + Knowledge browser badge
 
 14. Identify a deviation against the `security:tls-minimum-version` entry
     (which was authored by `test-pe` as PA with high confidence > 0.85).
@@ -118,6 +118,17 @@ Also register a `project_scans` entry to set `scan_count = 1` (required for CERT
     - Assert: denial hint text visible inline:
       `"This global standard was authored by a principal_architect with high confidence. Consider adding a project-level knowledge entry..."`
     - Submit → deviation shows `DENIED` status badge
+
+16. Navigate to the Knowledge browser for `quorum-test-catalog` (the global project):
+    - `GET /api/knowledge?project=quorum-test-catalog` (or via dashboard Knowledge page scoped to catalog)
+    - Locate the `security:tls-minimum-version` entry
+    - Assert: `denial_hint_count > 0` on the entry (at least 1 project has denied this standard)
+    - Assert: the badge or field shows the numeric count (not just a boolean)
+
+    > **`denial_hint_count` is surfaced on global catalog entries only.** It counts the number
+    > of distinct projects that have issued a `deny` action against this specific global standard.
+    > It allows PAs to identify standards that may be too prescriptive or need revision.
+    > This badge is only visible when viewing entries in a global catalog project.
 
 ### Part G — Defer path (constitutional enforcement)
 
@@ -180,6 +191,8 @@ Also register a `project_scans` entry to set `scan_count = 1` (required for CERT
 - [ ] Director cannot action deviations (403 with DEVIATION_ACTION_AUTHORITY rule)
 - [ ] Overdue deviation appears in `/pending` overdue section
 - [ ] Overdue deviation has weight 1.0 in conformance score (expired defer = full weight)
+- [ ] After deny: `denial_hint_count > 0` on the global catalog entry (badge visible in Knowledge browser)
+- [ ] `denial_hint_count` is a numeric count (not boolean)
 
 ---
 
