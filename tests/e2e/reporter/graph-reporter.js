@@ -356,8 +356,9 @@ export default class GraphReporter {
       `Fail score: ${scoreGate.failingOwnScore}/${SUITE.totalOwnScore} (${scoreGate.failurePct}%)`)
     console.log(`   passed:${counts.passed}  flaky:${counts.flaky}  failed:${counts.failed}  ` +
       `correlated:${counts.correlated}  skipped:${counts.skipped}`)
-    console.log(`   📊  Graph report → ${jsonPath}`)
-    console.log(`   🌐  HTML report  → ${htmlPath}`)
+    console.log(`   📊  Graph JSON  → ${jsonPath}`)
+    console.log(`   🌐  Graph HTML  → ${htmlPath}`)
+    console.log(`   💡  Open in browser: open ${htmlPath}  (or: npm run test:e2e:graph)`)
     if (report.blockReason) {
       console.log(`   ⚠️   ${report.blockReason}`)
     }
