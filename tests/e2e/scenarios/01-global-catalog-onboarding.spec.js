@@ -123,7 +123,7 @@ describe('S-01 — Global Catalog Onboarding', () => {
     const res = await client.get('/api/knowledge')
     expect(res.status).toBe(200)
     // Project is fresh — no entries yet
-    expect(Array.isArray(res.data.entries ?? [])).toBe(true)
+    expect(Array.isArray(res.data.items ?? [])).toBe(true)
   })
 
   test('step 3 — GET /api/globals includes the catalog with is_global true', async () => {
@@ -142,7 +142,7 @@ describe('S-01 — Global Catalog Onboarding', () => {
     const client = api(tokens.pe, CATALOG)
     const res = await client.get('/api/knowledge')
     expect(res.status).toBe(200)
-    const entries = res.data.entries ?? res.data ?? []
+    const entries = res.data.items ?? []
     // New catalog should be empty
     const catalogEntries = Array.isArray(entries)
       ? entries.filter(e => e.status === 'ACTIVE')
@@ -166,7 +166,7 @@ describe('S-01 — Global Catalog Onboarding', () => {
     const client = api(tokens.pe, CATALOG)
     const res = await client.get('/api/knowledge')
     expect(res.status).toBe(200)
-    const entries = res.data.entries ?? res.data ?? []
+    const entries = res.data.items ?? []
     const activeEntries = Array.isArray(entries)
       ? entries.filter(e => e.status === 'ACTIVE')
       : []
@@ -219,7 +219,7 @@ describe('S-01 — Global Catalog Onboarding', () => {
     const client = api(tokens.pe, CATALOG)
     const res = await client.get('/api/knowledge')
     expect(res.status).toBe(200)
-    const entries = res.data.entries ?? res.data ?? []
+    const entries = res.data.items ?? []
     const activeEntries = Array.isArray(entries)
       ? entries.filter(e => e.status === 'ACTIVE')
       : []
@@ -251,7 +251,7 @@ describe('S-01 — Global Catalog Onboarding', () => {
     const client = api(tokens.engineer, PROJECT)
     const res = await client.get('/api/knowledge')
     expect(res.status).toBe(200)
-    const entries = res.data.entries ?? res.data ?? []
+    const entries = res.data.items ?? []
     // The project has no local knowledge entries — it only linked to the catalog.
     // Global entries must NOT appear in the knowledge browser (search is separate).
     const projectEntries = Array.isArray(entries)

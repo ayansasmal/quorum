@@ -452,7 +452,7 @@ router.get('/knowledge', async (req, res, next) => {
 
     const [dataResult, countResult] = await Promise.all([
       pool.query(
-        `SELECT topic, key, entity_type, confidence, author, tags, created_at AS updated_at, version
+        `SELECT topic, key, status, entity_type, confidence, author, tags, created_at AS updated_at, version
          FROM knowledge_versions
          WHERE ${where}
          ORDER BY confidence DESC, created_at DESC
