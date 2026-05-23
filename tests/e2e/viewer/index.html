@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quorum — Test Suite Graph</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <style>
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3a;
+      --text:      #e2e8f0;
+      --muted:     #8892a4;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --orange:    #f97316;
+      --yellow:    #eab308;
+      --gray:      #6b7280;
+      --blue:      #3b82f6;
+      --panel-w:   340px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* header */
+    header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10; }
+    header h1 { font-size: 14px; font-weight: 600; }
+    #gate-badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .05em; }
+    #gate-badge.SAFE       { background: #14532d; color: var(--green); }
+    #gate-badge.WARNING    { background: #713f12; color: var(--yellow); }
+    #gate-badge.BLOCKED    { background: #7f1d1d; color: var(--red); }
+    #gate-badge.HARD_BLOCK { background: #450a0a; color: #fca5a5; border: 1px solid var(--red); }
+    #score-info { font-size: 12px; color: var(--muted); }
+    #counts { display: flex; gap: 10px; }
+    .count-chip { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+    .count-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    #legend { display: flex; gap: 10px; margin-left: auto; }
+    .leg { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; }
+    #load-wrap { display: flex; align-items: center; gap: 8px; }
+    #load-btn { padding: 4px 12px; font-size: 12px; border-radius: 6px; background: var(--blue); color: #fff; border: none; cursor: pointer; }
+    #load-btn:hover { background: #2563eb; }
+    #file-input { display: none; }
+    #file-name { font-size: 11px; color: var(--muted); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* filter bar */
+    #filter-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 14px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; align-items: center; }
+    #filter-bar label { font-size: 11px; color: var(--muted); }
+    .fchip { font-size: 11px; padding: 2px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; color: var(--muted); background: var(--bg); }
+    .fchip.on { border-color: var(--blue); color: #fff; background: #1e3a5f; }
+    .fchip:hover { border-color: var(--border); color: var(--text); }
+    .fsep { color: var(--border); }
+
+    /* main layout */
+    main { display: flex; flex: 1; overflow: hidden; }
+    #cy { flex: 1; position: relative; }
+
+    /* panel */
+    #panel { width: var(--panel-w); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; transition: width .18s; }
+    #panel.hidden { width: 0; border-left: none; overflow: hidden; }
+    #pin { padding: 14px; min-width: var(--panel-w); }
+    #ph { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    #pid { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .08em; }
+    #pname { font-size: 15px; font-weight: 600; margin-top: 2px; }
+    #close-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; }
+    #close-btn:hover { color: var(--text); }
+    #pstatus { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+    .psec { margin-bottom: 12px; }
+    .psec h3 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 6px; }
+    .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .kv { background: var(--bg); padding: 6px 8px; border-radius: 6px; }
+    .kv-l { font-size: 10px; color: var(--muted); display: block; }
+    .kv-v { font-size: 13px; font-weight: 600; display: block; }
+    .pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .pill { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; }
+    .pill.click { cursor: pointer; border: none; background: none; color: var(--blue); padding: 2px 4px; text-decoration: underline; }
+    .err-block { background: #1c0a0a; border: 1px solid #5b1a1a; border-radius: 6px; padding: 10px; margin-bottom: 7px; }
+    .err-msg { font-size: 11px; font-family: monospace; color: #fca5a5; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow-y: auto; }
+    .err-loc { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .lnk { font-size: 11px; color: var(--blue); cursor: pointer; text-decoration: none; display: block; }
+    .lnk:hover { text-decoration: underline; }
+
+    /* empty state */
+    #empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--muted); pointer-events: none; }
+    #empty h2 { font-size: 18px; margin-bottom: 8px; }
+    #empty p { font-size: 13px; line-height: 1.6; max-width: 340px; }
+    #empty code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Quorum · Test Suite Graph</h1>
+  <span id="gate-badge" class="SAFE">SAFE</span>
+  <span id="score-info">no data loaded</span>
+  <span style="color:var(--border)">|</span>
+  <div id="counts"></div>
+  <div id="legend">
+    <div class="leg"><div class="leg-dot" style="background:#22c55e"></div>passed</div>
+    <div class="leg"><div class="leg-dot" style="background:#eab308"></div>flaky</div>
+    <div class="leg"><div class="leg-dot" style="background:#ef4444"></div>failed</div>
+    <div class="leg"><div class="leg-dot" style="background:#f97316"></div>correlated</div>
+    <div class="leg"><div class="leg-dot" style="background:#6b7280"></div>skipped</div>
+  </div>
+  <div id="load-wrap">
+    <button id="load-btn">Load JSON</button>
+    <input type="file" id="file-input" accept=".json">
+    <span id="file-name">suite-graph.json</span>
+  </div>
+</header>
+
+<div id="filter-bar">
+  <label>Pillar:</label>
+  <div class="fchip on" data-pillar="all">All</div>
+  <div class="fchip" data-pillar="governance_integrity">Governance ⛔</div>
+  <div class="fchip" data-pillar="security">Security ⛔</div>
+  <div class="fchip" data-pillar="data_integrity">Data Integrity ⛔</div>
+  <div class="fchip" data-pillar="functional_correctness">Functional</div>
+  <div class="fchip" data-pillar="federation">Federation</div>
+  <div class="fchip" data-pillar="operational_reliability">Operational</div>
+  <div class="fchip" data-pillar="observability">Observability</div>
+  <div class="fchip" data-pillar="developer_experience">DX</div>
+  <span class="fsep">|</span>
+  <div class="fchip" data-status="failed">🔴 Failed only</div>
+  <div class="fchip" data-status="hard_block">🛑 HARD_BLOCK</div>
+</div>
+
+<main>
+  <div id="cy">
+    <div id="empty">
+      <h2>No suite results loaded</h2>
+      <p>Click <strong>Load JSON</strong> and select
+        <code>test-results/suite-graph.json</code> from the Playwright run.</p>
+      <p style="margin-top:10px">Serving this directory statically? The viewer auto-fetches
+        <code>./suite-graph.json</code>.</p>
+    </div>
+  </div>
+
+  <div id="panel" class="hidden">
+    <div id="pin">
+      <div id="ph">
+        <div>
+          <div id="pid"></div>
+          <div id="pname"></div>
+        </div>
+        <button id="close-btn" aria-label="Close panel">×</button>
+      </div>
+      <div id="pstatus"></div>
+      <!-- Scoring -->
+      <div class="psec">
+        <h3>Scoring</h3>
+        <div class="kv-grid">
+          <div class="kv"><span class="kv-l">OwnScore</span><span class="kv-v" id="p-own"></span></div>
+          <div class="kv"><span class="kv-l">FailureCost</span><span class="kv-v" id="p-fc"></span></div>
+          <div class="kv"><span class="kv-l">Criticality (C)</span><span class="kv-v" id="p-c"></span></div>
+          <div class="kv"><span class="kv-l">Detection Lag (D)</span><span class="kv-v" id="p-d"></span></div>
+          <div class="kv"><span class="kv-l">Frequency Tier</span><span class="kv-v" id="p-f"></span></div>
+          <div class="kv"><span class="kv-l">Leaf Assertions</span><span class="kv-v" id="p-leaf"></span></div>
+        </div>
+      </div>
+      <!-- Pillar -->
+      <div class="psec">
+        <h3>Pillar</h3>
+        <div id="p-pillar"></div>
+      </div>
+      <!-- Correlations (hidden when none) -->
+      <div class="psec" id="p-corr-sec" style="display:none">
+        <h3>Code-path correlations</h3>
+        <div id="p-corr-to"></div>
+        <div id="p-corr-from" style="margin-top:6px"></div>
+      </div>
+      <!-- Errors (hidden when none) -->
+      <div class="psec" id="p-err-sec" style="display:none">
+        <h3>Failure logs</h3>
+        <div id="p-errors"></div>
+      </div>
+      <!-- Links -->
+      <div class="psec">
+        <h3>Links</h3>
+        <a id="p-spec" class="lnk">→ Spec file</a>
+        <a id="p-journey" class="lnk" style="margin-top:4px">→ Journey doc</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ─── Constants ─────────────────────────────────────────────────────────────────
+const STATUS_COLOR = { passed:'#22c55e', flaky:'#eab308', failed:'#ef4444', correlated:'#f97316', skipped:'#6b7280' }
+const STATUS_BG    = { passed:'#14532d', flaky:'#713f12', failed:'#7f1d1d', correlated:'#7c2d12', skipped:'#1f2937' }
+const STATUS_LABEL = { passed:'✅ passed', flaky:'🟡 flaky', failed:'🔴 failed', correlated:'🟠 correlated', skipped:'⚫ skipped' }
+
+const PILLAR_BG     = { governance_integrity:'rgba(239,68,68,.06)',    security:'rgba(249,115,22,.06)',  data_integrity:'rgba(59,130,246,.06)', functional_correctness:'rgba(34,197,94,.06)', federation:'rgba(168,85,247,.06)', operational_reliability:'rgba(20,184,166,.06)', observability:'rgba(99,102,241,.06)', developer_experience:'rgba(236,72,153,.06)' }
+const PILLAR_BORDER = { governance_integrity:'rgba(239,68,68,.25)',    security:'rgba(249,115,22,.25)',  data_integrity:'rgba(59,130,246,.25)', functional_correctness:'rgba(34,197,94,.25)', federation:'rgba(168,85,247,.25)', operational_reliability:'rgba(20,184,166,.25)', observability:'rgba(99,102,241,.25)', developer_experience:'rgba(236,72,153,.25)' }
+const PILLAR_LABEL  = { governance_integrity:'Governance Integrity ⛔', security:'Security & Access Control ⛔', data_integrity:'Data Integrity ⛔', functional_correctness:'Functional Correctness', federation:'Federation', operational_reliability:'Operational Reliability', observability:'Observability', developer_experience:'Developer Experience' }
+const D_LABEL       = { 2.0:'silent', 1.5:'deferred', 1.0:'immediate' }
+
+// Node radius: sqrt-scaled 22–55 px (S-15 OwnScore=378 is max)
+function radius(ownScore) { return Math.round(22 + Math.sqrt(ownScore / 378) * 33) }
+
+// ─── DOM helpers (no innerHTML with dynamic data) ───────────────────────────────
+/**
+ * Create an element with optional text content and attributes.
+ * @param {string} tag
+ * @param {object} [opts] - { cls, text, style, ...attrs }
+ * @returns {HTMLElement}
+ */
+function el(tag, opts = {}) {
+  const e = document.createElement(tag)
+  if (opts.cls)   e.className = opts.cls
+  if (opts.text != null) e.textContent = String(opts.text)
+  if (opts.style) Object.assign(e.style, opts.style)
+  for (const [k, v] of Object.entries(opts)) {
+    if (['cls','text','style'].includes(k)) continue
+    e.setAttribute(k, v)
+  }
+  return e
+}
+
+/** Append multiple children to a parent. */
+function append(parent, ...children) { children.forEach(c => c && parent.appendChild(c)); return parent }
+
+/** Replace all children of an element with new children. */
+function setChildren(parent, ...children) { parent.replaceChildren(...children.filter(Boolean)) }
+
+// ─── Cytoscape instance ────────────────────────────────────────────────────────
+let cy = null
+
+function buildElements(report) {
+  const elems = []
+  const pillars = [...new Set(report.nodes.map(n => n.pillar))]
+
+  // Compound pillar parents
+  for (const p of pillars) {
+    elems.push({ data: { id: `pillar:${p}`, label: PILLAR_LABEL[p] ?? p }, classes: ['pillar'] })
+  }
+
+  // Scenario nodes
+  for (const n of report.nodes) {
+    const r = radius(n.ownScore)
+    elems.push({
+      data: { id: n.id, label: `${n.id}\n${n.label}`, parent: `pillar:${n.pillar}`,
+              status: n.status, ownScore: n.ownScore, failureCost: n.failureCost, radius: r, nd: n },
+      classes: [n.status, n.zeroTolerance ? 'zt' : 'sg']
+    })
+  }
+
+  // Edges
+  for (const e of report.edges) {
+    elems.push({ data: { id: `${e.source}--${e.target}`, source: e.source, target: e.target }, classes: ['corr'] })
+  }
+
+  return elems
+}
+
+function initGraph(report) {
+  document.getElementById('empty').style.display = 'none'
+  if (cy) cy.destroy()
+
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: buildElements(report),
+    style: [
+      { selector: 'node.pillar', style: {
+          label: 'data(label)', 'text-valign': 'top', 'text-halign': 'center',
+          'font-size': 11, 'font-weight': 600, color: '#8892a4', 'text-margin-y': -4,
+          'background-color': e => PILLAR_BG[e.id().replace('pillar:','')] ?? 'transparent',
+          'border-color': e => PILLAR_BORDER[e.id().replace('pillar:','')] ?? '#2a2d3a',
+          'border-width': 1, padding: 18, shape: 'roundrectangle' } },
+
+      { selector: 'node[ownScore]', style: {
+          label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
+          'font-size': 9, 'text-wrap': 'wrap', 'text-max-width': 70, color: '#e2e8f0', 'line-height': 1.3,
+          shape: 'ellipse',
+          width:  e => e.data('radius') * 2,
+          height: e => e.data('radius') * 2,
+          'background-color': e => STATUS_COLOR[e.data('status')] ?? '#6b7280',
+          'border-width': e => e.hasClass('zt') ? 3 : 1,
+          'border-color': '#ffffff', 'border-opacity': 0.15,
+          'transition-property': 'background-color', 'transition-duration': '0.2s' } },
+
+      { selector: 'node.failed', style: {
+          'border-color': '#ef4444', 'border-opacity': 0.8, 'border-width': 3,
+          'shadow-blur': 12, 'shadow-color': '#ef4444', 'shadow-opacity': 0.4 } },
+
+      { selector: 'node.correlated', style: {
+          'border-style': 'dashed', 'border-color': '#f97316', 'border-opacity': 0.7, 'border-width': 2 } },
+
+      { selector: 'edge.corr', style: {
+          width: 2, 'line-color': '#3b82f6', 'line-opacity': 0.5,
+          'target-arrow-color': '#3b82f6', 'target-arrow-shape': 'triangle',
+          'arrow-scale': 0.8, 'curve-style': 'bezier' } },
+
+      { selector: 'node.hi', style: { 'border-width': 4, 'border-color': '#ffffff', 'border-opacity': 0.8 } },
+    ],
+    layout: {
+      name: 'cose', animate: false, randomize: false, componentSpacing: 80,
+      nodeRepulsion: () => 8000, nodeOverlap: 20, idealEdgeLength: () => 120,
+      edgeElasticity: () => 100, nestingFactor: 1.2, gravity: 0.25,
+      numIter: 1500, coolingFactor: 0.99, minTemp: 1.0
+    },
+    wheelSensitivity: 0.3,
+  })
+
+  cy.on('tap', 'node[ownScore]', evt => showPanel(evt.target.data('nd')))
+  cy.on('tap', evt => { if (evt.target === cy) closePanel() })
+  cy.on('mouseover', 'node[ownScore]', evt => evt.target.addClass('hi'))
+  cy.on('mouseout',  'node[ownScore]', evt => evt.target.removeClass('hi'))
+}
+
+// ─── Panel ─────────────────────────────────────────────────────────────────────
+function showPanel(nd) {
+  document.getElementById('panel').classList.remove('hidden')
+
+  // Header
+  document.getElementById('pid').textContent  = nd.id
+  document.getElementById('pname').textContent = nd.label
+
+  const ps = document.getElementById('pstatus')
+  ps.textContent = STATUS_LABEL[nd.status] ?? nd.status
+  ps.style.background = STATUS_BG[nd.status] ?? '#1f2937'
+  ps.style.color = STATUS_COLOR[nd.status] ?? '#6b7280'
+
+  // KV grid
+  document.getElementById('p-own').textContent  = nd.ownScore
+  document.getElementById('p-fc').textContent   = nd.failureCost
+  document.getElementById('p-c').textContent    = nd.criticality
+  document.getElementById('p-d').textContent    = `${nd.detectionLag} (${D_LABEL[nd.detectionLag] ?? '?'})`
+  document.getElementById('p-f').textContent    = `F${nd.frequencyTier}`
+  document.getElementById('p-leaf').textContent = nd.leafCount
+
+  // Pillar label
+  const pil = document.getElementById('p-pillar')
+  setChildren(pil,
+    el('span', { text: `${PILLAR_LABEL[nd.pillar] ?? nd.pillar} — ${nd.zeroTolerance ? 'zero-tolerance ⛔' : 'score-gated 🟡'}`, style: { fontSize: '12px' } })
+  )
+
+  // Correlations
+  const corrSec  = document.getElementById('p-corr-sec')
+  const corrTo   = document.getElementById('p-corr-to')
+  const corrFrom = document.getElementById('p-corr-from')
+  setChildren(corrTo); setChildren(corrFrom)
+
+  const hasCorrTo   = nd.correlatesTo?.length > 0
+  const hasCorrFrom = !!nd.correlatedFrom
+
+  corrSec.style.display = (hasCorrTo || hasCorrFrom) ? '' : 'none'
+
+  if (hasCorrTo) {
+    const label = el('div', { text: 'Failure propagates to:', style: { fontSize: '11px', color: '#8892a4', marginBottom: '4px' } })
+    const pills = el('div', { cls: 'pills' })
+    for (const id of nd.correlatesTo) {
+      const btn = el('button', { cls: 'pill click', text: id })
+      btn.addEventListener('click', () => selectNode(id))
+      pills.appendChild(btn)
+    }
+    append(corrTo, label, pills)
+  }
+
+  if (hasCorrFrom) {
+    const note = el('div', { style: { fontSize: '11px', color: '#f97316' } })
+    const label = el('span', { text: '⚠ Correlated from ' })
+    const btn = el('button', { cls: 'pill click', text: nd.correlatedFrom, style: { color: '#f97316' } })
+    btn.addEventListener('click', () => selectNode(nd.correlatedFrom))
+    append(note, label, btn)
+    corrFrom.appendChild(note)
+  }
+
+  // Errors
+  const errSec = document.getElementById('p-err-sec')
+  const errCon = document.getElementById('p-errors')
+  setChildren(errCon)
+
+  if (nd.logs && nd.logs.length > 0) {
+    errSec.style.display = ''
+    for (const err of nd.logs) {
+      const block = el('div', { cls: 'err-block' })
+      const msgEl = el('pre', { cls: 'err-msg', text: err.message ?? '' })
+      append(block, msgEl)
+      if (err.location) append(block, el('div', { cls: 'err-loc', text: err.location }))
+      if (err.screenshot) {
+        const lnk = el('a', { cls: 'lnk', text: '📸 Screenshot', href: err.screenshot, target: '_blank', style: { marginTop: '4px', fontSize: '11px' } })
+        append(block, lnk)
+      }
+      errCon.appendChild(block)
+    }
+  } else {
+    errSec.style.display = 'none'
+  }
+
+  // Links — use textContent, set href attribute directly
+  const specLnk = document.getElementById('p-spec')
+  specLnk.textContent = '→ Spec file'
+  specLnk.setAttribute('href', nd.specFile ?? '#')
+
+  const jLnk = document.getElementById('p-journey')
+  jLnk.textContent = '→ Journey doc'
+  jLnk.setAttribute('href', nd.journeyFile ? `../${nd.journeyFile}` : '#')
+}
+
+function closePanel() { document.getElementById('panel').classList.add('hidden') }
+
+function selectNode(id) {
+  if (!cy) return
+  // cytoscape ID selector: prefix # then CSS-escaped ID
+  const node = cy.getElementById(id)
+  if (!node || node.empty()) return
+  cy.animate({ fit: { eles: node, padding: 80 }, duration: 400 })
+  showPanel(node.data('nd'))
+}
+
+// ─── Header update (DOM-only) ──────────────────────────────────────────────────
+function updateHeader(report) {
+  const badge = document.getElementById('gate-badge')
+  badge.textContent = report.deploymentStatus
+  badge.className = report.deploymentStatus
+  if (report.blockReason) badge.title = report.blockReason
+
+  const si = document.getElementById('score-info')
+  setChildren(si,
+    el('strong', { text: report.scoreGate.failingOwnScore }),
+    document.createTextNode(`/${report.totalOwnScore} pts failing (`),
+    el('strong', { text: `${report.scoreGate.failurePct}%` }),
+    document.createTextNode(')')
+  )
+
+  const colors = { passed:'#22c55e', flaky:'#eab308', failed:'#ef4444', correlated:'#f97316', skipped:'#6b7280' }
+  const counts = document.getElementById('counts')
+  const chips = Object.entries(report.counts)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => {
+      const chip = el('div', { cls: 'count-chip' })
+      append(chip, el('div', { cls: 'count-dot', style: { background: colors[k] ?? '#fff' } }), el('span', { text: `${v} ${k}` }))
+      return chip
+    })
+  setChildren(counts, ...chips)
+}
+
+// ─── Pillar / status filter ────────────────────────────────────────────────────
+const activeFilter = { pillar: 'all', status: null }
+
+function applyFilter() {
+  if (!cy) return
+  cy.batch(() => {
+    cy.nodes('[ownScore]').forEach(node => {
+      const nd = node.data('nd')
+      let vis = true
+      if (activeFilter.pillar !== 'all') vis = vis && nd.pillar === activeFilter.pillar
+      if (activeFilter.status === 'failed')     vis = vis && (nd.status === 'failed' || nd.status === 'correlated')
+      if (activeFilter.status === 'hard_block') vis = vis && (nd.zeroTolerance && (nd.status === 'failed' || nd.status === 'correlated'))
+      node.style('display', vis ? 'element' : 'none')
+    })
+    cy.edges().forEach(edge => {
+      const sv = cy.getElementById(edge.data('source')).style('display') !== 'none'
+      const tv = cy.getElementById(edge.data('target')).style('display') !== 'none'
+      edge.style('display', sv && tv ? 'element' : 'none')
+    })
+  })
+}
+
+document.querySelectorAll('.fchip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const p = chip.dataset.pillar
+    const s = chip.dataset.status
+    if (p) {
+      document.querySelectorAll('[data-pillar]').forEach(c => c.classList.remove('on'))
+      chip.classList.add('on')
+      activeFilter.pillar = p
+    }
+    if (s) {
+      const wasOn = chip.classList.contains('on')
+      document.querySelectorAll('[data-status]').forEach(c => c.classList.remove('on'))
+      if (!wasOn) { chip.classList.add('on'); activeFilter.status = s }
+      else activeFilter.status = null
+    }
+    applyFilter()
+  })
+})
+
+// ─── Load report ───────────────────────────────────────────────────────────────
+function loadReport(report) {
+  updateHeader(report)
+  initGraph(report)
+}
+
+document.getElementById('load-btn').addEventListener('click', () =>
+  document.getElementById('file-input').click())
+
+document.getElementById('file-input').addEventListener('change', evt => {
+  const file = evt.target.files[0]
+  if (!file) return
+  document.getElementById('file-name').textContent = file.name
+  const reader = new FileReader()
+  reader.onload = e => {
+    try { loadReport(JSON.parse(e.target.result)) }
+    catch (err) { alert(`Invalid JSON: ${err.message}`) }
+  }
+  reader.readAsText(file)
+})
+
+document.getElementById('close-btn').addEventListener('click', closePanel)
+
+// Auto-fetch when served statically
+fetch('./suite-graph.json')
+  .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+  .then(loadReport)
+  .catch(() => {/* no-op: show empty state */})
+</script>
+</body>
+</html>
