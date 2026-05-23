@@ -1,0 +1,66 @@
+##
+# docker-compose.test.yml — E2E test environment overrides.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#
+# Or via npm:
+#   npm run test:e2e:env:up
+#
+# What this file overrides:
+#
+#   gateway   — injects the committed test key pair (base64-encoded PEM) so the
+#               gateway accepts E2E JWTs signed by tests/e2e/fixtures/test-private-key.pem.
+#               Without this, the gateway generates an ephemeral key pair on startup
+#               and rejects all test tokens with 401.
+#
+#   graphiti  — redirects OpenAI calls to the local mock-openai service.
+#               Without this, Graphiti requires a real OPENAI_API_KEY and makes
+#               live network calls, which are non-deterministic and cost money.
+#
+#   mock-openai — lightweight Node.js HTTP server that returns valid but synthetic
+#                 OpenAI embedding vectors and chat completion responses. Deterministic
+#                 embeddings enable FalkorDB vector indexing in tests. No real API key.
+#
+# These are committed test keys — NOT production secrets. The private key exists
+# solely to let the test suite produce JWTs without running the full OAuth flow.
+# The keys are P-256 (ES256) and should never be used outside the test environment.
+##
+
+name: quorum-test
+
+services:
+
+  gateway:
+    environment:
+      # Inject the E2E test key pair so the gateway accepts test-signed JWTs.
+      # Values are base64-encoded PEM — decoded by keys.js via Buffer.from(b64,'base64').
+      # Generated from tests/e2e/fixtures/test-{private,public}-key.pem.
+      - QUORUM_JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZzlNbVZzVUpyMHZURjZldTEKc2VrdVh3RlJ0MzNkQTZJNWd0eGJOM0oxNGxDaFJBTkNBQVM5dmRZZWZZbEJwOWRMUFRxQVdxbzBlbmFGd2V4VAowMGFEK1NtSisvOFFxcmQ2cURmYm1ZT080bmhoNW5NOVhpbkhmUm9JcmU1TDlVNm1KbkVkQm54NgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg==
+      - QUORUM_JWT_PUBLIC_KEY=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdmIzV0huMkpRYWZYU3owNmdGcXFOSHAyaGNIcwpVOU5HZy9rcGlmdi9FS3EzZXFnMzI1bURqdUo0WWVaelBWNHB4MzBhQ0szdVMvVk9waVp4SFFaOGVnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+      # Mark as test env — keeps dev-only features enabled without production guards.
+      - NODE_ENV=test
+
+  graphiti:
+    environment:
+      # Redirect all OpenAI calls to the local mock service.
+      # The OpenAI Python SDK respects OPENAI_BASE_URL — Graphiti uses the SDK.
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+    depends_on:
+      mock-openai:
+        condition: service_healthy
+
+  # Minimal OpenAI API mock — returns deterministic embedding vectors and canned
+  # chat completions. Enables Graphiti/FalkorDB indexing without a real API key.
+  mock-openai:
+    build:
+      context: ./mock-openai
+    ports:
+      - "3003:3003"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

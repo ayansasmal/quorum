@@ -24,9 +24,19 @@ const GATEWAY = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
 const PRIV    = readFileSync(resolve(__dir, '../fixtures/test-private-key.pem'))
 const KEY_ID  = 'test-key-1'
 
-/** @param {string} sub */
+/**
+ * Signs a minimal test JWT. MUST include issuer: 'quorum-gateway' — verify-jwt.js
+ * passes { issuer: 'quorum-gateway' } to jose jwtVerify and rejects on mismatch.
+ *
+ * @param {string} sub
+ */
 function makeToken(sub) {
-  return jwt.sign({ sub }, PRIV, { algorithm: 'ES256', expiresIn: '1h', keyid: KEY_ID })
+  return jwt.sign({ sub }, PRIV, {
+    algorithm: 'ES256',
+    expiresIn: '1h',
+    keyid:     KEY_ID,
+    issuer:    'quorum-gateway',
+  })
 }
 
 /** Polls /health until the gateway is ready or timeout elapses. */

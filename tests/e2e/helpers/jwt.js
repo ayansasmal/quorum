@@ -26,14 +26,20 @@ const KEY_ID   = 'test-key-1'
 /**
  * Signs a minimal ES256 JWT for the given subject using the committed test key.
  *
- * @param {string} sub - GitHub username of the test user (e.g. 'test-pe')
+ * The `issuer` claim MUST be 'quorum-gateway' — verify-jwt.js passes
+ * `{ issuer: 'quorum-gateway' }` to jose's jwtVerify and it will reject any
+ * token that is missing or mismatches this claim.
+ *
+ * @param {string} sub    - GitHub username of the test user (e.g. 'test-pe')
+ * @param {object} [extra] - Additional payload fields (e.g. `{ is_admin: true }`)
  * @returns {string} Signed JWT
  */
-export function token(sub) {
-  return jwt.sign({ sub }, PRIV_KEY, {
+export function token(sub, extra = {}) {
+  return jwt.sign({ sub, ...extra }, PRIV_KEY, {
     algorithm: 'ES256',
     expiresIn: '1h',
     keyid:     KEY_ID,
+    issuer:    'quorum-gateway',
   })
 }
 
@@ -63,5 +69,7 @@ export const tokens = {
   director:   token('test-director'),
   vp:         token('test-vp'),
   product:    token('test-product'),
-  admin:      token('test-admin'),
+  // is_admin:true payload needed — verify-jwt.js reads payload.is_admin ?? false.
+  // Without it, admin routes (is_admin guard) return 403.
+  admin:      token('test-admin', { is_admin: true }),
 }

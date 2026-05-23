@@ -129,7 +129,17 @@ graph TD
 - `quorum-mcp/skill/SKILL.md`: Conformance Scanning section (deviate(), conformance(), quorum:scan orchestration, pending() deviation handling), updated quick reference, references/scan.md added
 - `quorum-mcp/README.md`: tool count 12→14, test count 559→620, 14-tool table, v0.4 governance rules
 
-**E2E suite infrastructure (in progress):** `tests/e2e/scenarios/` + `tests/e2e/helpers/` created. Playwright helpers: `api.js`, `jwt.js` (corrected: `tokens.pe` = test-pe = principal_architect, no phantom test-pa), `seed.js`, `graphiti.js`, `data.js`, `setup.js` (globalSetup: T0 probes + fixture upload). First spec: `01-global-catalog-onboarding.spec.js` (S-01, 13 tests). Search route G-8 fix: `GET /api/search` now loads project `globals`, passes `groupIds: [project, ...globals]` to Graphiti, joins `q_projects` in postgres fallback, annotates each result with `source: 'project'|'global'` and `catalog_id: string|null`; `normalizeGroupId` imported and reverse-mapped for Graphiti node annotation. 675 gateway tests still pass.
+**E2E suite infrastructure (complete):** Full test scaffolding ready.
+- Helpers: `api.js`, `jwt.js` (`tokens.pe` = test-pe = principal_architect; all tokens include `issuer: 'quorum-gateway'`; `tokens.admin` includes `is_admin: true`), `seed.js`, `graphiti.js`, `data.js`, `setup.js` (globalSetup: T0 probes + fixture upload), `teardown.js` (no-op; uid() isolation)
+- Fixtures: `quorum-test-catalog.quorum.json` (is_global:true, members: test-pe + test-architect), `quorum-test-project.quorum.json` (globals: [quorum-test-catalog], all 8 test users)
+- First spec: `01-global-catalog-onboarding.spec.js` (S-01, 13 tests); fresh timestamp-suffixed config IDs guarantee 201 on upload
+- `docker-compose.test.yml` overrides gateway with base64-encoded test key pair (so test JWTs are accepted), redirects Graphiti to `mock-openai` service
+- `mock-openai/` (server.js + Dockerfile + package.json): zero-dependency Node.js HTTP mock; `POST /v1/embeddings` returns deterministic 1536-dim unit-normalised vectors; `POST /v1/chat/completions` returns stable JSON content; used by Graphiti in test env to avoid real OpenAI calls
+- `playwright.config.js` has `globalSetup` + `globalTeardown` registered
+- Root `package.json` scripts: `test:e2e`, `test:e2e:headed`, `test:e2e:ui`, `test:e2e:report`, `test:e2e:env:up`, `test:e2e:env:down`, `test:e2e:env:clean`, `test:e2e:full`
+- Root `devDependencies` added: `@playwright/test ^1.50.0`, `axios ^1.7.9`, `jsonwebtoken ^9.0.2`
+- Search route G-8 fix: `GET /api/search` loads project `globals`, passes `groupIds: [project, ...globals]` to Graphiti, joins `q_projects` in postgres fallback, annotates each result with `source: 'project'|'global'` and `catalog_id`. 675 gateway tests still pass.
+- **Known gap:** `quorum-test-catalog` fixture only has test-pe + test-architect as members (not test-engineer). Scenarios using `tokens.engineer` scoped to `quorum-test-catalog` directly will get `role: null`. J01 uses fresh configs (which include test-engineer) — not affected.
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 

@@ -35,14 +35,25 @@
     "job:decay": "node scripts/decay-confidence.js",
     "job:archive": "node scripts/archive-audit.js",
     "job:recheck": "node scripts/recheck-conflicts.js",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:env:up": "docker compose -f docker-compose.yml -f docker-compose.test.yml up -d",
+    "test:e2e:env:down": "docker compose -f docker-compose.yml -f docker-compose.test.yml down",
+    "test:e2e:env:clean": "docker compose -f docker-compose.yml -f docker-compose.test.yml down --volumes",
+    "test:e2e:full": "npm run test:e2e:env:up && playwright test"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",
     "@commitlint/config-conventional": "^21.0.0",
+    "@playwright/test": "^1.50.0",
     "@vitest/coverage-v8": "4.1.2",
+    "axios": "^1.7.9",
     "commit-and-tag-version": "^12.7.3",
     "husky": "^9.1.7",
+    "jsonwebtoken": "^9.0.2",
     "vitest": "4.1.2"
   },
   "overrides": {

@@ -61,6 +61,10 @@ export default defineConfig({
   // Defined in tests/e2e/helpers/setup.js — must export a default function.
   globalSetup: './tests/e2e/helpers/setup.js',
 
+  // No-op teardown — uid() key isolation means no cleanup is needed.
+  // See tests/e2e/helpers/teardown.js for rationale.
+  globalTeardown: './tests/e2e/helpers/teardown.js',
+
   // Projects (browser targets — most Quorum scenarios are API-only)
   projects: [
     {

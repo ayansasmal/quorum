@@ -1,0 +1,11 @@
+{
+  "name": "mock-openai",
+  "version": "1.0.0",
+  "description": "Minimal OpenAI API mock for Quorum E2E tests",
+  "type": "module",
+  "main": "server.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}
