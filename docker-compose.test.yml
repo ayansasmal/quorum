@@ -2,21 +2,26 @@
 # docker-compose.test.yml — E2E test environment overrides.
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
 #
 # Or via npm:
-#   npm run test:e2e:env:up
+#   npm run test:e2e:env:up      (build + start)
+#   npm run test:e2e:env:setup   (build + start + init LocalStack)
 #
 # What this file overrides:
 #
-#   gateway   — injects the committed test key pair (base64-encoded PEM) so the
-#               gateway accepts E2E JWTs signed by tests/e2e/fixtures/test-private-key.pem.
-#               Without this, the gateway generates an ephemeral key pair on startup
-#               and rejects all test tokens with 401.
+#   gateway     — injects the committed test key pair (base64-encoded PEM) so the
+#                 gateway accepts E2E JWTs signed by tests/e2e/fixtures/test-private-key.pem.
+#                 Without this, the gateway generates an ephemeral key pair on startup
+#                 and rejects all test tokens with 401.
 #
-#   graphiti  — redirects OpenAI calls to the local mock-openai service.
-#               Without this, Graphiti requires a real OPENAI_API_KEY and makes
-#               live network calls, which are non-deterministic and cost money.
+#   graphiti    — redirects OpenAI calls to the local mock-openai service.
+#                 Without this, Graphiti requires a real OPENAI_API_KEY and makes
+#                 live network calls, which are non-deterministic and cost money.
+#
+#   localstack  — remaps the HOST port from 4566 → 4567 to avoid conflicts with any
+#                 dev LocalStack that may be running on the host. The CONTAINER port
+#                 (4566) is unchanged, so the gateway's AWS_ENDPOINT_URL is unaffected.
 #
 #   mock-openai — lightweight Node.js HTTP server that returns valid but synthetic
 #                 OpenAI embedding vectors and chat completion responses. Deterministic
@@ -51,6 +56,14 @@ services:
       mock-openai:
         condition: service_healthy
 
+  # Remap LocalStack host port 4566 → 4567 to avoid conflicts with a dev
+  # LocalStack that may already be bound to 127.0.0.1:4566.
+  # The gateway and other services connect via the Docker-internal address
+  # http://localstack:4566 (container port) — this override is host-only.
+  localstack:
+    ports:
+      - "4567:4566"
+
   # Minimal OpenAI API mock — returns deterministic embedding vectors and canned
   # chat completions. Enables Graphiti/FalkorDB indexing without a real API key.
   mock-openai:
@@ -59,8 +72,14 @@ services:
     ports:
       - "3003:3003"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3003/health"]
+      # Use node itself rather than wget — node is guaranteed in node:20-alpine,
+      # and busybox wget's behaviour with -qO- is inconsistent across image versions.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://127.0.0.1:3003/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 10
-      start_period: 5s
+      start_period: 10s
