@@ -49,6 +49,8 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 RUN npm ci --prefer-offline
 
-# Default command: run all E2E specs with the list reporter.
+# Default command: run all E2E specs using reporters from playwright.config.js.
+# This produces test-results/suite-graph.html (graph-reporter) and the Playwright
+# HTML report at playwright-report/index.html — both bind-mounted to the host.
 # Override at runtime: docker compose run test-runner npx playwright test --grep S-01
-CMD ["npx", "playwright", "test", "--reporter=list"]
+CMD ["npx", "playwright", "test"]
