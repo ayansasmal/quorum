@@ -499,6 +499,23 @@ function generateHtml(report) {
     sharedCodePath: e.sharedCodePath,
   })))
 
+  // Primary run node — embedded metadata for the run hub shown in the graph.
+  const cyRunNode = safeJson({
+    timestamp:       report.timestamp,
+    gateStatus:      deploymentStatus,
+    gateColor,
+    passed:          counts.passed,
+    flaky:           counts.flaky,
+    failed:          counts.failed,
+    correlated:      counts.correlated,
+    skipped:         counts.skipped,
+    failingOwnScore: scoreGate.failingOwnScore,
+    totalOwnScore:   report.totalOwnScore,
+    failurePct:      scoreGate.failurePct,
+    durationMs,
+    suiteVersion:    report.suiteVersion,
+  })
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -626,6 +643,7 @@ ${fixQueue.length > 0 ? `
   // ── Embedded report data ──────────────────────────────────────────────
   var _nodes = ${cyNodes};
   var _edges = ${cyEdges};
+  var _run   = ${cyRunNode};
 
   // ── Colour maps — must mirror the server-side constants ───────────────
   var SC = { passed:'#22c55e', flaky:'#f59e0b', failed:'#ef4444', correlated:'#f97316', skipped:'#94a3b8' };
@@ -684,6 +702,38 @@ ${fixQueue.length > 0 ? `
     }});
   });
 
+  // ── Primary run node ──────────────────────────────────────────────────
+  // Build a short label: YYYY-MM-DD / HH:MM:SS / gate-status (Cytoscape
+  // renders \n as a line break when text-wrap is set to 'wrap').
+  var _runDate = new Date(_run.timestamp);
+  var _pad = function (n) { return String(n).padStart(2, '0'); };
+  var _runLabel = _runDate.getFullYear() + '-' + _pad(_runDate.getMonth() + 1) + '-' + _pad(_runDate.getDate())
+    + '\n' + _pad(_runDate.getHours()) + ':' + _pad(_runDate.getMinutes()) + ':' + _pad(_runDate.getSeconds())
+    + '\n' + _run.gateStatus;
+  elems.push({ group: 'nodes', data: {
+    id:             '__run__',
+    type:           'run',
+    label:          _runLabel,
+    gateColor:      _run.gateColor,
+    gateStatus:     _run.gateStatus,
+    passed:         _run.passed,
+    flaky:          _run.flaky,
+    failed:         _run.failed,
+    correlated:     _run.correlated,
+    skipped:        _run.skipped,
+    failingOwnScore:_run.failingOwnScore,
+    totalOwnScore:  _run.totalOwnScore,
+    failurePct:     _run.failurePct,
+    durationMs:     _run.durationMs,
+    suiteVersion:   _run.suiteVersion,
+  }});
+  // Thin dashed spoke from run hub → every scenario node
+  _nodes.forEach(function (n) {
+    elems.push({ group: 'edges', data: {
+      id: '__run__-' + n.id, source: '__run__', target: n.id, type: 'run',
+    }});
+  });
+
   // ── Initialise Cytoscape ──────────────────────────────────────────────
   var cy = window._cy = cytoscape({
     container: document.getElementById('cy'),
@@ -705,6 +755,20 @@ ${fixQueue.length > 0 ? `
       }},
       { selector:'edge.lit', style:{
           'line-color':'#64748b', 'target-arrow-color':'#64748b', width:2.5, opacity:1,
+      }},
+      // Run hub node: ellipse, gate-status fill, white border, multi-line label
+      { selector:'node[type = "run"]', style:{
+          label:'data(label)', 'text-wrap':'wrap', 'text-max-width':88,
+          'background-color':'data(gateColor)', 'border-color':'#f8fafc', 'border-width':2,
+          color:'#fff', 'font-size':10, 'font-weight':700,
+          width:90, height:50, shape:'ellipse',
+          'text-valign':'center', 'text-halign':'center',
+      }},
+      // Run spoke edges: faint dashed lines, no arrowhead, purely structural
+      { selector:'edge[type = "run"]', style:{
+          width:1, 'line-color':'#1e293b', 'line-style':'dashed',
+          'line-dash-pattern':[3, 6], opacity:0.3,
+          'target-arrow-shape':'none',
       }},
     ],
     // cose (Compound Spring Embedder) handles disconnected components naturally:
@@ -733,8 +797,8 @@ ${fixQueue.length > 0 ? `
   });
 
   // ── Edge highlight on node hover ──────────────────────────────────────
-  cy.on('mouseover', 'node', function (evt) { evt.target.connectedEdges().addClass('lit'); });
-  cy.on('mouseout',  'node', function (evt) { evt.target.connectedEdges().removeClass('lit'); });
+  cy.on('mouseover', 'node', function (evt) { evt.target.connectedEdges('[type != "run"]').addClass('lit'); });
+  cy.on('mouseout',  'node', function (evt) { evt.target.connectedEdges('[type != "run"]').removeClass('lit'); });
 
   // ── Node detail panel — built with DOM methods (no innerHTML) ─────────
   cy.on('tap', 'node', function (evt) {
@@ -745,6 +809,37 @@ ${fixQueue.length > 0 ? `
     while (panel.firstChild) panel.removeChild(panel.firstChild);
     panel.style.display = 'block';
 
+    // ── Run hub node — shows overall run metadata ──────────────────────
+    if (d.type === 'run') {
+      var hdr = el('div', {cls:'detail-header'});
+      hdr.appendChild(el('span', {cls:'badge', style:'background:' + d.gateColor}, d.gateStatus));
+      hdr.appendChild(el('span', {cls:'detail-id'}, 'Test Run'));
+      var ts = new Date(d.timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      hdr.appendChild(el('span', {cls:'detail-lbl'}, ts));
+      panel.appendChild(hdr);
+
+      var grid = el('div', {cls:'detail-grid'});
+      var dur = d.durationMs ? (d.durationMs / 1000).toFixed(1) + 's' : '—';
+      [
+        ['Passed',      String(d.passed)],
+        ['Flaky',       String(d.flaky)],
+        ['Failed',      String(d.failed)],
+        ['Correlated',  String(d.correlated)],
+        ['Skipped',     String(d.skipped)],
+        ['Fail score',  d.failingOwnScore + ' / ' + d.totalOwnScore + ' (' + d.failurePct + '%)'],
+        ['Duration',    dur],
+        ['Version',     d.suiteVersion || '—'],
+      ].forEach(function (pair) {
+        var cell = el('div', {cls:'detail-cell'});
+        cell.appendChild(el('span', null, pair[0]));
+        cell.appendChild(document.createTextNode(pair[1]));
+        grid.appendChild(cell);
+      });
+      panel.appendChild(grid);
+      return;  // done — no further scenario-specific content
+    }
+
+    // ── Scenario node ──────────────────────────────────────────────────
     // Header: badge + id + description
     var hdr = el('div', {cls:'detail-header'});
     var badge = el('span', {cls:'badge', style:'background:' + (SC[d.status] || '#94a3b8')}, d.status);
