@@ -422,6 +422,35 @@ The spider chart has 8 axes, each 0–100%. The shape tells you what to investig
 - **All axes high, one dipping** → targeted regression in a specific feature; trace the shared code path from the dependency graph.
 - **Multiple axes simultaneously low** → infrastructure problem (T0). Check Docker health, JWT round-trip, config probe before debugging application code.
 
+### 9.4 Implementation — graph reporter and viewer
+
+The JSON output described in §9.1 is produced by the Playwright custom reporter at
+`tests/e2e/reporter/graph-reporter.js`. The static node/edge schema (OwnScore, FailureCost,
+pillar membership, correlation edges) lives in `tests/e2e/reporter/graph-schema.js`. The reporter
+reads that schema at test-run time and overlays live pass/fail/skip status from `onTestEnd`.
+
+**Spec file naming convention (required for reporter to map test results to graph nodes):**
+
+Every spec file must wrap each scenario in a `describe` block whose title begins with the scenario
+ID (`S-XX` or `S-XX.Y`). The reporter extracts the ID via `/^S-\d+(?:\.\d+)?/` from the full
+title path — any test not inside a matching `describe` block is ignored by the reporter.
+
+```js
+// ✅ Correct
+describe('S-05.1 — RBAC Knowledge Create', () => {
+  test('engineer cannot POST /api/knowledge', ...)
+})
+
+// ❌ Wrong — no scenario ID; test counted but not mapped to graph node
+describe('RBAC Knowledge Create', () => { ... })
+```
+
+**Viewing results:** after a run, `test-results/suite-graph.json` is emitted. The static DAG
+viewer at `tests/e2e/viewer/index.html` consumes this file. It renders pillar compound nodes,
+scenario nodes sized by `sqrt(ownScore)`, colour-coded by status, and an interactive fix-queue
+panel. Serve with `npx serve tests/e2e/viewer` (auto-fetches the JSON) or open the HTML file
+directly and use the file picker.
+
 ---
 
 ## 10. T0 Infrastructure Probes
@@ -442,9 +471,13 @@ of HARD_BLOCK items that resolve the moment T0 passes.
 
 ---
 
-## 11. Suite Binary Tree (reference)
+## 11. Suite Dependency Graph (reference)
 
 Updated structure showing all 19 journeys, 31 scenarios, with OwnScore and FailureCost.
+The indented tree format below is a rendering aid — the actual structure is a DAG. Several nodes
+have multiple incoming edges (e.g. S-06 is downstream of both S-02.2 and S-15; S-04 appears in
+Functional Correctness but is also the root for S-07 in Observability). See §5 for the full
+code-path correlation edge list. The machine-readable DAG is in `tests/e2e/reporter/graph-schema.js`.
 
 ```
 QUORUM TEST SUITE (OwnScore = 3001)

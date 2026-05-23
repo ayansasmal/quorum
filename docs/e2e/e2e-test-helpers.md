@@ -12,10 +12,10 @@ Concretely:
 - We do **not** assert embedding quality, similarity scores, cache TTLs, or graph
   index accuracy — those are the libraries' responsibilities.
 
-This means **26 of 30 scenarios are pure HTTP/PostgreSQL tests** with no timing
-dependencies. `graphitiSettle()` is only needed for the 4 scenarios that test
-our code's write-then-read pipeline through Graphiti, plus S-17 Part C which
-triggers cross-catalog conflict detection after a global catalog write.
+This means **26 of 31 scenarios are pure HTTP/PostgreSQL tests** with no timing
+dependencies. `graphitiSettle()` is needed by exactly 5 scenarios:
+- **S-01, S-02.1, S-17 Part C** — call `graphitiSettle()` directly before asserting Graphiti reads
+- **S-02.2, S-06** — call it indirectly via `seed.conflict()`, which must settle Graphiti before the conflict is detectable
 
 ---
 

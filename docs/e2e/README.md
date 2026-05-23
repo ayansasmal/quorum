@@ -6,35 +6,43 @@ Each journey is its own file. Read the journey before implementing its spec file
 
 ## Journey Index
 
-| Journey | Scenario(s) | Weight | Blast Radius | File |
-|---------|-------------|--------|--------------|------|
-| J01 — Global Catalog Onboarding | S-01 | 15 | 1.4% | [J01](journeys/J01-global-catalog-onboarding.md) |
-| J02 — Knowledge Governance Lifecycle | S-02.1 – S-02.8 | 164 total | ≤ 3.9% each | [J02](journeys/J02-knowledge-governance.md) |
-| J03 — Deprecation Workflow | S-03 | 40 | 3.6% | [J03](journeys/J03-deprecation-workflow.md) |
-| J04 — Deviation Governance Lifecycle | S-04 | 74 | 6.7% | [J04](journeys/J04-deviation-governance.md) |
-| J05 — RBAC Boundary Simulation | S-05.1 – S-05.6 | 333 total | ≤ 7.1% each | [J05](journeys/J05-rbac-boundary.md) |
-| J06 — Multi-User Conflict Resolution | S-06 | 45 | 4.1% | [J06](journeys/J06-multi-user-conflict.md) |
-| J07 — Conformance Scoring & Portfolio | S-07 | 50 | 4.5% | [J07](journeys/J07-conformance-portfolio.md) |
-| J08 — Confidence Endorsement (Bump) | S-08 | 30 | 2.7% | [J08](journeys/J08-confidence-bump.md) |
-| J09 — Platform Admin Operations | S-09 | 14 | 1.3% | [J09](journeys/J09-admin-operations.md) |
-| J10 — Audit Chain Integrity | S-10 | 30 | 2.7% | [J10](journeys/J10-audit-chain.md) |
-| J11 — Self-Approval Prevention | S-11 | 40 | 3.6% | [J11](journeys/J11-self-approval.md) |
-| J12 — Knowledge Status State Machine | S-12 | 46 | 4.2% | [J12](journeys/J12-state-machine.md) |
-| J13 — Config Management & Governance | S-13 | 20 | 1.8% | [J13](journeys/J13-config-governance.md) |
-| J14 — Dashboard Visual & Interaction | S-14 | 30 | 2.7% | [J14](journeys/J14-dashboard-visual.md) |
-| J15 — Reason / Placeholder Rejection | S-15 | 63 | 5.7% | [J15](journeys/J15-reason-placeholder.md) |
-| J16 — Knowledge History & Point-in-Time Recall | S-16 | 18 | 1.6% | [J16](journeys/J16-knowledge-history.md) |
-| J17 — Conflict: Governance Edge Cases | S-17 | 32 | 2.9% | [J17](journeys/J17-conflict-edge-cases.md) |
-| J18 — Governance Route: Direct Coverage | S-18 | 18 | 1.6% | [J18](journeys/J18-governance-route.md) |
-| J19 — Authentication Lifecycle | S-19 | 45 | 4.1% | [J19](journeys/J19-auth-lifecycle.md) |
+`OwnScore = W × C × D` — scoring formula from the Eight-Pillar Quality Framework.
+`FailureCost = OwnScore + Σ correlated scenario OwnScores` — total impact if this scenario fails.
+⛔ = zero-tolerance pillar (any failure → HARD_BLOCK). 🟡 = score-gated.
 
-**Total suite weight: 1107 | 10% gate: 110.7 | Max single blast radius: 7.1% (S-05.1)**
+| Journey | Scenario(s) | OwnScore | FailureCost | Gate | File |
+|---------|-------------|---------|-------------|------|------|
+| J01 — Global Catalog Onboarding | S-01 | 34 | 34 | 🟡 | [J01](journeys/J01-global-catalog-onboarding.md) |
+| J02 — Knowledge Governance Lifecycle | S-02.1 – S-02.8 | 330 total | ≤ 415 | ⛔/🟡 | [J02](journeys/J02-knowledge-governance.md) |
+| J03 — Deprecation Workflow | S-03 | 90 | 90 | 🟡 | [J03](journeys/J03-deprecation-workflow.md) |
+| J04 — Deviation Governance Lifecycle | S-04 | 167 | 242 | 🟡 | [J04](journeys/J04-deviation-governance.md) |
+| J05 — RBAC Boundary Simulation | S-05.1 – S-05.6 | 810 total | ≤ 810 | ⛔ | [J05](journeys/J05-rbac-boundary.md) |
+| J06 — Multi-User Conflict Resolution | S-06 | 135 | 135 | ⛔ | [J06](journeys/J06-multi-user-conflict.md) |
+| J07 — Conformance Scoring & Portfolio | S-07 | 75 | 75 | 🟡 | [J07](journeys/J07-conformance-portfolio.md) |
+| J08 — Confidence Endorsement (Bump) | S-08 | 68 | 68 | 🟡 | [J08](journeys/J08-confidence-bump.md) |
+| J09 — Platform Admin Operations | S-09 | 14 | 14 | 🟡 | [J09](journeys/J09-admin-operations.md) |
+| J10 — Audit Chain Integrity | S-10 | 180 | 388 | ⛔ | [J10](journeys/J10-audit-chain.md) |
+| J11 — Self-Approval Prevention | S-11 | 180 | 180 | ⛔ | [J11](journeys/J11-self-approval.md) |
+| J12 — Knowledge Status State Machine | S-12 | 138 | 138 | ⛔ | [J12](journeys/J12-state-machine.md) |
+| J13 — Config Management & Governance | S-13 | 45 | 45 | 🟡 | [J13](journeys/J13-config-governance.md) |
+| J14 — Dashboard Visual & Interaction | S-14 | 30 | 30 | 🟡 | [J14](journeys/J14-dashboard-visual.md) |
+| J15 — Reason / Placeholder Rejection | S-15 | **378** | **694** | ⛔ | [J15](journeys/J15-reason-placeholder.md) |
+| J16 — Knowledge History & Point-in-Time Recall | S-16 | 27 | 27 | 🟡 | [J16](journeys/J16-knowledge-history.md) |
+| J17 — Conflict: Governance Edge Cases | S-17 | 160 | 160 | ⛔ | [J17](journeys/J17-conflict-edge-cases.md) |
+| J18 — Governance Route: Direct Coverage | S-18 | 27 | 27 | 🟡 | [J18](journeys/J18-governance-route.md) |
+| J19 — Authentication Lifecycle | S-19 | 113 | 113 | ⛔ | [J19](journeys/J19-auth-lifecycle.md) |
+
+**Suite OwnScore: 3001 | 10% gate: 300 pts | Max single FailureCost: 810 (S-05.1) | Hard block: any ⛔ failure**
+
+> J02 has 8 sub-scenarios spanning four different pillars (Governance ⛔, Data Integrity ⛔,
+> Functional 🟡, Developer Experience 🟡). See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md)
+> §6 for per-scenario OwnScore and FailureCost breakdown.
 
 ---
 
 ## Risk & Weight Model
 
-See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full weight model, binary tree, frequency tiers, violation analysis, and CI execution strategy.
+See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full weight model, dependency graph, frequency tiers, violation analysis, and CI execution strategy.
 
 ## Test Helpers
 
@@ -65,6 +73,65 @@ npx playwright test --grep="F2"   # weekly operational
 # Teardown
 node tests/e2e/helpers/teardown.js
 ```
+
+**Scenario ID convention (required by the graph reporter):**
+Every spec file must wrap each scenario in a `describe` block whose title begins with the scenario
+ID — `S-XX` or `S-XX.Y`. The graph reporter extracts the ID from the title path and maps it to the
+node in the dependency graph.
+
+```js
+// ✅ Correct — reporter picks up S-05.1
+describe('S-05.1 — RBAC Knowledge Create', () => {
+  test('engineer cannot POST /api/knowledge', async ({ request }) => { ... })
+})
+
+// ❌ Wrong — no scenario ID prefix; reporter ignores these tests
+describe('RBAC Knowledge Create', () => { ... })
+```
+
+---
+
+## Graph Reporter & Viewer
+
+Every run writes `test-results/suite-graph.json` — a machine-readable DAG with live pass/fail/skip
+status, OwnScore, FailureCost, per-pillar health percentages, and a fix queue sorted by priority.
+
+**Node status colours:**
+
+| Status | Colour | Meaning |
+|--------|--------|---------|
+| `passed` | Green | All tests in this scenario passed |
+| `flaky` | Yellow | Passed, but only after one or more retries |
+| `failed` | Red | At least one test failed |
+| `correlated` | Orange | Scenario passed, but a root node it shares code with failed — results unreliable |
+| `skipped` | Grey | Scenario not executed (T0 failure or explicit skip) |
+
+**`correlated` propagation** — if S-02.2 (conflict detection) fails, its downstream dependents
+S-06 and S-17 are marked `correlated` even if their own tests passed. The same code path failure
+that caused S-02.2 to fail would have caused them to fail under different conditions. Fix the root
+cause and all correlated nodes clear together.
+
+**Opening the viewer:**
+
+```bash
+# Option A — serve the JSON next to the viewer (recommended: auto-fetches on load)
+cp test-results/suite-graph.json tests/e2e/viewer/suite-graph.json
+npx serve tests/e2e/viewer
+
+# Option B — open viewer/index.html directly in a browser; use the file picker to load
+#            test-results/suite-graph.json when prompted
+open tests/e2e/viewer/index.html
+```
+
+**Console summary (printed after every run):**
+```
+✅  Gate: SAFE  |  Fail score: 0/3001 (0.0%)
+   passed:31  flaky:0  failed:0  correlated:0  skipped:0
+   📊  Graph report → test-results/suite-graph.json
+```
+
+The graph reporter is implemented in `tests/e2e/reporter/graph-reporter.js` (Playwright custom
+reporter) using the static node/edge schema in `tests/e2e/reporter/graph-schema.js`.
 
 ---
 
