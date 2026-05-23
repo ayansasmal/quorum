@@ -12,12 +12,14 @@
   },
   "members": [
     {
+      "name": "Test PE",
       "github_username": "test-pe",
       "role": "principal_architect",
       "base_confidence": 0.90,
       "team": "platform"
     },
     {
+      "name": "Test Architect",
       "github_username": "test-architect",
       "role": "architect",
       "base_confidence": 0.80,

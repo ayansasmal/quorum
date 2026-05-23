@@ -141,6 +141,15 @@ graph TD
 - Search route G-8 fix: `GET /api/search` loads project `globals`, passes `groupIds: [project, ...globals]` to Graphiti, joins `q_projects` in postgres fallback, annotates each result with `source: 'project'|'global'` and `catalog_id`. 675 gateway tests still pass.
 - **Known gap:** `quorum-test-catalog` fixture only has test-pe + test-architect as members (not test-engineer). Scenarios using `tokens.engineer` scoped to `quorum-test-catalog` directly will get `role: null`. J01 uses fresh configs (which include test-engineer) — not affected.
 
+**E2E fully-isolated Docker environment (complete):** Zero host-port-binding test infrastructure.
+- `docker-compose.e2e.yml` — standalone (not extending base compose) with `name: quorum-e2e`; all 7 services (localstack, falkordb, postgresql, redis, mock-openai, graphiti, gateway) + test-runner on internal `e2e` bridge network; no host port bindings; no conflict with dev stack
+- `Dockerfile.e2e` — `node:24-alpine` test runner; `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` (API-only tests); source code bind-mounted at `/workspace` (NOT baked in); anonymous volume at `/workspace/node_modules` provides Alpine-compiled binaries even when host has macOS ones
+- `scripts/init-localstack-e2e.sh` — mounted into LocalStack's `/etc/localstack/init/ready.d/`; runs `awslocal` inside LocalStack container to create `quorum-configs-test` bucket, `quorum-user-projects-test` DDB table, and seed admin config; runs before healthcheck passes so gateway is guaranteed to see resources on startup
+- `scripts/e2e-docker.sh` — orchestration helper: `up` (build + start + `--wait` for gateway health), `run` (test-runner via `docker compose run --rm`), `down`, `clean` (removes volumes for fresh state), `full` (up → run → down, returns Playwright exit code)
+- New npm scripts: `test:e2e:docker` (full run), `test:e2e:docker:up`, `test:e2e:docker:run`, `test:e2e:docker:down`, `test:e2e:docker:clean`, `test:e2e:docker:logs`
+- **Usage**: `npm run test:e2e:docker` for fully isolated run; `npm run test:e2e:docker:up` + `npm run test:e2e:docker:run` for iterative dev
+- **Dev vs isolated**: `test:e2e:env:*` scripts still work (overlay approach, reuses host LocalStack); `test:e2e:docker:*` is fully self-contained
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)

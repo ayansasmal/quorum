@@ -1,0 +1,54 @@
+# =============================================================================
+# Dockerfile.e2e — Quorum E2E test runner
+#
+# PURPOSE
+#   Runs the Playwright E2E test suite inside an isolated Alpine container.
+#   Source code is bind-mounted at /workspace at runtime — nothing is baked in
+#   except the Node.js runtime and pre-compiled node_modules.
+#
+# WHY ALPINE (not Debian/Ubuntu)
+#   Lightweight: ~50MB base vs ~200MB. Playwright's API tests do not launch
+#   browser processes, so we do not need browser system dependencies.
+#
+# NODE_MODULES STRATEGY
+#   1. npm ci runs during build → /workspace/node_modules exists in image layer
+#   2. At runtime, source code is bind-mounted at /workspace (host files overlay)
+#   3. docker-compose.e2e.yml adds an anonymous volume at /workspace/node_modules
+#   4. Docker applies the anonymous volume ON TOP of the bind mount, shadowing
+#      the host macOS binaries with the Alpine-compiled ones from the image layer
+#   This prevents "Exec format error" from mixing macOS and Linux native modules.
+#
+# BROWSER SUPPORT
+#   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 prevents the ~200MB Chromium download.
+#   Current E2E scenarios are pure API/HTTP — no browser is launched.
+#   If browser tests are added later, install the system Chromium:
+#     RUN apk add --no-cache chromium font-liberation
+#     ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+#
+# USAGE (via npm scripts)
+#   npm run test:e2e:docker         # full isolated run (build + start + test)
+#   npm run test:e2e:docker:up      # start infrastructure only
+#   npm run test:e2e:docker:run     # run tests against running infrastructure
+#   npm run test:e2e:docker:down    # stop all containers
+#   npm run test:e2e:docker:clean   # stop + wipe volumes (fresh LocalStack state)
+# =============================================================================
+
+FROM node:24-alpine
+
+# Skip Playwright's bundled browser download — current tests are API-only.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Force test environment inside the container.
+ENV NODE_ENV=test
+
+WORKDIR /workspace
+
+# Install node_modules into the image layer.
+# Only package manifests are copied — application source is bind-mounted.
+# This layer is cached and only rebuilt when package.json / package-lock.json changes.
+COPY package.json package-lock.json ./
+RUN npm ci --prefer-offline
+
+# Default command: run all E2E specs with the list reporter.
+# Override at runtime: docker compose run test-runner npx playwright test --grep S-01
+CMD ["npx", "playwright", "test", "--reporter=list"]

@@ -53,8 +53,8 @@ export async function createProject(pg, groupId, owner, members = [], governance
   const seq = await pg.query(`SELECT nextval('q_project_seq') AS n`)
   const qProjectId = `q_p${seq.rows[0].n}`
   const { rows } = await pg.query(
-    `INSERT INTO q_projects (q_project_id, group_id, display_name, owner, members, domains, governance, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO q_projects (q_project_id, group_id, display_name, owner, members, domains, governance, created_by, is_global)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING q_project_id`,
     [
       qProjectId,
@@ -65,6 +65,7 @@ export async function createProject(pg, groupId, owner, members = [], governance
       JSON.stringify(opts.domains ?? []),
       JSON.stringify(governance),
       opts.createdBy ?? owner,
+      opts.isGlobal ?? false,
     ],
   )
   return rows[0].q_project_id

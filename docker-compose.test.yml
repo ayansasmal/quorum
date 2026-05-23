@@ -14,6 +14,9 @@
 #                 gateway accepts E2E JWTs signed by tests/e2e/fixtures/test-private-key.pem.
 #                 Without this, the gateway generates an ephemeral key pair on startup
 #                 and rejects all test tokens with 401.
+#                 Also overrides QUORUM_CONFIG_BUCKET and QUORUM_DDB_USER_PROJECTS_TABLE
+#                 to use isolated test namespaces (quorum-configs-test, quorum-user-projects-test)
+#                 so E2E runs never pollute the local dev S3/DDB state.
 #
 #   graphiti    — redirects OpenAI calls to the local mock-openai service.
 #                 Without this, Graphiti requires a real OPENAI_API_KEY and makes
@@ -43,6 +46,10 @@ services:
       # Generated from tests/e2e/fixtures/test-{private,public}-key.pem.
       - QUORUM_JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZzlNbVZzVUpyMHZURjZldTEKc2VrdVh3RlJ0MzNkQTZJNWd0eGJOM0oxNGxDaFJBTkNBQVM5dmRZZWZZbEJwOWRMUFRxQVdxbzBlbmFGd2V4VAowMGFEK1NtSisvOFFxcmQ2cURmYm1ZT080bmhoNW5NOVhpbkhmUm9JcmU1TDlVNm1KbkVkQm54NgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg==
       - QUORUM_JWT_PUBLIC_KEY=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdmIzV0huMkpRYWZYU3owNmdGcXFOSHAyaGNIcwpVOU5HZy9rcGlmdi9FS3EzZXFnMzI1bURqdUo0WWVaelBWNHB4MzBhQ0szdVMvVk9waVp4SFFaOGVnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+      # Isolated test S3 bucket + DDB table — keeps E2E data out of the dev namespace.
+      # Both must match the values passed to init-localstack.sh via test:e2e:env:init.
+      - QUORUM_CONFIG_BUCKET=quorum-configs-test
+      - QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects-test
       # Point S3/DDB calls at the host's LocalStack rather than a container.
       # host.docker.internal resolves to the host machine from inside Docker (macOS/Windows).
       # On Linux add: extra_hosts: ["host.docker.internal:host-gateway"]

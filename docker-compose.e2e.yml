@@ -1,0 +1,238 @@
+##
+# docker-compose.e2e.yml — Fully isolated E2E test environment.
+#
+# KEY PROPERTIES
+#   - Zero host port bindings: all services communicate via the internal
+#     'e2e' Docker network. Dev stack (docker-compose.yml) is unaffected.
+#   - Separate Docker Compose project (name: quorum-e2e): containers, volumes,
+#     and networks are named distinctly from the dev and test-overlay stacks.
+#   - LocalStack bootstrapped automatically via init hook: S3 bucket, DDB table,
+#     and admin config are created before any other service starts.
+#   - Source code bind-mounted into test-runner (NOT baked into image).
+#
+# USAGE
+#   npm run test:e2e:docker         # full run — build + start + test + teardown
+#   npm run test:e2e:docker:up      # start infrastructure and wait for healthy
+#   npm run test:e2e:docker:run     # run tests against running infrastructure
+#   npm run test:e2e:docker:down    # stop and remove containers
+#   npm run test:e2e:docker:clean   # stop + remove volumes (fresh state)
+#
+# OR directly:
+#   docker compose -f docker-compose.e2e.yml up -d --build --wait gateway
+#   docker compose -f docker-compose.e2e.yml run --rm test-runner
+#   docker compose -f docker-compose.e2e.yml down
+#
+# COMMITTED TEST KEYS
+#   QUORUM_JWT_PRIVATE_KEY / QUORUM_JWT_PUBLIC_KEY are P-256 (ES256) test keys.
+#   They are committed to the repository and only valid inside this environment.
+#   The private key is used by tests to sign JWTs; the gateway validates them.
+#   Never use these keys in production or any external-facing environment.
+##
+
+name: quorum-e2e
+
+networks:
+  # Internal bridge network — services resolve each other by service name.
+  # No host ports are exposed from this network.
+  e2e:
+    driver: bridge
+
+services:
+
+  # ── AWS emulation (S3 + DynamoDB) ──────────────────────────────────────────
+  #
+  # LocalStack bootstraps the E2E bucket, DDB table, and admin config on startup
+  # via the init hook script mounted at /etc/localstack/init/ready.d/.
+  # The healthcheck does not pass until the init script completes, so dependent
+  # services (gateway) are guaranteed to see the resources before they start.
+  localstack:
+    image: localstack/localstack:3
+    networks: [e2e]
+    environment:
+      - SERVICES=s3,dynamodb
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      # These are read by the init hook script below.
+      - QUORUM_CONFIG_BUCKET=quorum-configs-test
+      - QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects-test
+    volumes:
+      # Init hook: create S3 bucket, DDB table, admin config when LocalStack is ready.
+      # awslocal is pre-installed in the LocalStack image — no pip install needed.
+      - ./scripts/init-localstack-e2e.sh:/etc/localstack/init/ready.d/01-init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s    # extra headroom for init hook to complete
+      retries: 10
+
+  # ── Graph database (FalkorDB / RedisStack) ──────────────────────────────────
+  falkordb:
+    image: falkordb/falkordb:latest
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Relational store (PostgreSQL) ───────────────────────────────────────────
+  postgresql:
+    image: postgres:16-alpine
+    networks: [e2e]
+    environment:
+      POSTGRES_DB: quorum_audit
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum_local
+    volumes:
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quorum -d quorum_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Cache (Redis) ───────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    networks: [e2e]
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── OpenAI API mock ─────────────────────────────────────────────────────────
+  #
+  # Deterministic SHA-256–based embeddings + canned chat completions.
+  # Graphiti's Python SDK reads OPENAI_BASE_URL and routes all OpenAI calls here.
+  # No real API key or network access needed — keeps tests reproducible.
+  mock-openai:
+    build:
+      context: ./mock-openai
+    networks: [e2e]
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://127.0.0.1:3003/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Graphiti MCP (semantic memory) ──────────────────────────────────────────
+  graphiti:
+    image: graphiti-mcp:e2e
+    build:
+      context: .
+      dockerfile: Dockerfile.graphiti
+    networks: [e2e]
+    environment:
+      - FALKORDB_URI=redis://falkordb:6379
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+      - LLM_MODEL_NAME=gpt-4o-mini
+      - EMBEDDER_MODEL_NAME=text-embedding-3-small
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      mock-openai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # ── Quorum Gateway ──────────────────────────────────────────────────────────
+  #
+  # Uses isolated S3 bucket (quorum-configs-test) and DDB table
+  # (quorum-user-projects-test) that exist only inside this Docker network.
+  # Injected with the committed P-256 test key pair so it validates test JWTs.
+  gateway:
+    image: quorum-gateway:e2e
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    networks: [e2e]
+    environment:
+      # Downstream services — all via Docker internal DNS, no host port mapping
+      - GRAPHITI_URL=http://graphiti:8000
+      - POSTGRES_HOST=postgresql
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=quorum
+      - POSTGRES_PASSWORD=quorum_local
+      - POSTGRES_DB=quorum_audit
+      # S3 / DDB — pointed at the isolated LocalStack in this Docker network
+      - QUORUM_CONFIG_BUCKET=quorum-configs-test
+      - AWS_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects-test
+      # Redis — isolated inside this network
+      - REDIS_URL=redis://redis:6379
+      # Gateway config
+      - QUORUM_GATEWAY_PORT=3001
+      - QUORUM_SYNC_SECRET=
+      - NODE_ENV=test
+      # ── Test JWT key pair ────────────────────────────────────────────────────
+      # Committed P-256 (ES256) keys — NOT production secrets.
+      # Private key: used by tests/e2e/helpers/jwt.js to sign test tokens.
+      # Public key:  loaded by the gateway to validate those tokens.
+      # Generated from tests/e2e/fixtures/test-{private,public}-key.pem.
+      # Decoded by gateway/src/keys.js via Buffer.from(b64, 'base64').
+      - QUORUM_JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZzlNbVZzVUpyMHZURjZldTEKc2VrdVh3RlJ0MzNkQTZJNWd0eGJOM0oxNGxDaFJBTkNBQVM5dmRZZWZZbEJwOWRMUFRxQVdxbzBlbmFGd2V4VAowMGFEK1NtSisvOFFxcmQ2cURmYm1ZT080bmhoNW5NOVhpbkhmUm9JcmU1TDlVNm1KbkVkQm54NgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg==
+      - QUORUM_JWT_PUBLIC_KEY=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdmIzV0huMkpRYWZYU3owNmdGcXFOSHAyaGNIcwpVOU5HZy9rcGlmdi9FS3EzZXFnMzI1bURqdUo0WWVaelBWNHB4MzBhQ0szdVMvVk9waVp4SFFaOGVnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Accept 200 (healthy) or 503 (degraded) — both mean the gateway process is alive.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/health | grep -qE '^(200|503)$'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── E2E test runner ─────────────────────────────────────────────────────────
+  #
+  # Source code is bind-mounted — NOT baked into image. See Dockerfile.e2e.
+  # The anonymous volume at /workspace/node_modules ensures the Alpine-compiled
+  # modules from the image layer are used, not any macOS host binaries.
+  #
+  # Start via:  docker compose -f docker-compose.e2e.yml run --rm test-runner
+  # Or:         npm run test:e2e:docker:run
+  #
+  # Override Playwright args:
+  #   docker compose -f docker-compose.e2e.yml run --rm test-runner \
+  #     npx playwright test --grep "S-01"
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    networks: [e2e]
+    environment:
+      # Gateway URL via Docker internal DNS — matches the gateway service above
+      - QUORUM_GATEWAY_URL=http://gateway:3001
+      - NODE_ENV=test
+    volumes:
+      # Bind-mount: all source code, fixtures, and configs are available at /workspace.
+      # Logs and test-results written here are visible on the host after the run.
+      - .:/workspace
+      # Anonymous volume: preserves Alpine-compiled node_modules from the image layer.
+      # Prevents macOS host binaries from being used inside the Alpine container.
+      - /workspace/node_modules
+    depends_on:
+      gateway:
+        condition: service_healthy

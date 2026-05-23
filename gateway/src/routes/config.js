@@ -162,7 +162,11 @@ router.post('/upload', async (req, res) => {
         config.owner,
         config.members ?? [],
         { domains: config.domains },
-        { displayName: config.project ?? null, createdBy: req.user?.sub ?? 'system' },
+        {
+          displayName: config.project ?? null,
+          createdBy:   req.user?.sub ?? 'system',
+          isGlobal:    config.is_global ?? false,
+        },
       )
     }
   } catch (err) {

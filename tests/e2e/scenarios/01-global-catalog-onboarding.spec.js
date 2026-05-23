@@ -20,7 +20,9 @@
  *   test-pe is PA in both fresh configs (mirrors the fixture member list).
  */
 
-import { describe, test, expect, beforeAll } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+
+const { describe, beforeAll } = test
 import axios from 'axios'
 import { api }            from '../helpers/api.js'
 import { tokens }         from '../helpers/jwt.js'
@@ -49,9 +51,9 @@ const catalogConfig = {
   globals:      [],
   domains:      { security: {}, auth: {}, reliability: {} },
   members: [
-    { github_username: 'test-pe',       role: 'principal_architect', base_confidence: 0.90, team: 'platform' },
-    { github_username: 'test-architect', role: 'architect',          base_confidence: 0.80, team: 'platform' },
-    { github_username: 'test-engineer',  role: 'engineer',           base_confidence: 0.70, team: 'backend'  },
+    { name: 'Test PE',       github_username: 'test-pe',       role: 'principal_architect', base_confidence: 0.90, team: 'platform' },
+    { name: 'Test Architect', github_username: 'test-architect', role: 'architect',          base_confidence: 0.80, team: 'platform' },
+    { name: 'Test Engineer',  github_username: 'test-engineer',  role: 'engineer',           base_confidence: 0.70, team: 'backend'  },
   ],
 }
 
@@ -64,9 +66,9 @@ const projectConfig = {
   globals:   [CATALOG],
   domains:   { security: {}, auth: {} },
   members: [
-    { github_username: 'test-pe',       role: 'principal_architect', base_confidence: 0.90, team: 'platform' },
-    { github_username: 'test-architect', role: 'architect',          base_confidence: 0.80, team: 'platform' },
-    { github_username: 'test-engineer',  role: 'engineer',           base_confidence: 0.70, team: 'backend'  },
+    { name: 'Test PE',       github_username: 'test-pe',       role: 'principal_architect', base_confidence: 0.90, team: 'platform' },
+    { name: 'Test Architect', github_username: 'test-architect', role: 'architect',          base_confidence: 0.80, team: 'platform' },
+    { name: 'Test Engineer',  github_username: 'test-engineer',  role: 'engineer',           base_confidence: 0.70, team: 'backend'  },
   ],
 }
 
@@ -75,20 +77,25 @@ let tlsKey     // key slug for the PA-written global entry
 let tokenKey   // key slug for the architect-written DRAFT entry
 
 describe('S-01 — Global Catalog Onboarding', () => {
+  // Serial mode: all 13 steps share one worker, preserving the beforeAll state
+  // (tlsKey, tokenKey) and the same CATALOG/PROJECT IDs across every step.
+  // Journey specs that depend on sequenced writes must never run fully parallel.
+  test.describe.configure({ mode: 'serial' })
 
   // ── beforeAll: upload fresh configs ─────────────────────────────────────────
   beforeAll(async () => {
     const paHeader = { Authorization: `Bearer ${tokens.pe}`, 'Content-Type': 'application/json' }
 
-    // Upload catalog config
+    // Upload catalog config. Accept 409 — can happen if a previous run uploaded
+    // the same timestamp-based ID (e.g. test was retried in the same second).
     const catRes = await http.post('/config/upload', catalogConfig, { headers: paHeader })
-    if (catRes.status !== 201) {
+    if (catRes.status !== 201 && catRes.status !== 409) {
       throw new Error(`beforeAll: catalog upload failed ${catRes.status} ${JSON.stringify(catRes.data)}`)
     }
 
     // Upload project config (linked to catalog)
     const projRes = await http.post('/config/upload', projectConfig, { headers: paHeader })
-    if (projRes.status !== 201) {
+    if (projRes.status !== 201 && projRes.status !== 409) {
       throw new Error(`beforeAll: project upload failed ${projRes.status} ${JSON.stringify(projRes.data)}`)
     }
 

@@ -130,7 +130,10 @@ export default async function setup(_config) {
         validateStatus: () => true,
       },
     ),
-    axios.get(`${GATEWAY}/user/profile/test-pe`, { validateStatus: () => true }),
+    axios.get(`${GATEWAY}/user/profile/test-pe`, {
+      headers: { Authorization: `Bearer ${peToken}` },
+      validateStatus: () => true,
+    }),
   ])
 
   if (globalsRes.status !== 200) {

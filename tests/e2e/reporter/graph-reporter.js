@@ -324,8 +324,12 @@ export default class GraphReporter {
     const report = buildReport(this._results, durationMs)
 
     mkdirSync('test-results', { recursive: true })
-    const outPath = join('test-results', 'suite-graph.json')
-    writeFileSync(outPath, JSON.stringify(report, null, 2))
+
+    const jsonPath = join('test-results', 'suite-graph.json')
+    writeFileSync(jsonPath, JSON.stringify(report, null, 2))
+
+    const htmlPath = join('test-results', 'suite-graph.html')
+    writeFileSync(htmlPath, generateHtml(report))
 
     // Console summary
     const { deploymentStatus, scoreGate, counts } = report
@@ -337,7 +341,8 @@ export default class GraphReporter {
       `Fail score: ${scoreGate.failingOwnScore}/${SUITE.totalOwnScore} (${scoreGate.failurePct}%)`)
     console.log(`   passed:${counts.passed}  flaky:${counts.flaky}  failed:${counts.failed}  ` +
       `correlated:${counts.correlated}  skipped:${counts.skipped}`)
-    console.log(`   📊  Graph report → ${outPath}`)
+    console.log(`   📊  Graph report → ${jsonPath}`)
+    console.log(`   🌐  HTML report  → ${htmlPath}`)
     if (report.blockReason) {
       console.log(`   ⚠️   ${report.blockReason}`)
     }
@@ -346,4 +351,165 @@ export default class GraphReporter {
         ` (FailureCost ${report.fixQueue[0].fixPriorityScore})`)
     }
   }
+}
+
+// ─── HTML report generator ────────────────────────────────────────────────────
+
+/** Status → background colour (CSS). */
+const STATUS_COLOR = {
+  passed:     '#22c55e',
+  flaky:      '#f59e0b',
+  failed:     '#ef4444',
+  correlated: '#f97316',
+  skipped:    '#94a3b8',
+}
+
+/**
+ * Generates a self-contained HTML file embedding the full report as JSON.
+ * No external dependencies — opens directly from the filesystem.
+ *
+ * @param {object} report - the report object from buildReport()
+ * @returns {string} complete HTML document
+ */
+function generateHtml(report) {
+  const { deploymentStatus, scoreGate, counts, pillarHealth, fixQueue, nodes, timestamp, durationMs } = report
+
+  const gateColor = {
+    SAFE: '#22c55e', WARNING: '#f59e0b', BLOCKED: '#ef4444', HARD_BLOCK: '#dc2626',
+  }[deploymentStatus] ?? '#94a3b8'
+
+  const durationSec = (durationMs / 1000).toFixed(1)
+  const ts          = new Date(timestamp).toLocaleString()
+
+  // Fix queue rows
+  const fixRows = fixQueue.map(f => `
+    <tr>
+      <td>${f.rank}</td>
+      <td><span class="badge" style="background:${STATUS_COLOR[f.status] ?? '#94a3b8'}">${f.status}</span></td>
+      <td><strong>${f.scenarioId}</strong></td>
+      <td>${f.name}</td>
+      <td>${f.pillar}</td>
+      <td style="text-align:right">${f.fixPriorityScore}</td>
+      <td>${f.specFile ? f.specFile.replace('tests/e2e/scenarios/', '') : '—'}</td>
+    </tr>`).join('')
+
+  // Node grid rows (all 31 scenarios)
+  const nodeRows = nodes.map(n => {
+    const color   = STATUS_COLOR[n.status] ?? '#94a3b8'
+    const deps    = n.correlatesTo.length > 0 ? n.correlatesTo.join(', ') : '—'
+    const errHtml = n.logs
+      ? n.logs.map(e => `<div class="err">${escHtml(e.message.slice(0, 200))}</div>`).join('')
+      : ''
+    return `
+    <tr>
+      <td><span class="badge" style="background:${color}">${n.status}</span></td>
+      <td><strong>${n.id}</strong></td>
+      <td>${n.label}</td>
+      <td>${n.pillar}</td>
+      <td style="text-align:right">${n.ownScore}</td>
+      <td style="text-align:right">${n.failureCost}</td>
+      <td>${deps}</td>
+      <td>${errHtml}</td>
+    </tr>`
+  }).join('')
+
+  // Pillar health bars
+  const pillarBars = Object.entries(pillarHealth).map(([key, pct]) => {
+    const barColor = pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444'
+    return `
+      <div class="pillar-row">
+        <span class="pillar-name">${key}</span>
+        <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <span class="pillar-pct">${pct}%</span>
+      </div>`
+  }).join('')
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quorum E2E Suite Graph — ${deploymentStatus}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; font-size: 14px; background: #0f172a; color: #e2e8f0; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 24px 0 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; }
+  .meta { color: #64748b; font-size: 12px; margin-bottom: 20px; }
+  .gate { display: inline-block; padding: 4px 14px; border-radius: 20px; font-weight: 700; font-size: 16px; color: #fff; background: ${gateColor}; margin-bottom: 8px; }
+  .counts { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .count-chip { padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th { background: #1e293b; padding: 8px 10px; text-align: left; font-size: 12px; color: #94a3b8; position: sticky; top: 0; }
+  td { padding: 7px 10px; border-bottom: 1px solid #1e293b; vertical-align: top; font-size: 13px; }
+  tr:hover td { background: #1e293b44; }
+  .err { color: #fca5a5; font-size: 11px; font-family: monospace; margin-top: 2px; white-space: pre-wrap; word-break: break-all; }
+  .section { background: #1e293b; border-radius: 8px; padding: 16px; margin-bottom: 20px; overflow-x: auto; }
+  .pillar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .pillar-name { width: 180px; font-size: 12px; color: #94a3b8; flex-shrink: 0; }
+  .bar-bg { flex: 1; height: 10px; background: #334155; border-radius: 5px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; transition: width .3s; }
+  .pillar-pct { width: 36px; text-align: right; font-size: 12px; font-weight: 600; }
+  .score-line { font-size: 13px; margin-bottom: 12px; }
+  .score-line span { font-weight: 700; color: ${gateColor}; }
+  a { color: #60a5fa; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Quorum E2E Suite Graph</h1>
+<div class="meta">${ts} &nbsp;·&nbsp; ${durationSec}s &nbsp;·&nbsp; ${nodes.length} scenarios</div>
+
+<div class="gate">${deploymentStatus}</div>
+${report.blockReason ? `<div style="color:#fca5a5;margin:6px 0 12px;font-size:13px;">⚠ ${escHtml(report.blockReason)}</div>` : ''}
+
+<div class="counts">
+  <span class="count-chip" style="background:#22c55e22;color:#22c55e">✓ ${counts.passed} passed</span>
+  <span class="count-chip" style="background:#f59e0b22;color:#f59e0b">~ ${counts.flaky} flaky</span>
+  <span class="count-chip" style="background:#ef444422;color:#ef4444">✗ ${counts.failed} failed</span>
+  <span class="count-chip" style="background:#f9731622;color:#f97316">⊘ ${counts.correlated} correlated</span>
+  <span class="count-chip" style="background:#94a3b822;color:#94a3b8">– ${counts.skipped} skipped</span>
+</div>
+
+<div class="score-line">
+  Fail score: <span>${scoreGate.failingOwnScore} / ${report.totalOwnScore} (${scoreGate.failurePct}%)</span>
+  &nbsp;·&nbsp; gate at 5% (warning) / 10% (blocked)
+</div>
+
+<h2>Pillar Health</h2>
+<div class="section" style="max-width:600px">${pillarBars}</div>
+
+${fixQueue.length > 0 ? `
+<h2>Fix Queue (${fixQueue.length} items)</h2>
+<div class="section">
+<table>
+  <thead><tr><th>#</th><th>Status</th><th>ID</th><th>Name</th><th>Pillar</th><th style="text-align:right">Cost</th><th>Spec</th></tr></thead>
+  <tbody>${fixRows}</tbody>
+</table>
+</div>` : '<h2>Fix Queue</h2><div class="section" style="color:#22c55e">✓ Nothing to fix — all scenarios passed.</div>'}
+
+<h2>All Scenarios (${nodes.length})</h2>
+<div class="section">
+<table>
+  <thead><tr><th>Status</th><th>ID</th><th>Label</th><th>Pillar</th><th style="text-align:right">Own</th><th style="text-align:right">Cost</th><th>Depends on</th><th>Errors</th></tr></thead>
+  <tbody>${nodeRows}</tbody>
+</table>
+</div>
+
+</body>
+</html>`
+}
+
+/**
+ * Escape HTML special characters to prevent XSS in embedded error messages.
+ * @param {string} str
+ * @returns {string}
+ */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
