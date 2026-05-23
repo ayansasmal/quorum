@@ -1,7 +1,7 @@
 # mock-openai — E2E test OpenAI API mock
 # Tiny image: node:20-alpine + the two-file service (server.js + package.json).
 # No npm install needed — zero external dependencies.
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
