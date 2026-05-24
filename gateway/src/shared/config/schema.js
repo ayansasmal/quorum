@@ -24,6 +24,12 @@ export const MemberSchema = z.object({
   github_username: z.string().optional(),
   /** Git committer email — used as fallback identity signal. */
   git_email: z.string().email().optional(),
+  /**
+   * Per-member confidence floor override (0–1).
+   * Overrides the role-level base_confidence when set. Stored in DDB and
+   * used by the gateway to weight knowledge contributions from this member.
+   */
+  base_confidence: z.number().min(0).max(1).optional(),
 })
 
 /** Role definition — sets the base_confidence floor for that role. */

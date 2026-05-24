@@ -61,6 +61,11 @@ const router = Router()
  * @param {import('express').NextFunction} next
  */
 export const peWriteLimit = (req, res, next) => {
+  // Bypass in test mode — parallel E2E workers share the same Docker bridge IP
+  // and their seed functions generate legitimate burst writes that exceed the
+  // production 10/min threshold. The limit protects production, not test infra.
+  if (process.env.NODE_ENV === 'test') return next()
+
   const ip = req.ip ?? 'unknown'
   const now = Date.now()
   const window = 60_000

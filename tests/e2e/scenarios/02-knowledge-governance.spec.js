@@ -172,8 +172,9 @@ describe('S-02.2 — Conflict Detection', () => {
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/api/knowledge', {
       topic,
-      key:     sessionKey,
-      content: incomingContent,
+      key:         sessionKey,
+      content:     incomingContent,
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')

@@ -89,10 +89,10 @@ export async function draftEntry({ topic, key, content, entityType = 'Decision',
  * @param {{ topic: string, key: string, content: string, existingContent?: string, project?: string }} opts
  * @returns {Promise<{ conflictId: string }>}
  */
-export async function conflict({ topic, key, content, existingContent = '', project = 'quorum-test-project' }) {
+export async function conflict({ topic, key, content, existingContent = '', entityType = 'Decision', project = 'quorum-test-project' }) {
   // Step 1: engineer writes conflicting content → DRAFT version created in knowledge_versions
   const engClient = api(tokens.engineer, project)
-  const writeRes = await engClient.post('/api/knowledge', { topic, key, content })
+  const writeRes = await engClient.post('/api/knowledge', { topic, key, content, entity_type: entityType })
   if (writeRes.status !== 201) {
     throw new Error(`seed.conflict: DRAFT write failed: ${writeRes.status} ${JSON.stringify(writeRes.data)}`)
   }
