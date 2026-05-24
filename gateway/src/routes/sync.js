@@ -129,9 +129,12 @@ export async function syncOneProject(bucket, projectId) {
       github_username: m.github_username,
       role:            m.role,
       team:            m.team,
-      base_confidence: m.role && config.roles?.[m.role]
-        ? config.roles[m.role].base_confidence
-        : 0.5,
+      // Precedence: per-member override → role-level default → hardcoded floor.
+      // Per-member base_confidence was added to MemberSchema and must take priority
+      // over the role-level config so individual contributor overrides are honoured.
+      base_confidence: m.base_confidence
+        ?? (m.role && config.roles?.[m.role] ? config.roles[m.role].base_confidence : null)
+        ?? 0.5,
       is_owner:        owner !== null && m.github_username === owner,
     })).filter((m) => m.github_username)
 
