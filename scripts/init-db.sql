@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS pending_decisions (
   conflict_id                TEXT PRIMARY KEY,    -- 'q_c7'
   q_key_id                   TEXT NOT NULL REFERENCES q_keys(q_key_id),
   q_project_id               TEXT NOT NULL REFERENCES q_projects(q_project_id),
-  decision_type              TEXT NOT NULL CHECK (decision_type IN ('conflict', 'draft_review')),
+  decision_type              TEXT NOT NULL CHECK (decision_type IN ('conflict', 'draft_review', 'deprecation_request')),
   status                     TEXT NOT NULL DEFAULT 'pending'
                               CHECK (status IN ('pending', 'resolved', 'stale')),
 
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS pending_decisions (
   conflict_reason            TEXT,
 
   -- Resolution
-  resolution                 TEXT CHECK (resolution IN ('supersede', 'coexist_split', 'coexist_merge', 'reject', 'escalate')),
+  resolution                 TEXT CHECK (resolution IN ('supersede', 'coexist_split', 'coexist_merge', 'reject', 'escalate', 'approved', 'rejected')),
   resolution_note            TEXT,
   resolved_by                TEXT,
   resolved_at                TIMESTAMPTZ,
