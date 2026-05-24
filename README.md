@@ -2,7 +2,7 @@
 
 > *Every AI dystopia film has the same root cause — humans removed themselves from the decision loop. Quorum puts them back in.*
 
-[![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://github.com/ayansasmal/quorum-mcp) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](gateway/openapi.yaml)
+[![Gateway Tests](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml/badge.svg)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Coverage](https://img.shields.io/badge/coverage-86%25%20lines%20%7C%2077%25%20branches-brightgreen)](https://github.com/ayansasmal/quorum/actions/workflows/test-gateway.yml) [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org) [![License](https://img.shields.io/badge/license-ELv2-blue)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://github.com/ayansasmal/quorum-mcp) [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-85EA2D?logo=swagger)](gateway/openapi.yaml)
 
 **Quorum** is a governance layer for engineering and business knowledge — built on [Graphiti](https://github.com/getzep/graphiti)'s temporal knowledge graph — that gives Claude Code and multi-agent systems a shared, self-evolving, human-governed memory of engineering decisions, business requirements, patterns, and institutional knowledge.
 
@@ -10,9 +10,18 @@
 
 ## Who is this for?
 
-**Engineering teams using Claude Code or multi-agent AI.** If your agents make architectural decisions, write code, or give advice — and if those decisions need to be consistent, auditable, and human-approved — Quorum is the governance layer that makes that possible.
+**Engineering organisations where AI agents make decisions that need to stay consistent, auditable, and human-governed — across teams, not just within one.**
 
-See [docs/WHY.md](docs/WHY.md) for business cases and real-world narratives.
+| Role | What Quorum solves for them |
+|------|-----------------------------|
+| **Engineering managers** | Confidence that Claude Code follows *your team's* actual standards, not generic internet advice |
+| **Platform engineers** | Publish standards once as a global catalog; every product team's agents check against them automatically |
+| **Principal architects** | Critical decisions can't be quietly overridden; global contradictions surface at write time |
+| **VPs of Engineering / Directors** | Portfolio-level conformance score across all teams; governed deviations visible without status meetings |
+| **CTOs** | Org-wide alignment to data residency, auth, and compliance constraints — provable, not asserted |
+| **Product managers** | Feature requirements and business rules survive refactors, team changes, and agent turnover |
+
+See [docs/WHY.md](docs/WHY.md) for detailed narratives — including three new v0.4 scenarios on cross-team standards, conformance scoring, and portfolio visibility.
 
 ---
 
@@ -60,8 +69,12 @@ Quorum checks existing knowledge graph
 - **Provenance always** — every node carries author, timestamp, confidence, source, conflict history
 - **Authority-weighted writes** — a junior engineer's addition does not silently overwrite a senior architect's ADR
 - **Human at the fork** — agents operate autonomously on established knowledge; humans only intervene at genuine ambiguity
-- **Quorum Gateway** — Express service fronting Graphiti and PostgreSQL with slim ES256 JWT (`{ sub, is_admin }` only), GitHub OAuth, Redis config/profile cache, and S3-backed per-project configuration
-- **Quorum Dashboard** — React SPA for browsing the knowledge graph, resolving conflicts, reviewing drafts, editing project config, and managing ownership + roles
+- **Federation** — link projects to global catalogs; `search()` and `recall()` traverse them transparently; global contradictions are always caught at write time
+- **Deviation governance** — when a project deviates from a global standard, agents record it via `deviate()`; PEs accept, deny, or defer with full constitutional enforcement
+- **Conformance scoring** — every project gets a weighted conformance score against its linked global catalogs; `quorum:scan` drives incremental CI scanning
+- **Portfolio intelligence** — exec-gated org-wide rollup across all projects; denial hint badges surface contested global entries
+- **Quorum Gateway** — Express service fronting Graphiti and PostgreSQL with slim ES256 JWT, GitHub OAuth, Redis config/profile cache, and S3-backed per-project configuration
+- **Quorum Dashboard** — React SPA for browsing the knowledge graph, resolving conflicts, reviewing drafts, managing deviations, and editing project config
 - **Export to human** — everything Quorum knows, exportable as Markdown or Confluence markup
 
 ---
@@ -82,22 +95,25 @@ graph TB
 ```
 
 
-**Identity model (v0.3):** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and base_confidence are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates “who you are” from “what project you’re working in.”
+**Identity model:** JWT carries only `{ sub, is_admin }`. Active project is set via `X-Quorum-Project` request header. Role, ownership, and `base_confidence` are resolved per-request from the Redis profile cache (`profile:{sub}` → DynamoDB on miss). This separates “who you are” from “what project you’re working in.” Executive roles (`director`, `vp_engineering`, `group_executive`) have tier-3 authority for reads and portfolio views but are blocked from deviation governance actions.
 
 **Content durability:** all knowledge text is stored in the PostgreSQL `knowledge_versions.summary` column on every write. Graphiti/FalkorDB holds semantic graph embeddings and is the fallback — it is treated as eventually consistent and can be wiped without permanent content loss.
 
 ---
 
-## Current State (v0.3 shipped)
+## Current State (v0.4 shipped)
 
-- **Identity / authz** — ES256 slim JWT `{ sub, is_admin, jti, iat, exp }`; per-request `X-Quorum-Project` header for project scope; role/`base_confidence`/`is_owner` resolved from Redis profile cache (`profile:{sub}`) → DynamoDB on miss
-- **Storage schema** — `q_*` id schema (`q_projects`, `q_keys`) replaces UUID-based tables; flat S3 layout `<group_id>.quorum.json`
-- **Audit pipeline** — dual-store: PostgreSQL (durable, tamper-evident SHA256 chain, `summary` column for content) + Graphiti (semantic traversal); audit log is append-only at the application layer
-- **Caching** — Redis for config (`config:{group_id}`), user profile (`profile:{sub}`), and platform admin (`admin:platform`), each 300s TTL, pub/sub invalidation on governance writes
-- **Membership index** — `quorum-user-projects` DynamoDB table with GSI for reverse lookup; `POST /sync/configs` performs S3→DDB full sync (dual auth: sync token or `principal_architect` JWT)
-- **Dashboard** — Stats, Graph, Pending Decisions, Knowledge Browser, Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel; full light/dark theme; project selector with search + pagination
-- **Tests** — 31 test files, 476 passing tests; coverage 86% lines · 77% branches · 88% functions (threshold 75% all); CI on Node 22 via `npm test` + `npm test -- --coverage`
-- **Tooling** — OpenAPI 3.1 spec at [`gateway/openapi.yaml`](gateway/openapi.yaml); public JSON Schema at `GET /schema/config`; ops audit CLI at [`scripts/audit-cli.js`](scripts/audit-cli.js); confidence endorsement via `POST /api/bump/:topic/:key` (7-day cooldown)
+- **Identity / authz** — ES256 slim JWT `{ sub, is_admin }`; `X-Quorum-Project` header decouples identity from project scope; role and `base_confidence` resolved per-request from Redis profile cache → DynamoDB on miss
+- **Storage** — `q_*` id schema; flat S3 layout `<group_id>.quorum.json`; PostgreSQL `summary` column as durable content store (survives FalkorDB wipes)
+- **Audit pipeline** — dual-store: PostgreSQL (SHA256 tamper-evident chain) + Graphiti (semantic traversal); append-only; `GET /pg/audit/lineage/:topic/:key` for compliance queries
+- **Caching** — Redis for config, user profile, and admin with 300s TTL and pub/sub invalidation on governance writes
+- **Federation** — `GET /api/globals` discovers global catalogs; `search()` / `recall()` transparently traverse linked catalogs; results annotated with `source` + `catalog_id`; `detectConflict()` scoped to `[project, ...globals]` so global contradictions are always caught
+- **Deviation governance** — `POST /api/deviations` (idempotent upsert, server-side severity with `PA_AUTHORED_FLOOR`); batch endpoint (up to 100 records); `GET /api/deviations` with computed `OPEN / ACCEPTED / DENIED / DEFERRED / OVERDUE / RESOLVED` status via LATERAL join; PE accept/deny/defer with constitutional enforcement
+- **Conformance scoring** — `GET /api/conformance` returns weighted score per project; UNCERTIFIED gate when catalog has < 10 ACTIVE entries or no scans; `quorum:scan` skill for incremental CI-driven scanning
+- **Portfolio intelligence** — `GET /api/portfolio` (role-gated: exec + `is_admin`); weighted criticality rollup over all projects; `denial_hint_count` badge on global entries in Knowledge browser
+- **Dashboard** — Stats (ConformanceCard: score badge, breakdown bar, staleness warning), Deviations (filter rail, inline action panel), Pending (overdue deferrals), Knowledge (denial hint badges), Graph, Audit, Config, Admin; full light/dark theme
+- **Tests** — 675 gateway tests · 620 quorum-mcp tests; coverage 86% lines · 77% branches; CI on Node 22
+- **Tooling** — OpenAPI 3.1 spec v0.4.0 at [`gateway/openapi.yaml`](gateway/openapi.yaml) (Federation, Deviations, Conformance, Portfolio tags); `GET /schema/config` public JSON Schema; [`scripts/audit-cli.js`](scripts/audit-cli.js) ops CLI; E2E suite via `npm run test:e2e:docker`
 
 ---
 
@@ -105,7 +121,7 @@ graph TB
 
 > **Full step-by-step guide:** [docs/QUICKSTART.md](docs/QUICKSTART.md)
 
-**Prerequisites:** Node.js 20+, Docker Desktop, `pip install awscli-local`, OpenAI API key
+**Prerequisites:** Node.js 22+, Docker Desktop, `pip install awscli-local`, OpenAI API key
 
 ```bash
 git clone https://github.com/ayansasmal/quorum.git
@@ -148,11 +164,13 @@ node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL 
 | Tool | Description |
 |------|-------------|
 | `review(action, topic, key, note)` | Approve / reject / request changes on DRAFT knowledge |
-| `pending()` | Surface unresolved conflicts and DRAFTs awaiting review |
+| `pending()` | Surface unresolved conflicts, DRAFTs, deprecation requests, open deviations |
+| `deviate(opts)` | Record a project deviation from a linked global catalog entry |
+| `conformance(opts?)` | Get conformance score for the current project; `include_details` returns top-10 open deviations |
 | `authenticate()` | PKCE OAuth flow — opens browser to GitHub login, stores JWT in-memory |
 | `config_upload(opts)` | Upload project config to S3 and sync DynamoDB membership index |
 
-**Integrations (v0.4+):**
+**Integrations (v0.5+):**
 
 | Tool | Description |
 |------|-------------|
@@ -179,8 +197,12 @@ node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL 
 | Self-evolving skill | ❌ | ✅ Claude Code SKILL.md |
 | Export to human | ❌ | ✅ Markdown + Confluence |
 | Durable content store | ⚠️ graph only | ✅ PostgreSQL summary column (survives FalkorDB wipes) |
-| PR knowledge ingestion | ❌ | ✅ ingest_pr() (v0.4) |
-| Atlassian integration | ❌ | ✅ Jira + Confluence via MCP (v0.4) |
+| Cross-project federation | ❌ | ✅ Global catalogs; search/recall traverse linked projects transparently |
+| Deviation governance | ❌ | ✅ Record, score severity, accept/deny/defer with constitutional enforcement |
+| Conformance scoring | ❌ | ✅ Weighted score per project; UNCERTIFIED gate; quorum:scan CI skill |
+| Portfolio intelligence | ❌ | ✅ Org-wide rollup (exec-gated); denial hint badges on global entries |
+| PR knowledge ingestion | ❌ | ✅ ingest_pr() (v0.5) |
+| Atlassian integration | ❌ | ✅ Jira + Confluence via MCP (v0.5) |
 | Knowledge entity types | ❌ | ✅ Decision, Pattern, Constraint, Runbook, Requirement |
 
 ---
@@ -199,9 +221,9 @@ Engineering decisions explain *how* things are built. Business requirements expl
 
 - **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack
 - **v0.2** (shipped) — Quorum Gateway (ES256 JWT, GitHub OAuth, S3-backed project config), multi-project scoping, authority weighting, confidence decay, human-in-the-loop conflict resolution, Quorum Dashboard, self-evolving SKILL.md
-- **v0.3** (shipped) — Slim JWT `{ sub, is_admin }`, Redis config/profile/admin cache with pub/sub invalidation, `X-Quorum-Project` header, `GET /user/profile/:username`, ownership governance (transfer, role update, admin management), PostgreSQL `summary` as durable content store, PG ILIKE fallback in search
-- **v0.4** — Self-evolving graph: PACE framework, decision quality feedback loop, governance health dashboard, PR ingestion (`ingest_pr`)
-- **v0.5** — Multi-team namespacing, Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`), cross-team promotion workflow
+- **v0.3** (shipped) — Slim JWT `{ sub, is_admin }`, Redis config/profile/admin cache with pub/sub invalidation, `X-Quorum-Project` header, ownership governance, PostgreSQL `summary` as durable content store, deprecation request workflow
+- **v0.4** (shipped) — Federation (global catalogs, cross-project reads), deviation governance (`deviate()`, accept/deny/defer with constitutional enforcement), conformance scoring (`conformance()`, `quorum:scan` CI skill), portfolio intelligence (exec-gated org rollup, denial hint badges), fully-isolated E2E Docker test suite; 675 gateway tests · 620 quorum-mcp tests
+- **v0.5** — PR ingestion (`ingest_pr`), Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`), multi-team namespacing, cross-team promotion workflow
 - **v1.0** — Production hardening, external security audit, hosted docs
 
 > Full detail: [docs/ROADMAP.md](docs/ROADMAP.md)
@@ -211,11 +233,16 @@ Engineering decisions explain *how* things are built. Business requirements expl
 ## Repository Structure
 
 ```
-gateway/          ← @as-quorum/gateway — Express :3001 (private, self-hosted)
-dashboard/        ← React SPA served via nginx :3002 (private, self-hosted)
-tests/            ← Gateway integration tests (vitest)
-scripts/          ← setup.sh · audit-cli.js · seed · decay · archive
-docs/             ← ARCHITECTURE · TESTING · DEPLOYMENT · QUICKSTART · DIAGRAMS
+gateway/             ← @as-quorum/gateway — Express :3001 (private, self-hosted)
+dashboard/           ← React SPA served via nginx :3002 (private, self-hosted)
+tests/               ← Gateway integration tests (vitest)
+mock-openai/         ← Zero-dependency Node.js OpenAI mock for E2E test isolation
+scripts/             ← setup.sh · audit-cli.js · seed · decay · archive · e2e-docker.sh
+docs/                ← ARCHITECTURE · TESTING · DEPLOYMENT · QUICKSTART · FRONTEND · E2E-JOURNEYS
+docker-compose.yml           ← dev stack
+docker-compose.e2e.yml       ← fully-isolated E2E stack (no host port bindings)
+docker-compose.test.yml      ← gateway test overlay (test key pair + mock-openai)
+playwright.config.js         ← E2E test runner config
 ```
 
 > MCP server source: [github.com/as-quorum/quorum-mcp](https://github.com/as-quorum/quorum-mcp) — installed as `@as-quorum/mcp`

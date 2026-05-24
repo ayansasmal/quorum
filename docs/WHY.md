@@ -1,6 +1,6 @@
 # Why Quorum?
 
-> Four narratives from teams who've felt this pain — plus one that most teams don't realise they have.
+> Eight narratives from teams who've felt this pain — five within a single team, three that emerge only when you scale across teams.
 
 ---
 
@@ -66,13 +66,57 @@ Engineering decisions explain *how* things are built. Business requirements expl
 
 ---
 
+## 6. The invisible standard violation problem
+
+Your platform team maintains a global engineering catalog: "all services must use KMS for secrets at rest", "PII must never leave `eu-west-1`", "never store session tokens in Redis". Twelve product teams are building services. They all use Claude Code. They have no visibility into the global catalog — their agents give advice based on the team's local knowledge graph.
+
+A new service team stores a pattern: "use environment variables for API keys — simple and portable." Their agent follows it. Three services ship with API keys in env vars. The KMS requirement was in the global catalog. Nobody saw the conflict.
+
+**What Quorum does:** federation and deviation governance work together. Product teams link their project config to the global catalog: `"globals": ["platform-security-standards"]`. Now every `remember()` call by any agent on that team runs conflict detection against both the local graph and the global catalog. The pattern "use environment variables for API keys" triggers a conflict with the global KMS standard — immediately, at write time, before any code ships.
+
+The team's agent records the deviation via `deviate()` rather than silently proceeding. The principal engineer reviews it: accept as a sanctioned exception (with reason and expiry), deny (must fix before next release), or defer (30, 45, 60, or 90 days with a mandatory revisit). The conflict is governed, not ignored.
+
+The platform team can see which services have open deviations against their standards. "We have a KMS compliance gap on three services" becomes a fact, not a suspicion.
+
+---
+
+## 7. The standards compliance black hole
+
+Six months after adopting shared engineering standards, your CTO asks a simple question: are teams actually following them? The honest answer is: nobody knows.
+
+Some teams are rigorous. Others have drifted. A few have made intentional exceptions that were never documented. The platform team has a catalog of 40 ACTIVE standards. None of the 12 product teams has a conformance score. The quarterly engineering review is tomorrow.
+
+**What Quorum does:** every project that links a global catalog gets a conformance score automatically. The score is weighted: unactioned OPEN deviations reduce it the most, OVERDUE deferrals nearly as much, ACCEPTED exceptions reduce it less (they're governed), DENIED deviations the least (someone rejected the standard, which is governed), RESOLVED deviations not at all. A project with no global catalogs or fewer than 10 ACTIVE catalog entries shows as UNCERTIFIED — which is itself signal.
+
+The `conformance()` MCP tool lets any agent check a project's score and surface the top open deviations by severity before the review. The dashboard Stats page shows each project's score badge — green above 80, amber 50–80, red below 50. The CTO's portfolio view shows a weighted rollup across all certified projects, org-wide compliance at a glance.
+
+"Are teams following standards?" goes from an unanswerable question to a number with a breakdown.
+
+---
+
+## 8. The portfolio blindspot
+
+A VP of Engineering oversees eight teams. Each runs Claude Code with their own Quorum project. Each has a local knowledge graph growing steadily. But from the VP's perspective, the org is opaque: which teams are aligned to global standards? Which have open deviations that have gone stale? Which team's architecture is drifting in a direction that contradicts what the platform team established?
+
+The answer lives in eight separate graphs that nobody has a cross-cutting view of.
+
+**What Quorum does:** portfolio intelligence is role-gated to `principal_architect`, `director`, `vp_engineering`, `group_executive`, and admins — no accidental exposure of project internals. The `GET /api/portfolio` endpoint loads every project, applies the org hierarchy filter (so a VP only sees teams under their node), and returns a weighted criticality rollup: a single portfolio conformance score, a count of certified vs uncertified projects, and per-project scores.
+
+In the Knowledge browser, global catalog entries show a `denial_hint_count` badge — a red pill showing how many projects have explicitly denied that standard. A catalog entry with eight denials is a signal that the standard may be unrealistic or needs revisiting. One denial might be a rogue team. Eight is a policy problem.
+
+The VP doesn't need to chase eight team leads for a status update. The governance trail is already there — because every deviation, every acceptance, every deferral was recorded at the point it happened.
+
+---
+
 ## Who Quorum is for
 
 - **Engineering managers** whose teams use AI coding assistants and need confidence that agents are following the team’s actual standards — not generic internet advice.
-- **Platform engineers** building internal developer platforms who want AI assistance to be consistent, governed, and auditable across all teams connecting to the platform.
-- **CTOs and architects** who need to know that critical decisions — auth patterns, data residency constraints, compliance requirements — cannot be quietly overridden by a well-meaning junior engineer or an AI that doesn’t know what it doesn’t know.
+- **Platform engineers** building internal developer platforms who want AI assistance to be consistent, governed, and auditable across all teams connecting to the platform. Global catalogs let the platform team publish standards once and have every product team’s agents check against them automatically.
+- **CTOs and architects** who need to know that critical decisions — auth patterns, data residency constraints, compliance requirements — cannot be quietly overridden by a well-meaning junior engineer or an AI that doesn’t know what it doesn’t know. The portfolio view gives a single weighted conformance score across all teams without chasing eight team leads.
+- **VPs of Engineering and directors** who need org-wide visibility into how well teams are aligned to shared standards, where deviations are piling up, and which parts of the portfolio are drifting — without reading eight separate knowledge graphs.
+- **Principal architects** who set global standards and need to know when teams deviate, why, and whether those deviations are governed (accepted/denied/deferred) or just silently happening.
 - **Product managers** whose feature requirements and business rules need to survive refactors, team changes, and the next AI assistant that joins the team.
-- **Teams scaling their use of Claude Code** beyond individual productivity into shared, collaborative AI-assisted engineering.
+- **Teams scaling their use of Claude Code** beyond individual productivity into shared, collaborative AI-assisted engineering — and beyond a single team into multi-team organisations where standards need to travel with the work.
 
 ---
 
