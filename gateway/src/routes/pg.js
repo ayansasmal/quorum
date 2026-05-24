@@ -736,6 +736,7 @@ router.get('/pending/:conflictId', async (req, res, next) => {
 // POST /pg/scans — record a scan run in project_scans.
 // Used by the quorum:scan skill (via MCP) and by E2E seed helpers to advance
 // scan_count above 0 so getConformanceScore can produce a CERTIFIED result.
+// E2E: tests/e2e/scenarios/05-conformance-scoring.spec.js — S-05.2 beforeAll (advances scan_count)
 router.post('/scans', async (req, res, next) => {
   const pool       = req.app.locals.pool
   const qProjectId = req.user.qProjectId

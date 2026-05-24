@@ -277,6 +277,7 @@ export function enforceConstitutionalRulesAreImmutable(configKey) {
  * @param {string} projectId - group_id of the target project
  * @param {boolean} isGlobalProject - true when the target project has is_global: true
  */
+// E2E: tests/e2e/scenarios/01-global-catalog-onboarding.spec.js — S-01 step 8 (architect→DRAFT, engineer blocked)
 export function enforceGlobalWriteAuthority(identity, projectId, isGlobalProject) {
   // Non-global projects: no restriction on write role.
   if (!isGlobalProject) return
@@ -309,6 +310,7 @@ export function enforceGlobalWriteAuthority(identity, projectId, isGlobalProject
  * @param {string} actorRole
  * @param {'accept'|'deny'|'defer'} operation
  */
+// E2E: tests/e2e/scenarios/04-deviation-governance.spec.js — S-04.3 (authority guard), S-04.4 (deny), S-04.5 (defer)
 export function enforceDeviationActionAuthority(actorRole, operation) {
   const ALLOWED_ROLES = [
     'architect',
@@ -339,6 +341,7 @@ export function enforceDeviationActionAuthority(actorRole, operation) {
  *
  * @param {string | Date} deferUntil - ISO timestamp or Date object
  */
+// E2E: tests/e2e/scenarios/04-deviation-governance.spec.js — S-04.5 step 1 (invalid days) + step 3 (valid 30d)
 export function enforceValidDeferDeadline(deferUntil) {
   const days = Math.round(
     (new Date(deferUntil).getTime() - Date.now()) / (1000 * 60 * 60 * 24),

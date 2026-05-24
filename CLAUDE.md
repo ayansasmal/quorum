@@ -232,6 +232,35 @@ The constitutional test suite enforces all of these at 100% coverage:
 
 ---
 
+## E2E Test Traceability
+
+**Rule: when writing any new E2E journey spec (`tests/e2e/scenarios/`), annotate the production code it exercises in three categories. Apply to the code being added or changed in the same commit.**
+
+This lets a future developer know immediately which E2E tests will break if they modify a specific code path — without having to grep across the test suite.
+
+### Annotation format
+
+```javascript
+// E2E: tests/e2e/scenarios/<spec-file>.spec.js — <S-XX.Y> <short description>
+```
+
+### Where to annotate (selective — not every line)
+
+| Category | Example | Why |
+|----------|---------|-----|
+| **Constitutional enforcement functions** | `enforceDeviationActionAuthority`, `enforceValidDeferDeadline`, `enforceGlobalWriteAuthority` | High-consequence, brittle boundaries; coverage required at 100% |
+| **Non-obvious infrastructure endpoints** | `POST /pg/scans`, `POST /pg/pending` | Routes that exist only for E2E/skill infrastructure — purpose not obvious from code alone |
+| **Scoring / status gate logic** | UNCERTIFIED conditions in `getConformanceScore`, deviation status weights | Multi-condition logic where a misread of the formula breaks E2E assertions |
+| **Cross-repo vendored shared logic** | Shared queries or constitutional functions vendored between gateway and quorum-mcp | Both copies need annotation when both are tested |
+
+### Where NOT to annotate
+
+- Standard CRUD route handlers (too broad — dozens of tests cover each one)
+- Boilerplate auth guards (pattern is uniform; any spec that calls a guarded route tests them)
+- Config/env wiring code
+
+---
+
 ## Environment Variables
 
 ```bash

@@ -1042,6 +1042,10 @@ export async function getConformanceScore(pg, qProjectId, catalogGroupIds = []) 
                         scan_count: scanCount, last_scan_at: lastScanAt,
                         breakdown: { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 } }
 
+  // E2E: tests/e2e/scenarios/05-conformance-scoring.spec.js
+  //   S-05.1 step 1 — no globals → UNCERTIFIED (quorum-test-isolated-project fixture)
+  //   S-05.2 step 1 — 10 entries + scan → CERTIFIED
+  //   S-01  step 7 — new catalog with 1 entry → UNCERTIFIED (entry_count < 10)
   if (!catalogGroupIds.length || applicableEntries < 10 || scanCount === 0) return UNCERTIFIED
 
   // Compute weighted sum from unresolved deviations with LATERAL status join.
