@@ -180,6 +180,10 @@ services:
       - QUORUM_GATEWAY_PORT=3001
       - QUORUM_SYNC_SECRET=
       - NODE_ENV=test
+      # ── LLM (mock) — governance endpoints call the mock-openai service ────────
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+      - LLM_MODEL_NAME=gpt-4o-mini
       # ── Test JWT key pair ────────────────────────────────────────────────────
       # Committed P-256 (ES256) keys — NOT production secrets.
       # Private key: used by tests/e2e/helpers/jwt.js to sign test tokens.
@@ -192,6 +196,8 @@ services:
       postgresql:
         condition: service_healthy
       graphiti:
+        condition: service_healthy
+      mock-openai:
         condition: service_healthy
       localstack:
         condition: service_healthy

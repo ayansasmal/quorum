@@ -14,9 +14,8 @@
  * @module seed
  */
 
-import { api }            from './api.js'
-import { tokens }         from './jwt.js'
-import { graphitiSettle } from './graphiti.js'
+import { api }    from './api.js'
+import { tokens } from './jwt.js'
 
 /**
  * Generates a unique key for each test run.
@@ -74,25 +73,45 @@ export async function draftEntry({ topic, key, content, entityType = 'Decision',
 }
 
 /**
- * Creates a conflict (pending decision) by writing a semantically similar entry
- * against an existing ACTIVE entry.
+ * Creates a conflict (pending decision) by:
+ *   1. Writing a DRAFT version as engineer against an existing ACTIVE entry.
+ *   2. Inserting a pending_decision record via POST /pg/pending so the PE can
+ *      review it via POST /api/review/:conflictId.
  *
- * Calls graphitiSettle() internally — callers do NOT need to manage timing.
- * Use as prerequisite for scenarios that need a conflict_id to act on.
+ * Two-step creation is required because POST /api/knowledge (dashboard route)
+ * creates a DRAFT version in knowledge_versions but does NOT automatically
+ * create a pending_decisions row. The review endpoint requires a pending_decisions
+ * record, so we create it explicitly here.
  *
- * @param {{ topic: string, key: string, content: string, project?: string }} opts - the conflicting content
+ * Use as prerequisite for scenarios that need a conflict_id to act on
+ * (S-02.3 supersede, S-02.4 reject, S-02.5 escalate, S-02.6 split, S-02.7 merge).
+ *
+ * @param {{ topic: string, key: string, content: string, existingContent?: string, project?: string }} opts
  * @returns {Promise<{ conflictId: string }>}
  */
-export async function conflict({ topic, key, content, project = 'quorum-test-project' }) {
-  const client = api(tokens.engineer, project)
-  await client.post('/api/knowledge', { topic, key, content })
-  await graphitiSettle()
-  const pending = await client.get('/pg/pending')
-  const entry = pending.data.decisions?.find(
-    d => d.topic === topic && d.key === key
-  )
-  if (!entry) throw new Error(`seed.conflict: no conflict found for ${topic}/${key}`)
-  return { conflictId: entry.decision_id }
+export async function conflict({ topic, key, content, existingContent = '', project = 'quorum-test-project' }) {
+  // Step 1: engineer writes conflicting content → DRAFT version created in knowledge_versions
+  const engClient = api(tokens.engineer, project)
+  const writeRes = await engClient.post('/api/knowledge', { topic, key, content })
+  if (writeRes.status !== 201) {
+    throw new Error(`seed.conflict: DRAFT write failed: ${writeRes.status} ${JSON.stringify(writeRes.data)}`)
+  }
+
+  // Step 2: create pending_decision record so /api/review/:conflictId can find it.
+  // The conflict_id is auto-allocated by the gateway (q_conflict_seq).
+  const pendingRes = await engClient.post('/pg/pending', {
+    conflict_topic:    topic,
+    conflict_key:      key,
+    decision_type:     'conflict',
+    existing_content:  existingContent,
+    incoming_content:  content,
+    conflict_reason:   'Conflicting entry detected (E2E test seed)',
+  })
+  if (pendingRes.status !== 201) {
+    throw new Error(`seed.conflict: pending_decision insert failed: ${pendingRes.status} ${JSON.stringify(pendingRes.data)}`)
+  }
+
+  return { conflictId: pendingRes.data.conflict_id }
 }
 
 /**

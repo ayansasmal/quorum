@@ -91,13 +91,41 @@ function handleEmbeddings(body, res) {
  * @param {http.ServerResponse} res
  */
 function handleChatCompletions(body, res) {
-  // Return a minimal valid JSON response that Graphiti won't reject.
-  // The content is a stable JSON object so Graphiti's JSON parser doesn't error.
-  const content = JSON.stringify({
-    entities:      [],
-    relationships: [],
-    summary:       'Mock entity extraction — no real analysis performed in test mode.',
-  })
+  // Route to governance-specific responses based on the system prompt content.
+  // This allows the gateway's /governance/* endpoints to return well-shaped JSON
+  // in the E2E environment without a real OpenAI API key.
+  const systemMsg = (body.messages ?? []).find(m => m.role === 'system')?.content ?? ''
+
+  let content
+  if (systemMsg.includes('conflict detector')) {
+    // governance/detect-conflict: return valid conflict-check shape
+    content = JSON.stringify({
+      contradicts:      false,
+      reason:           'No contradiction detected in test mode.',
+      possible_split:   false,
+      split_suggestion: null,
+    })
+  } else if (systemMsg.includes('reviewer brief')) {
+    // governance/enrich: return valid enrichment shape
+    content = JSON.stringify({
+      analysis:               'Mock conflict analysis for E2E test.',
+      risks_if_approved:      ['Risk A (test)', 'Risk B (test)'],
+      questions_for_reviewer: ['Q1: Is the scope clear?', 'Q2: Does this supersede the existing standard?'],
+      existing_rationale:     null,
+      possible_split:         false,
+      split_suggestion:       null,
+    })
+  } else if (systemMsg.includes('knowledge extractor')) {
+    // governance/extract: return empty items (safe default)
+    content = JSON.stringify({ items: [] })
+  } else {
+    // Graphiti entity extraction — stable generic object Graphiti won't reject
+    content = JSON.stringify({
+      entities:      [],
+      relationships: [],
+      summary:       'Mock entity extraction — no real analysis performed in test mode.',
+    })
+  }
 
   const payload = {
     id:      `chatcmpl-mock-${Date.now()}`,

@@ -9,7 +9,8 @@
  * Enforces json_object response_format so all responses parse cleanly.
  */
 
-const OPENAI_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'
+const OPENAI_BASE = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com').replace(/\/$/, '')
+const OPENAI_COMPLETIONS_URL = `${OPENAI_BASE}/v1/chat/completions`
 
 /**
  * Call the OpenAI Chat Completions API and return the parsed JSON response body.
