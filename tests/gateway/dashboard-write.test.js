@@ -661,3 +661,115 @@ describe('POST /api/review/:conflictId — deprecation request path', () => {
     expect(transitionVersionStatus).not.toHaveBeenCalled()
   })
 })
+
+// ── POST /api/review/:conflictId — conflict path ───────────────────────────────
+
+describe('POST /api/review/:conflictId — conflict path', () => {
+  /** Build a conflict-type pending_decisions record. */
+  function makeConflictDecision(overrides = {}) {
+    return {
+      conflict_id:               'q_c99',
+      decision_type:             'conflict',
+      status:                    'pending',
+      q_project_id:              'q_p1',
+      q_key_id:                  'q_k1',
+      conflict_reason:           'Contradicts existing infra policy',
+      active_version_at_creation: 1,
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    // Conflict decision returned by default in this describe block
+    getPendingDecisionById.mockResolvedValue(makeConflictDecision())
+    // Key lookup — the route queries q_keys to get topic/key from q_key_id
+    fakePool.query.mockImplementation((sql) => {
+      if (sql.includes('SELECT topic, key FROM q_keys')) {
+        return Promise.resolve({ rows: [{ topic: 'infra', key: 'deploy-policy' }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    // getLatestDraftVersion returns { version: 2, author: 'bob' } (default from global mock)
+    // getCurrentVersion returns { version: 1, confidence: 0.8 } (default from global mock)
+  })
+
+  it('returns 404 when decision does not exist', async () => {
+    getPendingDecisionById.mockResolvedValue(null)
+
+    const res = await post('/api/review/q_c99', {
+      action: 'approve', note: 'Approved after review.',
+    })
+
+    expect(res.status).toBe(404)
+    expect(res.body.error).toBe('not_found')
+  })
+
+  it('approve — transitions DRAFT to ACTIVE (conflict resolution)', async () => {
+    const res = await post('/api/review/q_c99', {
+      action: 'approve', note: 'Incoming version is more accurate.',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('approved')
+
+    // DRAFT (version 2) must become ACTIVE
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      fakeClient,
+      'q_k1_v2',
+      'ACTIVE',
+      expect.objectContaining({ version: 2 }),
+    )
+  })
+
+  it('approve — also supersedes the old ACTIVE (no two simultaneous ACTIVE versions)', async () => {
+    await post('/api/review/q_c99', {
+      action: 'approve', note: 'Incoming version is more accurate.',
+    })
+
+    // Old ACTIVE (version 1) must become SUPERSEDED in the same transaction
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      fakeClient,
+      'q_k1_v1',
+      'SUPERSEDED',
+      expect.objectContaining({ version: 2 }),
+    )
+    // Both transitions run inside the same BEGIN/COMMIT block
+    const txCalls = fakeClient.query.mock.calls.map((c) => c[0])
+    expect(txCalls).toContain('BEGIN')
+    expect(txCalls).toContain('COMMIT')
+  })
+
+  it('reject — transitions DRAFT to REJECTED (not ACTIVE)', async () => {
+    const res = await post('/api/review/q_c99', {
+      action: 'reject', note: 'Existing policy is correct.',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.status).toBe('rejected')
+
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      fakeClient,
+      'q_k1_v2',
+      'REJECTED',
+      null,
+    )
+    // Old ACTIVE must NOT be touched on reject
+    expect(transitionVersionStatus).not.toHaveBeenCalledWith(
+      fakeClient,
+      'q_k1_v1',
+      'SUPERSEDED',
+      expect.anything(),
+    )
+  })
+
+  it('writes audit entry with tool dashboard-review on approve', async () => {
+    await post('/api/review/q_c99', {
+      action: 'approve', note: 'Incoming version is more accurate.',
+    })
+
+    expect(writeAuditEntry).toHaveBeenCalledWith(
+      fakePool,
+      expect.objectContaining({ operation: 'OUTCOME', tool: 'review' }),
+    )
+  })
+})

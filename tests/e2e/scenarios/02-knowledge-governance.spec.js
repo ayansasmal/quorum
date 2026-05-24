@@ -209,11 +209,11 @@ describe('S-02.2 — Conflict Detection', () => {
 
   test('step 4 — POST /governance/detect-conflict validates required fields', async () => {
     const client = api(tokens.pe, PROJECT)
-    // Missing 'incoming' → 422
+    // Missing 'incoming' → 400 (Errors.unprocessable returns HTTP 400)
     const res = await client.post('/governance/detect-conflict', {
       existing: existingContent,
     })
-    expect(res.status).toBe(422)
+    expect(res.status).toBe(400)
     expect(res.data.error).toBeDefined()
   })
 
@@ -495,7 +495,9 @@ describe('S-02.6 — Coexist-Split', () => {
       reason:      'Split into context-specific pool size standards: oltp and batch.',
     })
     expect(res.status).toBe(200)
-    expect(res.data.new_version).toBeGreaterThan(1)
+    // Supersede returns { new_version: <full row object>, superseded_version: <number> }
+    expect(res.data.new_version.version).toBeGreaterThan(1)
+    expect(res.data.new_version.status).toBe('ACTIVE')
     expect(res.data.superseded_version).toBe(1)
   })
 
@@ -550,7 +552,9 @@ describe('S-02.7 — Coexist-Merge', () => {
       reason:      'Merged rotation requirements: 90d standard, 30d for PII services.',
     })
     expect(res.status).toBe(200)
-    expect(res.data.new_version).toBeGreaterThan(1)
+    // Supersede returns { new_version: <full row object>, superseded_version: <number> }
+    expect(res.data.new_version.version).toBeGreaterThan(1)
+    expect(res.data.new_version.status).toBe('ACTIVE')
     expect(res.data.superseded_version).toBe(1)
   })
 

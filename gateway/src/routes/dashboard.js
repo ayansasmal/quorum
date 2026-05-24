@@ -933,6 +933,17 @@ router.post('/review/:conflictId', async (req, res, next) => {
             at:      new Date().toISOString(),
           }
           await transitionVersionStatus(client, draftVersionId, 'ACTIVE', forwardLink)
+
+          // Atomically supersede the old ACTIVE so there is never more than one
+          // ACTIVE version for a given topic:key after conflict approval.
+          if (currentActive) {
+            const currentActiveId = `${decision.q_key_id}_v${currentActive.version}`
+            await transitionVersionStatus(client, currentActiveId, 'SUPERSEDED', {
+              version: draftVersion.version,
+              author:  reviewer,
+              at:      new Date().toISOString(),
+            })
+          }
         } else if (action === 'reject') {
           await transitionVersionStatus(client, draftVersionId, 'REJECTED', null)
         }
