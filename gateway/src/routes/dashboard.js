@@ -605,6 +605,9 @@ router.get('/search', async (req, res, next) => {
     const globals       = projectConfig?.globals ?? []
 
     // All group_id slugs to search across (project + every linked global catalog).
+    // E2E: tests/e2e/scenarios/07-cross-catalog-search.spec.js
+    //   S-07.3 step 1 — PROJECT (globals:[CATALOG]) finds global entry
+    //   S-07.4 step 3 — ISOLATED_PROJECT (no globals) cannot find global entries
     const allGroupIds = [groupId, ...globals]
 
     // Reverse map for annotation: normalizedGroupId → original group_id slug.
@@ -630,8 +633,8 @@ router.get('/search', async (req, res, next) => {
          WHERE qp.group_id = ANY($1)
            AND (kv.summary ILIKE $2 OR kv.key ILIKE $2 OR kv.topic ILIKE $2
                 OR EXISTS (SELECT 1 FROM unnest(kv.tags) t WHERE t ILIKE $2))
-           AND kv.status NOT IN ('DRAFT','DEPRECATED','REJECTED')
-           ${domainFilter}
+           AND kv.status NOT IN ('DRAFT','DEPRECATED','REJECTED') -- E2E: S-07.5 step 1 (DRAFT exclusion)
+           ${domainFilter} -- E2E: S-07.6 step 1 (domain filter narrows to exact topic)
          ORDER BY kv.confidence DESC, kv.created_at DESC
          LIMIT ${limit}`,
         pgParams,
