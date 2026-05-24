@@ -38,6 +38,8 @@
  *   GET  /pg/pending/:conflictId              → getPendingDecisionById
  *   POST /pg/pending                          → insert pending decision
  *   PATCH /pg/pending/:conflictId             → update pending decision
+ *
+ *   POST /pg/scans                            → record a scan run (project_scans table)
  */
 
 import { Router } from 'express'
@@ -728,6 +730,39 @@ router.get('/pending/:conflictId', async (req, res, next) => {
     const row = await getPendingDecisionById(pool, conflictId)
     if (row && row.q_project_id !== req.user.qProjectId) return res.status(404).json(null)
     res.json(row)
+  } catch (err) { next(err) }
+})
+
+// POST /pg/scans — record a scan run in project_scans.
+// Used by the quorum:scan skill (via MCP) and by E2E seed helpers to advance
+// scan_count above 0 so getConformanceScore can produce a CERTIFIED result.
+router.post('/scans', async (req, res, next) => {
+  const pool       = req.app.locals.pool
+  const qProjectId = req.user.qProjectId
+  const d          = req.body ?? {}
+  const scanType   = d.scan_type ?? 'full'
+  if (!['full', 'incremental'].includes(scanType)) {
+    return res.status(400).json({ error: 'invalid_scan_type', message: "scan_type must be 'full' or 'incremental'" })
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO project_scans
+         (q_project_id, scan_type, triggered_by, files_scanned,
+          deviations_new, deviations_confirmed, deviations_resolved, candidates_surfaced)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING *`,
+      [
+        qProjectId,
+        scanType,
+        d.triggered_by         ?? 'agent',
+        d.files_scanned        ?? null,
+        d.deviations_new       ?? 0,
+        d.deviations_confirmed ?? 0,
+        d.deviations_resolved  ?? 0,
+        d.candidates_surfaced  ?? 0,
+      ],
+    )
+    res.status(201).json(rows[0])
   } catch (err) { next(err) }
 })
 

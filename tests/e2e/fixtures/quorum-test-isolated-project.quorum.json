@@ -1,0 +1,27 @@
+{
+  "group_id": "quorum-test-isolated-project",
+  "project": "Quorum E2E Isolated Project (no globals)",
+  "owner": "test-pe",
+  "is_global": false,
+  "hierarchy": {
+    "level": "service",
+    "display_name": "E2E Isolated Service",
+    "criticality": 1
+  },
+  "members": [
+    {
+      "name": "Test PE",
+      "github_username": "test-pe",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
+      "name": "Test Engineer",
+      "github_username": "test-engineer",
+      "role": "engineer",
+      "base_confidence": 0.70,
+      "team": "backend"
+    }
+  ]
+}

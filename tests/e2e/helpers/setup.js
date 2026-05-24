@@ -96,7 +96,11 @@ export default async function setup(_config) {
   const peToken = makeToken('test-pe')
   const fixDir  = resolve(__dir, '../fixtures')
 
-  for (const file of ['quorum-test-catalog.quorum.json', 'quorum-test-project.quorum.json']) {
+  for (const file of [
+    'quorum-test-catalog.quorum.json',
+    'quorum-test-project.quorum.json',
+    'quorum-test-isolated-project.quorum.json',
+  ]) {
     const res = await uploadFixture(resolve(fixDir, file), peToken)
     const label = res.status === 201 ? 'uploaded ✓' : 'already onboarded ✓'
     console.log(`[setup] fixture ${file} — ${label}`)
