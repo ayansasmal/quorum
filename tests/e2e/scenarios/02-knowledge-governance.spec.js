@@ -294,12 +294,21 @@ describe('S-02.3 — Supersede Path', () => {
     expect(v1.status).toBe('SUPERSEDED')
   })
 
-  test('step 4 — audit lineage records the supersede transition', async () => {
+  test('step 4 — approve action is recorded in the immutable audit trail', async () => {
+    // The dashboard review/approve route writes to audit_log directly via writeAuditEntry
+    // (tool: 'review'). This is distinct from the lineage endpoint, which requires
+    // version_audit_links entries written by the MCP path. Use GET /pg/audit?tool=review
+    // to verify the approval audit record exists.
     const client = api(tokens.pe, PROJECT)
-    const res = await client.get(`/pg/audit/lineage/${topic}/${deployKey}`)
+    const res = await client.get('/pg/audit?tool=review')
     expect(res.status).toBe(200)
     expect(Array.isArray(res.data.entries)).toBe(true)
-    expect(res.data.entries.length).toBeGreaterThan(0)
+    const approveEntry = res.data.entries.find(e =>
+      e.outcome_json?.key === deployKey &&
+      e.outcome_json?.status === 'approved',
+    )
+    expect(approveEntry).toBeDefined()
+    expect(approveEntry.operation).toBe('OUTCOME')
   })
 
   test('step 5 — resolved conflict no longer appears in GET /pg/pending', async () => {
