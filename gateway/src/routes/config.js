@@ -25,6 +25,7 @@ import { QuorumConfigSchema }            from '../shared/config/schema.js'
 import { getS3, syncOneProject }         from './sync.js'
 import { updateMemberRecord }            from '../ddb.js'
 import { writeGovernanceAudit }          from '../shared/audit/governance.js'
+import { enforceReasonRequired }         from '../shared/governance/constitutional.js'
 import { createProject, getProjectByGroupId } from '../shared/graph/queries.js'
 
 const router = Router()
@@ -266,7 +267,7 @@ function canTransferOwnership(actor, newOwner, isOwner, isAdmin) {
 }
 
 // POST /config/transfer-ownership
-router.post('/transfer-ownership', verifyJwt, async (req, res) => {
+router.post('/transfer-ownership', verifyJwt, async (req, res, next) => {
   const { to, reason } = req.body ?? {}
   const actor   = req.user.sub
   const project = req.user.project
@@ -274,8 +275,10 @@ router.post('/transfer-ownership', verifyJwt, async (req, res) => {
 
   if (!project) return res.status(400).json({ error: 'missing_header', message: 'X-Quorum-Project header required' })
   if (!to)      return res.status(400).json({ error: 'missing_param',  message: 'to (new owner username) required' })
-  if (!reason || reason.length < 10) {
-    return res.status(400).json({ error: 'missing_param', message: 'reason must be at least 10 characters' })
+  try {
+    enforceReasonRequired(reason, 'transfer-ownership')
+  } catch (err) {
+    return next(err)
   }
 
   const config = await loadProjectConfig(project)
@@ -324,7 +327,7 @@ router.post('/transfer-ownership', verifyJwt, async (req, res) => {
 })
 
 // POST /config/update-role
-router.post('/update-role', verifyJwt, async (req, res) => {
+router.post('/update-role', verifyJwt, async (req, res, next) => {
   const { github_username, role, reason } = req.body ?? {}
   const actor   = req.user.sub
   const project = req.user.project
@@ -333,8 +336,10 @@ router.post('/update-role', verifyJwt, async (req, res) => {
   if (!project)        return res.status(400).json({ error: 'missing_header', message: 'X-Quorum-Project header required' })
   if (!github_username) return res.status(400).json({ error: 'missing_param', message: 'github_username required' })
   if (!role)           return res.status(400).json({ error: 'missing_param', message: 'role required' })
-  if (!reason || reason.length < 10) {
-    return res.status(400).json({ error: 'missing_param', message: 'reason must be at least 10 characters' })
+  try {
+    enforceReasonRequired(reason, 'update-role')
+  } catch (err) {
+    return next(err)
   }
 
   if (!req.user.is_owner && !req.user.is_admin) {

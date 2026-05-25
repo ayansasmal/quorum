@@ -74,6 +74,8 @@ const HEX64_RE = /^[0-9a-f]{64}$/  // SHA256 hex digest — 64 lowercase hex cha
 // S-10.7 beforeAll depends on S-10.1 beforeAll having seeded data — serial enforces ordering.
 test.describe.configure({ mode: 'serial' })
 
+describe('S-10 — Audit Chain Integrity', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-10.1 — Write Creates Audit Entries
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,4 +305,5 @@ describe('S-10.8 — Lineage', () => {
     expect(Array.isArray(res.data.entries)).toBe(true)
     expect(res.data.entries).toHaveLength(0)
   })
-})
+
+}) // S-10 — Audit Chain Integrity

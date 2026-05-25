@@ -40,8 +40,11 @@ const app = express()
 app.use(express.json())
 app.locals.pool = { query: vi.fn() }
 app.use('/admin', adminRoutes)
-// Error handler matching server.js
+// Error handler matching server.js global handler
 app.use((err, _req, res, _next) => {
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
   const status = err.status ?? 500
   const code   = err.code   ?? 'INTERNAL_ERROR'
   res.status(status).json({ error: code.toLowerCase(), message: err.message })
@@ -251,8 +254,7 @@ describe('POST /admin/users', () => {
       { Authorization: `Bearer ${tok}` },
     )
     expect(status).toBe(400)
-    expect(body.error).toBe('missing_param')
-    expect(body.message).toMatch(/reason/)
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 500 when admin config is not seeded', async () => {

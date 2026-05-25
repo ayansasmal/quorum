@@ -55,6 +55,8 @@ const SEVEN_DAYS_MS  = 7 * 24 * 60 * 60 * 1000
 // S-08.4 first-bump must complete before second-bump fires — serial enforces ordering.
 test.describe.configure({ mode: 'serial' })
 
+describe('S-08 — Confidence Endorsement', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-08.1 — Happy Path
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,4 +272,5 @@ describe('S-08.5 — Validation Guards', () => {
     expect(res.status).toBe(404)
     expect(res.data.error).toBe('not_found')
   })
-})
+
+}) // S-08 — Confidence Endorsement

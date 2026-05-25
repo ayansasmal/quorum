@@ -52,6 +52,8 @@ const CATALOG = 'quorum-test-catalog'
 // and will see it in failed[]. Ordering guarantees deterministic assertion.
 test.describe.configure({ mode: 'serial' })
 
+describe('S-13 — Config Governance', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-13.1 — Sync Auth
 // ─────────────────────────────────────────────────────────────────────────────
@@ -313,4 +315,5 @@ describe('S-13.5 — Config Schema Validation', () => {
     expect(res.status).not.toBe(400)
     expect(res.status).not.toBe(500)
   })
-})
+
+}) // S-13 — Config Governance

@@ -56,6 +56,8 @@ const ISOLATED_PROJECT = 'quorum-test-isolated-project'  // no globals — perma
 // beforeAll is still in-flight, producing a spurious UNCERTIFIED result.
 test.describe.configure({ mode: 'serial' })
 
+describe('S-07 — Conformance Scoring', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-07.1 — UNCERTIFIED Gates
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,4 +437,5 @@ describe('S-07.8 — Conformance Score Badge', () => {
     // ('Open' also appears in the filter rail for deviations, so use 'Accepted' which is breakdown-only)
     await expect(page.getByText(/\d+ Accepted/, { exact: false })).not.toBeVisible()
   })
-})
+
+}) // S-07 — Conformance Scoring

@@ -55,11 +55,26 @@ vi.mock('../../gateway/src/shared/graph/client.js', () => ({
   searchFacts: vi.fn().mockResolvedValue({ facts: [] }),
 }))
 
-vi.mock('../../gateway/src/shared/governance/constitutional.js', () => ({
-  enforceNoSelfApproval:       vi.fn(),
-  enforceReasonRequired:       vi.fn(),
-  enforceGlobalWriteAuthority: vi.fn(),
-}))
+vi.mock('../../gateway/src/shared/governance/constitutional.js', () => {
+  class ConstitutionalViolation extends Error {
+    constructor(rule, message) {
+      super(`ConstitutionalViolation[${rule}]: ${message}`)
+      this.name = 'ConstitutionalViolation'
+      this.rule = rule
+    }
+  }
+  return {
+    ConstitutionalViolation,
+    enforceNoSelfApproval:       vi.fn(),
+    enforceGlobalWriteAuthority: vi.fn(),
+    // Mirrors real enforcement: throws REASON_REQUIRED when reason is null/short/placeholder
+    enforceReasonRequired: vi.fn((reason, _op) => {
+      if (reason == null || String(reason).trim().length < 10) {
+        throw new ConstitutionalViolation('REASON_REQUIRED', 'reason must be at least 10 characters')
+      }
+    }),
+  }
+})
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
@@ -100,6 +115,14 @@ app.locals.pool = fakePool
 
 // Mount with verifyJwt applied — mirrors server.js setup
 app.use('/api', verifyJwt, dashboardRoutes)
+// Error handler matching server.js global handler
+app.use((err, _req, res, _next) => {
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
+  const status = err.status ?? 500
+  res.status(status).json({ error: err.code ?? 'internal_error', message: err.message })
+})
 
 beforeAll(async () => {
   await new Promise((resolve) => {
@@ -131,11 +154,13 @@ beforeEach(() => {
   // Reset user to default PA
   mockUser = { sub: 'alice', project: 'q_p1', role: 'principal_architect', is_admin: false }
 
-  // Give enforceReasonRequired real-ish behaviour so deprecate tests can check 400s
+  // Give enforceReasonRequired real-ish behaviour — throws a ConstitutionalViolation-shaped
+  // error so the server error handler returns { rule: 'REASON_REQUIRED' } (status 400)
   enforceReasonRequired.mockImplementation((reason) => {
     if (!reason || String(reason).trim().length < 10) {
-      const err = new Error('Reason must be at least 10 characters and must not be a placeholder')
-      err.status = 400
+      const err = new Error(`ConstitutionalViolation[REASON_REQUIRED]: reason must be at least 10 characters`)
+      err.name = 'ConstitutionalViolation'
+      err.rule = 'REASON_REQUIRED'
       throw err
     }
   })
@@ -295,16 +320,14 @@ describe('POST /api/knowledge/:topic/:key/promote', () => {
     const { status, body } = await post('/api/knowledge/infra/retry-policy/promote', {})
 
     expect(status).toBe(400)
-    expect(body.error).toBe('validation_error')
-    expect(body.field).toBe('note')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 400 when note is too short', async () => {
     const { status, body } = await post('/api/knowledge/infra/retry-policy/promote', { note: 'Short' })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('validation_error')
-    expect(body.field).toBe('note')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 404 when no DRAFT exists', async () => {
@@ -366,8 +389,7 @@ describe('POST /api/knowledge/:topic/:key/supersede', () => {
     const { status, body } = await post('/api/knowledge/infra/retry-policy/supersede', { content, entity_type })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('validation_error')
-    expect(body.field).toBe('reason')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 404 when no ACTIVE version exists', async () => {
@@ -424,14 +446,14 @@ describe('POST /api/knowledge/:topic/:key/deprecate', () => {
     const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', {})
 
     expect(status).toBe(400)
-    expect(body.error).toBe('reason_required')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 400 when reason is less than 10 chars', async () => {
     const { status, body } = await post('/api/knowledge/auth/jwt-rotation/deprecate', { reason: 'too short' })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('reason_required')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('returns 404 when no ACTIVE version exists', async () => {
@@ -524,7 +546,7 @@ describe('POST /api/knowledge/deprecate/bulk', () => {
     })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('reason_required')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
   it('happy path — deprecates all entries and returns { deprecated, errors }', async () => {

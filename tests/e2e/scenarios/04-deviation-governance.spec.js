@@ -48,6 +48,8 @@ import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 const CATALOG  = 'quorum-test-catalog'
 const PROJECT  = 'quorum-test-project'
 
+describe('S-04 — Deviation Governance', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-04.1 — Deviation Recording
 // ─────────────────────────────────────────────────────────────────────────────
@@ -698,4 +700,5 @@ describe('S-04.8 — Knowledge Denial Hint Badge', () => {
       await expect(badge).toHaveAttribute('title', '1 project has denied this standard')
     })
   })
-})
+
+}) // S-04 — Deviation Governance

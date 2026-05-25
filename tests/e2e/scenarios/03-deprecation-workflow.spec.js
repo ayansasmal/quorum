@@ -33,6 +33,8 @@ import { uid, activeEntry, deprecationRequest } from '../helpers/seed.js'
 
 const PROJECT = 'quorum-test-project'
 
+describe('S-03 — Deprecation Workflow', () => {
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S-03.1 — PE Single Deprecation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -386,3 +388,5 @@ describe('S-03.5 — Deprecation Request: Reject', () => {
     expect(items.some(e => e.topic === topic && e.key === activeKey && e.status === 'ACTIVE')).toBe(true)
   })
 })
+
+}) // S-03 — Deprecation Workflow

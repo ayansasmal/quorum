@@ -70,6 +70,14 @@ app.use(express.json())
 app.locals.pool = { query: vi.fn() }
 app.use('/user',   userRoutes)
 app.use('/config', configRoutes)
+// Error handler matching server.js global handler
+app.use((err, _req, res, _next) => {
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
+  const status = err.status ?? 500
+  res.status(status).json({ error: err.code ?? 'internal_error', message: err.message })
+})
 
 beforeAll(async () => {
   await new Promise((resolve) => {
@@ -314,8 +322,7 @@ describe('POST /config/update-role → cache invalidation', () => {
     })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('missing_param')
-    expect(body.message).toMatch(/10 characters/)
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 })
 

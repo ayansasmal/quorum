@@ -871,11 +871,12 @@ router.post('/review/:conflictId', async (req, res, next) => {
     const draftVersion = await getLatestDraftVersion(pool, decision.q_key_id)
 
     // Constitutional Rule 4: no self-approval
+    // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11 NO_SELF_APPROVAL on review
     if (draftVersion?.author) {
       try {
         enforceNoSelfApproval(draftVersion.author, reviewer, 'review')
       } catch (err) {
-        return res.status(403).json({ error: 'self_approval_blocked', message: err.message })
+        return next(err)
       }
     }
 
@@ -1217,13 +1218,14 @@ router.post('/knowledge/:topic/:key/promote', peWriteLimit, async (req, res, nex
   const { topic, key } = req.params
   const { note } = req.body ?? {}
 
-  // Validate note using the same rules as the shared reason validator.
-  if (note == null || typeof note !== 'string' || note.trim().length === 0) {
-    return res.status(400).json({ error: 'validation_error', field: 'note', message: 'note is required for this operation (min 10 chars)' })
+  // Constitutional Rule 3: note must be meaningful (min 10 chars, no placeholder patterns)
+  // E2E: tests/e2e/scenarios/15-reason-placeholder.spec.js — S-15 REASON_REQUIRED on promote
+  try {
+    enforceReasonRequired(note, 'promote')
+  } catch (err) {
+    return next(err)
   }
-  if (note.trim().length < 10) {
-    return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at least 10 characters (got ${note.trim().length})` })
-  }
+  // Structural checks not covered by enforceReasonRequired
   if (note.length > 500) {
     return res.status(400).json({ error: 'validation_error', field: 'note', message: `note must be at most 500 characters (got ${note.length})` })
   }
@@ -1307,6 +1309,14 @@ router.post('/knowledge/:topic/:key/supersede', peWriteLimit, async (req, res, n
   if ('tags' in body) validationFields.tags = tags
   if ('confidence' in body) validationFields.confidence = confidence
   if ('reason' in body) validationFields.reason = reason
+
+  // Constitutional Rule 3: reason must be meaningful (min 10 chars, no placeholder patterns)
+  // E2E: tests/e2e/scenarios/15-reason-placeholder.spec.js — S-15 REASON_REQUIRED on supersede
+  try {
+    enforceReasonRequired(reason, 'supersede')
+  } catch (err) {
+    return next(err)
+  }
 
   try {
     validateKnowledgeInput(validationFields, { requireReason: true })
@@ -1418,7 +1428,7 @@ router.post('/knowledge/deprecate/bulk', peWriteLimit, async (req, res, next) =>
   try {
     enforceReasonRequired(reason, 'deprecate')
   } catch (err) {
-    return res.status(400).json({ error: 'reason_required', message: err.message })
+    return next(err)
   }
 
   const pool        = req.app.locals.pool
@@ -1504,10 +1514,12 @@ router.post('/knowledge/:topic/:key/deprecate', peWriteLimit, async (req, res, n
   const { topic, key } = req.params
   const { reason }     = req.body ?? {}
 
+  // Constitutional Rule 3: reason must be meaningful (min 10 chars, no placeholder patterns)
+  // E2E: tests/e2e/scenarios/15-reason-placeholder.spec.js — S-15 REASON_REQUIRED on deprecate
   try {
     enforceReasonRequired(reason, 'deprecate')
   } catch (err) {
-    return res.status(400).json({ error: 'reason_required', message: err.message })
+    return next(err)
   }
 
   try {

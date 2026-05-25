@@ -19,6 +19,7 @@ import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 import { loadAdminConfig, saveAdminConfig } from '../config-cache.js'
 import { writeGovernanceAudit } from '../shared/audit/governance.js'
+import { enforceReasonRequired } from '../shared/governance/constitutional.js'
 
 const router = Router()
 
@@ -43,7 +44,9 @@ router.get('/config', verifyJwt, requireAdmin, async (_req, res) => {
 })
 
 // POST /admin/users
-router.post('/users', verifyJwt, requireAdmin, async (req, res) => {
+// E2E: tests/e2e/scenarios/09-admin-operations.spec.js — S-09 admin user management
+// E2E: tests/e2e/scenarios/15-reason-placeholder.spec.js — S-15 REASON_REQUIRED on admin/users
+router.post('/users', verifyJwt, requireAdmin, async (req, res, next) => {
   const { action, github_username, reason } = req.body ?? {}
   const actor = req.user.sub
   const pool  = req.app.locals.pool
@@ -54,8 +57,11 @@ router.post('/users', verifyJwt, requireAdmin, async (req, res) => {
   if (!github_username) {
     return res.status(400).json({ error: 'missing_param', message: 'github_username required' })
   }
-  if (!reason || reason.length < 10) {
-    return res.status(400).json({ error: 'missing_param', message: 'reason must be at least 10 characters' })
+  // Constitutional Rule 3: reason must be meaningful (min 10 chars, no placeholder patterns)
+  try {
+    enforceReasonRequired(reason, 'admin-users')
+  } catch (err) {
+    return next(err)
   }
 
   const config = await loadAdminConfig()
