@@ -159,6 +159,7 @@ graph TD
 - New npm scripts: `test:e2e:docker` (full run), `test:e2e:docker:up`, `test:e2e:docker:run`, `test:e2e:docker:down`, `test:e2e:docker:clean`, `test:e2e:docker:logs`
 - **Usage**: `npm run test:e2e:docker` for fully isolated run; `npm run test:e2e:docker:up` + `npm run test:e2e:docker:run` for iterative dev
 - **Dev vs isolated**: `test:e2e:env:*` scripts still work (overlay approach, reuses host LocalStack); `test:e2e:docker:*` is fully self-contained
+- **Full suite clean (289 passed, 0 failed, 15 skipped browser):** fixes applied — React error #310 on Stats page (useConformance hook order violation), engineerLimit rate limiter NODE_ENV=test bypass added to createLimiter(), playwright.config.js wires PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH into launchOptions.executablePath, docker-compose.e2e.yml dashboard healthcheck uses 127.0.0.1 (BusyBox wget IPv6 issue), 05-rbac-boundary.spec.js corrected confidence validation, promote/deprecate response shapes, entity_type for global writes, note vs reason field, 07-conformance-portfolio.spec.js exact:true locator and ConformanceCard message priority, 04-deviation-governance.spec.js assert select element not hidden option
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
