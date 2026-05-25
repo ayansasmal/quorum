@@ -532,6 +532,13 @@ router.post('/audit', async (req, res, next) => {
 })
 
 // GET /pg/audit — all entries (project-scoped)
+// E2E: tests/e2e/scenarios/09-audit-trail.spec.js
+//   S-09.1 step 1 — write creates audit entries (tool=dashboard-create filter)
+//   S-09.2 — entry shape (chain + metadata fields present)
+//   S-09.3 — hash field structural integrity (64-char hex, non-negative chain_position)
+//   S-09.4 — author filter (exact match)
+//   S-09.5 — tool filter (exact match, not prefix)
+//   S-09.6 — limit parameter
 router.get('/audit', async (req, res, next) => {
   const pool = req.app.locals.pool
   const opts = { ...req.query, qProjectId: req.user.qProjectId }
@@ -542,6 +549,7 @@ router.get('/audit', async (req, res, next) => {
 })
 
 // GET /pg/audit/count
+// E2E: tests/e2e/scenarios/09-audit-trail.spec.js — S-09.1 step 2 (project-scoped count > 0)
 router.get('/audit/count', async (req, res, next) => {
   const pool = req.app.locals.pool
   try {
@@ -551,6 +559,8 @@ router.get('/audit/count', async (req, res, next) => {
 })
 
 // GET /pg/audit/lineage/:topic/:key — ordered audit trail for a knowledge node
+// E2E: tests/e2e/scenarios/09-audit-trail.spec.js — S-09.8 step 1
+//   (dashboard writes don't populate version_audit_links → returns { entries: [] })
 router.get('/audit/lineage/:topic/:key', async (req, res, next) => {
   const pool = req.app.locals.pool
   const { topic, key } = req.params
@@ -572,6 +582,8 @@ router.get('/audit/lineage/:topic/:key', async (req, res, next) => {
 })
 
 // GET /pg/audit/:id
+// E2E: tests/e2e/scenarios/09-audit-trail.spec.js — S-09.7
+//   (returns 200+entry for valid ID; 200+null for nonexistent UUID; 404 only for cross-project IDs)
 router.get('/audit/:id', async (req, res, next) => {
   const pool = req.app.locals.pool
   try {
