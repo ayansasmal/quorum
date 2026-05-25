@@ -78,6 +78,14 @@ const app = express()
 app.use(express.json())
 app.locals.pool = fakePool
 app.use('/pg', pgRoutes)
+// Error handler matching server.js global handler
+app.use((err, _req, res, _next) => {
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
+  const status = err.status ?? 500
+  res.status(status).json({ error: err.code ?? 'internal_error', message: err.message })
+})
 
 beforeAll(async () => {
   await new Promise((resolve) => {
@@ -90,6 +98,9 @@ afterAll(() => server.close())
 beforeEach(() => {
   vi.clearAllMocks()
   fakePool.query.mockReset()
+  // Default: any unspecific pool.query() returns { rows: [] } so that the
+  // SELECT is_global query in POST /pg/versions doesn't destructure undefined.
+  fakePool.query.mockResolvedValue({ rows: [] })
   // Ensure the /versions/:topic/:key catch-all mock never throws (it's registered
   // before /versions/by-status/:status in the route file — Express picks it first).
   getCurrentVersion.mockResolvedValue(null)
@@ -324,23 +335,21 @@ describe('POST /pg/versions/supersede — validation', () => {
     supersedes_reason: 'Updated to reflect new backoff strategy after load testing.',
   }
 
-  it('rejects missing supersedes_reason with 400 validation_error on reason field', async () => {
+  it('rejects missing supersedes_reason with 400 REASON_REQUIRED constitutional violation', async () => {
     const { supersedes_reason: _omit, ...bodyWithoutReason } = validBody
     const { status, body } = await post('/pg/versions/supersede', bodyWithoutReason)
 
     expect(status).toBe(400)
-    expect(body.error).toBe('validation_error')
-    expect(body.field).toBe('reason')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 
-  it('rejects supersedes_reason shorter than 10 chars with 400 validation_error on reason field', async () => {
+  it('rejects supersedes_reason shorter than 10 chars with 400 REASON_REQUIRED constitutional violation', async () => {
     const { status, body } = await post('/pg/versions/supersede', {
       ...validBody,
       supersedes_reason: 'Too short',
     })
 
     expect(status).toBe(400)
-    expect(body.error).toBe('validation_error')
-    expect(body.field).toBe('reason')
+    expect(body.rule).toBe('REASON_REQUIRED')
   })
 })

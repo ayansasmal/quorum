@@ -45,6 +45,7 @@
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
+import { enforceReasonRequired } from '../shared/governance/constitutional.js'
 import {
   getProjectByGroupId,
   getOrCreateKey,
@@ -76,10 +77,14 @@ const router = Router()
 // All pg routes require a valid JWT
 router.use(verifyJwt)
 
-// All pg routes are project-scoped — X-Quorum-Project header required
+// All pg routes are project-scoped — X-Quorum-Project header required.
+// Non-members of private projects (access_denied set by verify-jwt.js) are blocked here.
 router.use((req, res, next) => {
   if (!req.user.project) {
     return res.status(400).json({ error: 'X-Quorum-Project header required' })
+  }
+  if (req.user.access_denied) {
+    return res.status(403).json({ error: 'forbidden', message: 'Access denied to this project' })
   }
   next()
 })
@@ -328,6 +333,14 @@ router.post('/versions/supersede', async (req, res, next) => {
     return res.status(400).json({ error: 'topic_key_required', message: 'new_version.topic and new_version.key required' })
   }
 
+  // Constitutional Rule 3: supersedes_reason must be meaningful (min 10 chars, no placeholder patterns)
+  // E2E: tests/e2e/scenarios/15-reason-placeholder.spec.js — S-15 REASON_REQUIRED on pg-versions-supersede
+  try {
+    enforceReasonRequired(supersedesReason, 'pg-versions-supersede')
+  } catch (err) {
+    return next(err)
+  }
+
   try {
     validateKnowledgeInput({
       topic:       newVersion.topic,
@@ -419,6 +432,23 @@ router.post('/versions', async (req, res, next) => {
     const version = req.body.version ?? await getNextVersionNumber(pool, qKeyId)
     const versionId = `${qKeyId}_v${version}`
 
+    // Status authority — gateway derives status from role + project config.
+    // Never accept status from the client; the gateway is the single authority.
+    // E2E: tests/e2e/scenarios/05-rbac-boundary.spec.js — S-05.1 role-based status derivation
+    const { rows: [projRow] } = await pool.query(
+      'SELECT is_global FROM q_projects WHERE q_project_id = $1',
+      [qProjectId],
+    )
+    const isGlobal  = projRow?.is_global === true
+    const isPA      = req.user.role === 'principal_architect' || req.user.is_admin === true
+    const isReflect = (req.body.triggered_by ?? '') === 'reflect'
+
+    // PENDING_CONFLICT_CHECK: MCP sends a flag (not a literal status) when
+    // Graphiti was unavailable — the recheck-conflicts job will promote it later.
+    const status = req.body.pending_conflict_check === true
+      ? 'PENDING_CONFLICT_CHECK'
+      : (isGlobal || isReflect || !isPA) ? 'DRAFT' : 'ACTIVE'
+
     // Whitelist allowed fields from req.body — never accept status, author,
     // author_role, chain_position, entry_hash, previous_hash, q_project_id, or q_key_id
     // from the client. author and author_role are always pinned to the JWT claims.
@@ -435,6 +465,7 @@ router.post('/versions', async (req, res, next) => {
       author_type:  req.body.author_type  ?? 'agent',
       triggered_by: req.body.triggered_by ?? undefined,
       entity_type:  req.body.entity_type  ?? undefined,
+      status,       // Server-side derived — always overrides any client-supplied value
       // Server-side — always override from JWT, never from body
       author:       req.user.sub,
       author_role:  req.user.role,
@@ -782,6 +813,10 @@ router.post('/scans', async (req, res, next) => {
 // ── Error handler for this router ─────────────────────────────────────────────
 
 router.use((err, _req, res, _next) => {
+  // Constitutional violations — always 400 with { rule, message }
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
   const status = err.status ?? 500
   console.error('[Gateway/pg] Error:', err.message, err.stack)
   const message = status >= 500 ? 'Internal server error' : err.message

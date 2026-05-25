@@ -22,12 +22,15 @@ import { SignJWT } from 'jose'
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock('../../gateway/src/config-cache.js', () => ({
-  loadUserProfile: vi.fn(),
+  loadUserProfile:    vi.fn(),
+  // loadProjectConfig is now called by verify-jwt for is_public enforcement.
+  // Default to null (no config found → private project → access_denied: true).
+  loadProjectConfig:  vi.fn().mockResolvedValue(null),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
-import { loadUserProfile }  from '../../gateway/src/config-cache.js'
+import { loadUserProfile, loadProjectConfig }  from '../../gateway/src/config-cache.js'
 import { loadKeys, getKeys } from '../../gateway/src/keys.js'
 import { verifyJwt }         from '../../gateway/src/middleware/verify-jwt.js'
 
@@ -165,14 +168,30 @@ describe('verifyJwt — v0.3 slim JWT + X-Quorum-Project header', () => {
     expect(body.base_confidence).toBe(0.7)
   })
 
-  it('returns role null for a project the user is not a member of', async () => {
+  it('returns role null and access_denied for non-member of a private project', async () => {
     loadUserProfile.mockResolvedValue(PROFILE)
+    // loadProjectConfig defaults to null (private project — is_public not set)
     const token = await signToken({ sub: 'alice', is_admin: false })
 
     const { status, body } = await getProbe({ token, project: 'unknown-project' })
 
+    // Probe route always returns req.user — the pg/* access_denied guard is in pg.js.
+    // verify-jwt attaches access_denied: true; route-level middleware enforces 403.
     expect(status).toBe(200)
     expect(body.role).toBeNull()
+    expect(body.access_denied).toBe(true)
+  })
+
+  it('returns role null and access_denied: false for non-member of a PUBLIC project', async () => {
+    loadUserProfile.mockResolvedValue(PROFILE)
+    loadProjectConfig.mockResolvedValueOnce({ is_public: true })
+    const token = await signToken({ sub: 'alice', is_admin: false })
+
+    const { status, body } = await getProbe({ token, project: 'public-project' })
+
+    expect(status).toBe(200)
+    expect(body.role).toBeNull()
+    expect(body.access_denied).toBe(false)
   })
 
   it('returns 401 for an expired JWT', async () => {

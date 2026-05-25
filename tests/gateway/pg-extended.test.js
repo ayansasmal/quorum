@@ -119,6 +119,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockUserRole = 'engineer'
   fakePool.query.mockReset()
+  // Default: any unspecific pool.query() returns { rows: [] } so that the
+  // SELECT is_global query in POST /pg/versions doesn't destructure undefined.
+  fakePool.query.mockResolvedValue({ rows: [] })
   fakePool.connect.mockResolvedValue(fakeClient)
   fakeClient.query.mockReset()
   fakeClient.release.mockReset()

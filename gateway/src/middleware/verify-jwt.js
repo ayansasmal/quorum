@@ -13,7 +13,7 @@
 
 import { jwtVerify } from 'jose'
 import { getKeys } from '../keys.js'
-import { loadUserProfile } from '../config-cache.js'
+import { loadUserProfile, loadProjectConfig } from '../config-cache.js'
 
 /**
  * Resolve a q_project_id (e.g. 'q_p1') to its human-readable group_id by
@@ -79,19 +79,35 @@ export async function verifyJwt(req, res, next) {
     // accept a direct group_id match in case a profile ever carries the
     // q_project_id alongside group_id.
     let entry = null
+    let resolvedGroupId = null   // human-readable group_id for the active project
     if (project) {
       const isQProjectId = /^q_p\d+$/.test(project)
       if (isQProjectId) {
         const groupId = await resolveGroupId(req.app?.locals?.pool, project)
+        resolvedGroupId = groupId
         entry = profile.projects.find((p) =>
           p.q_project_id === project || (groupId && p.group_id === groupId),
         ) ?? null
       } else {
+        resolvedGroupId = project
         entry = profile.projects.find((p) => p.group_id === project) ?? null
       }
     }
 
-    /** @type {{ sub: string, is_admin: boolean, project: string | null, role: string | null, base_confidence: number, is_owner: boolean }} */
+    // is_public enforcement — non-members of private projects are denied access.
+    // Admins bypass this check (is_admin grants cross-project read/write).
+    // If the project config cannot be loaded (S3 unreachable, config missing),
+    // deny by default (fail-safe: never accidentally grant access).
+    // E2E: tests/e2e/scenarios/19-auth-lifecycle.spec.js — S-19.3 project scope + is_public
+    let accessDenied = false
+    if (project && !entry && !isAdmin) {
+      const config = resolvedGroupId
+        ? await loadProjectConfig(resolvedGroupId).catch(() => null)
+        : null
+      accessDenied = !(config?.is_public === true)
+    }
+
+    /** @type {{ sub: string, is_admin: boolean, project: string | null, role: string | null, base_confidence: number, is_owner: boolean, access_denied: boolean }} */
     req.user = {
       sub,
       is_admin:        isAdmin,
@@ -99,6 +115,7 @@ export async function verifyJwt(req, res, next) {
       role:            entry?.role            ?? null,
       base_confidence: entry?.base_confidence ?? 0.5,
       is_owner:        entry?.is_owner        ?? false,
+      access_denied:   accessDenied,
     }
 
     next()

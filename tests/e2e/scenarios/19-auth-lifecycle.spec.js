@@ -117,22 +117,17 @@ describe('S-19.1 — JWT Validation Boundaries', () => {
     expect(res.data.error).toBeTruthy()
   })
 
-  test('step 6 — valid JWT but unknown sub (user not in DDB) → 401', async () => {
+  test('step 6 — valid JWT but non-member of private project → 403 (access denied)', async () => {
     const unknownSub = token('no-such-user-s19')
     const res = await bare({
       Authorization:      `Bearer ${unknownSub}`,
       'X-Quorum-Project': PROJECT,
     }).get(PROBE)
-    // Profile lookup fails for unknown sub — auth chain stops.
-    // Depending on verify-jwt implementation: 401 (user not found) or
-    // proceeds with empty profile (role=null) and may 200.
-    // Document the actual behaviour rather than assuming.
-    // Per current implementation: loadUserProfile returns an empty profile on DDB miss
-    // (returns { projects: [] }) — auth does NOT fail on unknown sub.
-    // The user will have role=null; pg/* routes succeed (read-only, no role guard).
-    // This is a known behaviour — test documents it, not fixes it.
-    // Expected: 200 or 404 (resource not found), NOT 401 (auth passed for any valid JWT sub).
-    expect([200, 404]).toContain(res.status)
+    // loadUserProfile returns { projects: [] } on DDB miss — auth does NOT fail on unknown sub.
+    // But verify-jwt.js checks is_public on non-member access.
+    // quorum-test-project does NOT have is_public: true, so access_denied = true.
+    // pg.js middleware returns 403 when access_denied is set.
+    expect(res.status).toBe(403)
   })
 })
 
