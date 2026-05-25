@@ -1,20 +1,20 @@
 /**
  * S-07 — Cross-Catalog Search (J07)
  *
- * Journey: J07 — Cross-Catalog Search and Source Attribution
- * Pillars: Functional Correctness (S-07.1, S-07.2)
- *          Federation Integrity   (S-07.3, S-07.4)
- *          Filter Accuracy        (S-07.5, S-07.6)
+ * Journey: J20 — Cross-Catalog Search and Source Attribution
+ * Pillars: Functional Correctness (S-20.1, S-20.2)
+ *          Federation Integrity   (S-20.3, S-20.4)
+ *          Filter Accuracy        (S-20.5, S-20.6)
  *
  * Sub-scenarios:
- *   S-07.1  Query validation — q required, min 2 characters
- *   S-07.2  Result field shape — all 11 result fields present; top-level source indicator
- *   S-07.3  Cross-catalog scope — project with globals finds global entries;
+ *   S-20.1  Query validation — q required, min 2 characters
+ *   S-20.2  Result field shape — all 11 result fields present; top-level source indicator
+ *   S-20.3  Cross-catalog scope — project with globals finds global entries;
  *           result annotated source:'global' + catalog_id
- *   S-07.4  Scope isolation — project without globals does NOT find global catalog entries
- *   S-07.5  DRAFT exclusion — DRAFT entries never appear in search results
- *   S-07.6  Domain filter — ?domain=<topic> narrows results to exact topic match
- *   S-07.7  Mixed sources — result set can contain both source:'project' and source:'global'
+ *   S-20.4  Scope isolation — project without globals does NOT find global catalog entries
+ *   S-20.5  DRAFT exclusion — DRAFT entries never appear in search results
+ *   S-20.6  Domain filter — ?domain=<topic> narrows results to exact topic match
+ *   S-20.7  Mixed sources — result set can contain both source:'project' and source:'global'
  *
  * Architecture notes:
  *   GET /api/search:
@@ -32,7 +32,7 @@
  *   that appear verbatim in the summary column. graphitiSettle() is NOT called.
  *
  *   Serial mode at file level prevents parallel-worker races across describes that share
- *   beforeAll-seeded state (e.g. S-07.3 seeds referenced in S-07.7).
+ *   beforeAll-seeded state (e.g. S-20.3 seeds referenced in S-20.7).
  *
  * All keys are uid()-suffixed for run-to-run isolation.
  */
@@ -48,15 +48,15 @@ const PROJECT          = 'quorum-test-project'          // has globals: [quorum-
 const CATALOG          = 'quorum-test-catalog'           // is_global:true; members: test-pe, test-architect
 const ISOLATED_PROJECT = 'quorum-test-isolated-project'  // no globals field → search always project-scoped
 
-// Serial: S-07.3's beforeAll seeds a global entry that S-07.7 also needs to find.
+// Serial: S-20.3's beforeAll seeds a global entry that S-20.7 also needs to find.
 // Serialising the whole file guarantees ordering and prevents worker isolation races.
 test.describe.configure({ mode: 'serial' })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.1 — Query Validation
+// S-20.1 — Query Validation
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.1 — Query Validation', () => {
+describe('S-20.1 — Query Validation', () => {
   test('step 1 — missing q returns 400 with query_required', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/api/search')
@@ -89,10 +89,10 @@ describe('S-07.1 — Query Validation', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.2 — Result Field Shape
+// S-20.2 — Result Field Shape
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.2 — Result Field Shape', () => {
+describe('S-20.2 — Result Field Shape', () => {
   let shapeToken
 
   beforeAll(async () => {
@@ -102,7 +102,7 @@ describe('S-07.2 — Result Field Shape', () => {
     await activeEntry({
       topic:   'auth',
       key:     shapeToken,
-      content: `Shape test entry ${shapeToken} — used by S-07.2 to verify all result fields are present.`,
+      content: `Shape test entry ${shapeToken} — used by S-20.2 to verify all result fields are present.`,
     })
   })
 
@@ -143,10 +143,10 @@ describe('S-07.2 — Result Field Shape', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.3 — Cross-Catalog Scope
+// S-20.3 — Cross-Catalog Scope
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.3 — Cross-Catalog Scope', () => {
+describe('S-20.3 — Cross-Catalog Scope', () => {
   let globalToken
 
   beforeAll(async () => {
@@ -158,7 +158,7 @@ describe('S-07.3 — Cross-Catalog Scope', () => {
     await activeEntry({
       topic:   'security',
       key:     globalToken,
-      content: `Global catalog entry ${globalToken} — validates cross-catalog search scope via S-07.3.`,
+      content: `Global catalog entry ${globalToken} — validates cross-catalog search scope via S-20.3.`,
       project: CATALOG,
     })
   })
@@ -185,20 +185,20 @@ describe('S-07.3 — Cross-Catalog Scope', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.4 — Scope Isolation
+// S-20.4 — Scope Isolation
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.4 — Scope Isolation', () => {
-  // Re-uses the global entry seeded in S-07.3 (guaranteed available in serial mode).
+describe('S-20.4 — Scope Isolation', () => {
+  // Re-uses the global entry seeded in S-20.3 (guaranteed available in serial mode).
   // ISOLATED_PROJECT has no globals field → allGroupIds = [isolatedGroupId] only.
 
   test('step 1 — project without globals cannot find global catalog entries', async () => {
     // quorum-test-isolated-project has no globals array.
     // The search scope resolves to allGroupIds = ['quorum-test-isolated-project'] only.
-    // The global entry seeded in S-07.3.beforeAll must NOT appear here.
+    // The global entry seeded in S-20.3.beforeAll must NOT appear here.
     const client = api(tokens.pe, ISOLATED_PROJECT)
 
-    // Fetch globalToken from S-07.3 — we need a shared unique value.
+    // Fetch globalToken from S-20.3 — we need a shared unique value.
     // Because we run serially, we can rely on the exact token being in the DB.
     // We query broadly (just 's07-global' prefix) — any result with source:'global' is a violation.
     const res = await client.get('/api/search?q=s07-global')
@@ -231,10 +231,10 @@ describe('S-07.4 — Scope Isolation', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.5 — DRAFT Exclusion
+// S-20.5 — DRAFT Exclusion
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.5 — DRAFT Exclusion', () => {
+describe('S-20.5 — DRAFT Exclusion', () => {
   let draftToken
 
   beforeAll(async () => {
@@ -271,10 +271,10 @@ describe('S-07.5 — DRAFT Exclusion', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.6 — Domain Filter
+// S-20.6 — Domain Filter
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.6 — Domain Filter', () => {
+describe('S-20.6 — Domain Filter', () => {
   let domainToken
   let authKey
   let reliabilityKey
@@ -328,10 +328,10 @@ describe('S-07.6 — Domain Filter', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-07.7 — Mixed Sources
+// S-20.7 — Mixed Sources
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.7 — Mixed Sources', () => {
+describe('S-20.7 — Mixed Sources', () => {
   let mixedToken
   let localKey
   let globalKey

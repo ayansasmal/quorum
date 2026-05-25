@@ -56,8 +56,9 @@ vi.mock('../../gateway/src/shared/graph/client.js', () => ({
 }))
 
 vi.mock('../../gateway/src/shared/governance/constitutional.js', () => ({
-  enforceNoSelfApproval: vi.fn(),
-  enforceReasonRequired: vi.fn(),
+  enforceNoSelfApproval:       vi.fn(),
+  enforceReasonRequired:       vi.fn(),
+  enforceGlobalWriteAuthority: vi.fn(),
 }))
 
 // ── Imports (after mocks) ──────────────────────────────────────────────────────

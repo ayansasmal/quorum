@@ -43,6 +43,7 @@ import { loadProjectConfig } from '../config-cache.js'
 import {
   enforceNoSelfApproval,
   enforceReasonRequired,
+  enforceGlobalWriteAuthority,
   enforceDeviationActionAuthority,
   enforceValidDeferDeadline,
 } from '../shared/governance/constitutional.js'
@@ -1130,6 +1131,13 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
     const pool = req.app.locals.pool
     const qProjectId = await resolveQProjectId(req, res)
     if (!qProjectId) return
+
+    // Constitutional: only architect+ may write to a global catalog.
+    // Roles not in GLOBAL_WRITE_ROLES (engineer, senior_engineer, director, vp_engineering)
+    // and non-members (role: null) are blocked with GLOBAL_WRITE_AUTHORITY.
+    // E2E: tests/e2e/scenarios/05-rbac-boundary.spec.js — S-05.4 global catalog write authority
+    const projectConfig = await loadProjectConfig(req.user.project).catch(() => null)
+    enforceGlobalWriteAuthority(req.user, req.user.project, projectConfig?.is_global === true)
 
     const qKeyId      = await getOrCreateKey(pool, qProjectId, topic, key)
 

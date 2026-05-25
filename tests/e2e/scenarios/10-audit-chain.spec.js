@@ -1,28 +1,28 @@
 /**
  * S-09 — Audit Trail (J09)
  *
- * Journey: J09 — Audit Trail Integrity and Query API
- * Pillars: Functional Correctness (S-09.1, S-09.2)
- *          Structural Integrity   (S-09.3)
- *          Filter / Query API     (S-09.4, S-09.5, S-09.6)
- *          Fetch by ID            (S-09.7)
- *          Lineage                (S-09.8)
+ * Journey: J10 — Audit Trail Integrity and Query API
+ * Pillars: Functional Correctness (S-10.1, S-10.2)
+ *          Structural Integrity   (S-10.3)
+ *          Filter / Query API     (S-10.4, S-10.5, S-10.6)
+ *          Fetch by ID            (S-10.7)
+ *          Lineage                (S-10.8)
  *
  * Sub-scenarios:
- *   S-09.1  Write creates audit entries — seeding an ACTIVE entry via PA produces ≥ 1
+ *   S-10.1  Write creates audit entries — seeding an ACTIVE entry via PA produces ≥ 1
  *           audit row; GET /pg/audit/count returns a positive integer
- *   S-09.2  Entry shape — all required fields present (chain fields + metadata);
+ *   S-10.2  Entry shape — all required fields present (chain fields + metadata);
  *           field types are correct
- *   S-09.3  Hash field structural integrity — entry_hash is a 64-char lowercase hex
+ *   S-10.3  Hash field structural integrity — entry_hash is a 64-char lowercase hex
  *           (SHA256); chain_position is a non-negative integer; previous_hash is
  *           64-char hex or null
- *   S-09.4  Author filter — GET /pg/audit?author=test-pe returns only test-pe entries
- *   S-09.5  Tool filter — GET /pg/audit?tool=dashboard-create returns only
+ *   S-10.4  Author filter — GET /pg/audit?author=test-pe returns only test-pe entries
+ *   S-10.5  Tool filter — GET /pg/audit?tool=dashboard-create returns only
  *           dashboard-create entries (exact match, not prefix)
- *   S-09.6  Limit parameter — GET /pg/audit?limit=2 returns at most 2 entries
- *   S-09.7  Fetch by ID — valid entry_id returns the full entry (200 with body);
+ *   S-10.6  Limit parameter — GET /pg/audit?limit=2 returns at most 2 entries
+ *   S-10.7  Fetch by ID — valid entry_id returns the full entry (200 with body);
  *           nonexistent UUID returns 200 with null body (not 404)
- *   S-09.8  Lineage — dashboard-created entry returns { entries: [] };
+ *   S-10.8  Lineage — dashboard-created entry returns { entries: [] };
  *           version_audit_links rows are only populated by MCP writes via
  *           POST /pg/audit-links, not by dashboard writes
  *
@@ -57,7 +57,7 @@
  *
  * Test strategy:
  *   activeEntry() uses PA token → tool='dashboard-create' on the resulting audit row.
- *   Serial mode: S-09.7 beforeAll fetches the entry_id produced by S-09.1 beforeAll.
+ *   Serial mode: S-10.7 beforeAll fetches the entry_id produced by S-10.1 beforeAll.
  *   File-level serial ensures the seed is committed before the ID capture.
  */
 
@@ -71,14 +71,14 @@ import { uid, activeEntry } from '../helpers/seed.js'
 const PROJECT  = 'quorum-test-project'
 const HEX64_RE = /^[0-9a-f]{64}$/  // SHA256 hex digest — 64 lowercase hex characters
 
-// S-09.7 beforeAll depends on S-09.1 beforeAll having seeded data — serial enforces ordering.
+// S-10.7 beforeAll depends on S-10.1 beforeAll having seeded data — serial enforces ordering.
 test.describe.configure({ mode: 'serial' })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.1 — Write Creates Audit Entries
+// S-10.1 — Write Creates Audit Entries
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.1 — Write Creates Audit Entries', () => {
+describe('S-10.1 — Write Creates Audit Entries', () => {
   beforeAll(async () => {
     const token = uid('s09-write')
     await activeEntry({
@@ -106,10 +106,10 @@ describe('S-09.1 — Write Creates Audit Entries', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.2 — Entry Shape
+// S-10.2 — Entry Shape
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.2 — Entry Shape', () => {
+describe('S-10.2 — Entry Shape', () => {
   test('step 1 — all expected chain and metadata fields are present', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?tool=dashboard-create&limit=1')
@@ -156,10 +156,10 @@ describe('S-09.2 — Entry Shape', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.3 — Hash Field Structural Integrity
+// S-10.3 — Hash Field Structural Integrity
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.3 — Hash Field Structural Integrity', () => {
+describe('S-10.3 — Hash Field Structural Integrity', () => {
   test('step 1 — entry_hash is 64-char hex; chain_position ≥ 0; previous_hash is 64-char hex or null', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?tool=dashboard-create&limit=5')
@@ -187,10 +187,10 @@ describe('S-09.3 — Hash Field Structural Integrity', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.4 — Author Filter
+// S-10.4 — Author Filter
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.4 — Author Filter', () => {
+describe('S-10.4 — Author Filter', () => {
   test('step 1 — GET /pg/audit?author=test-pe returns only test-pe authored entries', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?author=test-pe&limit=10')
@@ -205,10 +205,10 @@ describe('S-09.4 — Author Filter', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.5 — Tool Filter
+// S-10.5 — Tool Filter
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.5 — Tool Filter', () => {
+describe('S-10.5 — Tool Filter', () => {
   test('step 1 — GET /pg/audit?tool=dashboard-create returns only dashboard-create entries', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?tool=dashboard-create&limit=10')
@@ -223,10 +223,10 @@ describe('S-09.5 — Tool Filter', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.6 — Limit Parameter
+// S-10.6 — Limit Parameter
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.6 — Limit Parameter', () => {
+describe('S-10.6 — Limit Parameter', () => {
   test('step 1 — GET /pg/audit?limit=2 returns at most 2 entries', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?limit=2')
@@ -237,15 +237,15 @@ describe('S-09.6 — Limit Parameter', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.7 — Fetch by ID
+// S-10.7 — Fetch by ID
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.7 — Fetch by ID', () => {
+describe('S-10.7 — Fetch by ID', () => {
   let validEntryId
 
   beforeAll(async () => {
     // Capture a real entry_id from the project's audit log.
-    // S-09.1 beforeAll has already seeded at least one dashboard-create entry so
+    // S-10.1 beforeAll has already seeded at least one dashboard-create entry so
     // this fetch is guaranteed to find a row (serial mode ensures ordering).
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/pg/audit?tool=dashboard-create&limit=1')
@@ -274,10 +274,10 @@ describe('S-09.7 — Fetch by ID', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-09.8 — Lineage
+// S-10.8 — Lineage
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-09.8 — Lineage', () => {
+describe('S-10.8 — Lineage', () => {
   let lineageTopic, lineageKey
 
   beforeAll(async () => {

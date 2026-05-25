@@ -238,6 +238,12 @@ app.use((_req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
+  // ConstitutionalViolation — a constitutional rule was broken; always 400 with rule name.
+  // The rule field is required by assertConstitutionalViolation() in E2E tests.
+  // E2E: tests/e2e/scenarios/05-rbac-boundary.spec.js — S-05.4/S-05.5 constitutional enforcement
+  if (err.name === 'ConstitutionalViolation') {
+    return res.status(400).json({ rule: err.rule, message: err.message })
+  }
   const status = err.status ?? 500
   const code   = err.code   ?? 'INTERNAL_ERROR'
   if (status >= 500) console.error('[Gateway] Unhandled error:', err.message, err.stack)

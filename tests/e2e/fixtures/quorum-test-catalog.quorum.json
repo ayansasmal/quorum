@@ -24,6 +24,20 @@
       "role": "architect",
       "base_confidence": 0.80,
       "team": "platform"
+    },
+    {
+      "name": "Test Product",
+      "github_username": "test-product",
+      "role": "product_owner",
+      "base_confidence": 0.85,
+      "team": "product"
+    },
+    {
+      "name": "Test Compliance",
+      "github_username": "test-compliance",
+      "role": "compliance_officer",
+      "base_confidence": 0.90,
+      "team": "compliance"
     }
   ]
 }

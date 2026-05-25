@@ -1,16 +1,16 @@
 /**
  * S-06 — Config Sync & Federation Discovery (J06)
  *
- * Journey: J06 — Config Sync and Global Catalog Discovery
- * Pillars: Functional Correctness (S-06.1, S-06.2, S-06.3)
- *          Federation Integrity   (S-06.4, S-06.5)
+ * Journey: J13 — Config Sync and Global Catalog Discovery
+ * Pillars: Functional Correctness (S-13.1, S-13.2, S-13.3)
+ *          Federation Integrity   (S-13.4, S-13.5)
  *
  * Sub-scenarios:
- *   S-06.1  Sync auth — only PA or sync-token can run /sync/configs
- *   S-06.2  Sync response shape — synced count, failed[], globals_warnings[]
- *   S-06.3  Self-reference guard — a project listing itself in globals fails DDB sync
- *   S-06.4  GET /api/globals — returns is_global:true catalogs with correct shape
- *   S-06.5  Config schema validation — v0.4 fields (is_global, global_scope, globals)
+ *   S-13.1  Sync auth — only PA or sync-token can run /sync/configs
+ *   S-13.2  Sync response shape — synced count, failed[], globals_warnings[]
+ *   S-13.3  Self-reference guard — a project listing itself in globals fails DDB sync
+ *   S-13.4  GET /api/globals — returns is_global:true catalogs with correct shape
+ *   S-13.5  Config schema validation — v0.4 fields (is_global, global_scope, globals)
  *
  * Architecture notes:
  *   POST /sync/configs:
@@ -48,15 +48,15 @@ import { uid }    from '../helpers/seed.js'
 const PROJECT = 'quorum-test-project'
 const CATALOG = 'quorum-test-catalog'
 
-// Serial: S-06.3 uploads a self-referencing config to S3; S-06.2 re-runs sync
+// Serial: S-13.3 uploads a self-referencing config to S3; S-13.2 re-runs sync
 // and will see it in failed[]. Ordering guarantees deterministic assertion.
 test.describe.configure({ mode: 'serial' })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-06.1 — Sync Auth
+// S-13.1 — Sync Auth
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-06.1 — Sync Auth', () => {
+describe('S-13.1 — Sync Auth', () => {
   test('step 1 — engineer cannot run sync (403 forbidden)', async () => {
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/sync/configs', {})
@@ -80,10 +80,10 @@ describe('S-06.1 — Sync Auth', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-06.2 — Sync Response Shape
+// S-13.2 — Sync Response Shape
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-06.2 — Sync Response Shape', () => {
+describe('S-13.2 — Sync Response Shape', () => {
   test('step 1 — sync response has all required fields', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.post('/sync/configs', {})
@@ -129,10 +129,10 @@ describe('S-06.2 — Sync Response Shape', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-06.3 — Self-Reference Guard
+// S-13.3 — Self-Reference Guard
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-06.3 — Self-Reference Guard', () => {
+describe('S-13.3 — Self-Reference Guard', () => {
   test.describe.configure({ mode: 'serial' })
 
   let selfRefGroupId
@@ -180,10 +180,10 @@ describe('S-06.3 — Self-Reference Guard', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-06.4 — GET /api/globals
+// S-13.4 — GET /api/globals
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-06.4 — Global Catalog Discovery', () => {
+describe('S-13.4 — Global Catalog Discovery', () => {
   test('step 1 — GET /api/globals returns quorum-test-catalog (is_global:true)', async () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.get('/api/globals')
@@ -242,10 +242,10 @@ describe('S-06.4 — Global Catalog Discovery', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// S-06.5 — Config Schema Validation (v0.4 fields)
+// S-13.5 — Config Schema Validation (v0.4 fields)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-06.5 — Config Schema Validation', () => {
+describe('S-13.5 — Config Schema Validation', () => {
   const validBase = {
     group_id: uid('schema-test-project'),
     owner:    'test-pe',
