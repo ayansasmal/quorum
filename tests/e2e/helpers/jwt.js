@@ -118,3 +118,53 @@ export const tokens = {
   // Without it, admin routes return 403 even for test-admin.
   admin:      adminToken(),
 }
+
+// ── Test-only token manipulation helpers (S-19) ───────────────────────────────
+
+/**
+ * Signs an ES256 JWT that is already past its expiry time (exp = now − 1 hour).
+ * `verifyJwt` must reject this with 401 token_expired.
+ *
+ * @param {string} sub     - GitHub username of the test user
+ * @param {object} [extra] - Additional payload fields
+ * @returns {string} Expired JWT
+ */
+export function expiredToken(sub, extra = {}) {
+  return jwt.sign(
+    { sub, ...extra, exp: Math.floor(Date.now() / 1000) - 3600 },
+    PRIV_KEY,
+    { algorithm: 'ES256', keyid: KEY_ID, issuer: 'quorum-gateway' },
+  )
+}
+
+/**
+ * Produces a tampered JWT: valid header and payload, but corrupted signature.
+ * The gateway's ES256 verify step will reject this with 401.
+ *
+ * Modifies the last character of the base64url-encoded signature segment so the
+ * bytes are syntactically valid base64url but the ECDSA verification fails.
+ *
+ * @param {string} validToken - A valid JWT to tamper with
+ * @returns {string} JWT with invalidated signature
+ */
+export function buildTamperedToken(validToken) {
+  const parts = validToken.split('.')
+  // Flip the last character of the signature segment (A→B, B→C, etc.)
+  const sig     = parts[2]
+  const lastChar = sig[sig.length - 1]
+  const flipped  = lastChar === 'A' ? 'B' : 'A'
+  parts[2] = sig.slice(0, -1) + flipped
+  return parts.join('.')
+}
+
+/**
+ * Signs a JWT with the HS256 algorithm (a symmetric algorithm).
+ * The gateway only accepts ES256; HS256 tokens must be rejected with 401.
+ *
+ * @param {object} payload - JWT payload (e.g. { sub: 'test-pe', iss: 'quorum-gateway' })
+ * @param {string} [secret='test-hs256-secret'] - HMAC secret
+ * @returns {string} HS256-signed JWT
+ */
+export function generateHs256Token(payload, secret = 'test-hs256-secret') {
+  return jwt.sign(payload, secret, { algorithm: 'HS256', expiresIn: '1h' })
+}

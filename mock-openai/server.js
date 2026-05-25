@@ -116,8 +116,28 @@ function handleChatCompletions(body, res) {
       split_suggestion:       null,
     })
   } else if (systemMsg.includes('knowledge extractor')) {
-    // governance/extract: return empty items (safe default)
-    content = JSON.stringify({ items: [] })
+    // governance/extract: return two well-shaped items so S-18 can assert
+    // the per-item field contract (topic, key, content, entity_type, confidence, mode).
+    content = JSON.stringify({
+      items: [
+        {
+          topic:       'reliability',
+          key:         'rate-limiter-algorithm',
+          content:     'Use sliding window algorithm for rate limiting. One counter per service per endpoint.',
+          entity_type: 'Pattern',
+          confidence:  0.55,
+          mode:        'extracting',
+        },
+        {
+          topic:       'reliability',
+          key:         'rate-limiter-storage',
+          content:     'Store rate limit counters in Redis. Max 100 req/min per endpoint.',
+          entity_type: 'Decision',
+          confidence:  0.75,
+          mode:        'echoing',
+        },
+      ],
+    })
   } else {
     // Graphiti entity extraction — stable generic object Graphiti won't reject
     content = JSON.stringify({
