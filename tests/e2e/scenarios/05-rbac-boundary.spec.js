@@ -65,10 +65,12 @@ test.describe('S-05.1 — knowledge create: DRAFT/ACTIVE split + confidence floo
   for (const { token, role, status: expectedStatus, confidence: expectedConfidence } of roleCases) {
     test(`step 1 — ${role} creates entry → ${expectedStatus} at confidence ${expectedConfidence}`, async () => {
       const res = await api(token, PROJECT).post('/api/knowledge', {
-        topic:      'rbac',
-        key:        uid(`s051-${role}`),
-        content:    `RBAC boundary test entry authored by ${role}.`,
-        confidence: 0.10,   // always below floor — server must apply base_confidence
+        topic:       'rbac',
+        key:         uid(`s051-${role.replace(/_/g, '-')}`),
+        content:     `RBAC boundary test entry authored by ${role}.`,
+        entity_type: 'Decision',
+        // Omit confidence — server must apply base_confidence floor for this role.
+        // (Submitting a sub-floor value like 0.10 is rejected by validation as < 0.5.)
       })
       expect(res.status).toBe(201)
       expect(res.data.status).toBe(expectedStatus)
@@ -77,11 +79,13 @@ test.describe('S-05.1 — knowledge create: DRAFT/ACTIVE split + confidence floo
   }
 
   test('step 2 — writing to an unknown project returns 404', async () => {
-    // Project not found in DDB → gateway returns 404 (no membership to resolve)
+    // Project not found in DDB → gateway returns 404 after input validation passes.
+    // entity_type is required by validateKnowledgeInput (runs before project lookup).
     const res = await api(tokens.pe, 'quorum-nonexistent-project-xyz').post('/api/knowledge', {
-      topic:   'rbac',
-      key:     uid('s051-xproj'),
-      content: 'Cross-project access test — unknown project.',
+      topic:       'rbac',
+      key:         uid('s051-xproj'),
+      content:     'Cross-project access test — unknown project.',
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(404)
   })
@@ -141,16 +145,20 @@ test.describe('S-05.2 — promote + supersede: PE-only gate', () => {
   test('step 3 — principal_architect can promote DRAFT → ACTIVE', async () => {
     const res = await api(tokens.pe, PROJECT).post(
       `/api/knowledge/${draftTopic}/${draftKey}/promote`,
-      { reason: 'PE promoting DRAFT to ACTIVE for S-05.2 — sufficiently long reason' },
+      { note: 'PE promoting DRAFT to ACTIVE for S-05.2 — sufficiently long note' },
     )
     expect(res.status).toBe(200)
-    expect(res.data.status).toBe('ACTIVE')
+    expect(res.data.promoted).toBe(true)   // promote returns { promoted: true, version, version_id, topic, key }
   })
 
   test('step 4 — principal_architect can supersede ACTIVE entry', async () => {
     const res = await api(tokens.pe, PROJECT).post(
       `/api/knowledge/${activeTopic}/${activeKey}/supersede`,
-      { content: 'Superseded content for S-05.2 RBAC test', reason: 'PE superseding ACTIVE for S-05.2 test — valid reason' },
+      {
+        content:     'Superseded content for S-05.2 RBAC test',
+        entity_type: 'Decision',
+        reason:      'PE superseding ACTIVE for S-05.2 test — valid reason',
+      },
     )
     expect(res.status).toBe(200)
   })
@@ -213,7 +221,7 @@ test.describe('S-05.3 — deprecate: PE-only gate (single + bulk)', () => {
       { reason: 'PE deprecating entry for S-05.3 RBAC test — valid long reason' },
     )
     expect(res.status).toBe(200)
-    expect(res.data.status).toBe('DEPRECATED')
+    expect(res.data.deprecated).toBe(true)   // route returns { deprecated: true, topic, key }
   })
 
   test('step 4 — principal_architect can bulk-deprecate', async () => {
@@ -298,10 +306,13 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
 
   for (const [role, token] of globalBlockedTokens) {
     test(`step 3 — ${role} cannot write to global catalog (400 GLOBAL_WRITE_AUTHORITY)`, async () => {
+      // entity_type required by validateKnowledgeInput — must pass validation so
+      // enforceGlobalWriteAuthority fires (runs after validation in the route).
       const res = await catalogApi(token).post('/api/knowledge', {
-        topic:   'security',
-        key:     uid(`s054-${role}-block`),
-        content: `Global write attempt by ${role} — should be GLOBAL_WRITE_AUTHORITY`,
+        topic:       'security',
+        key:         uid(`s054-${role.replace(/_/g, '-')}-block`),
+        content:     `Global write attempt by ${role} — should be GLOBAL_WRITE_AUTHORITY`,
+        entity_type: 'Decision',
       })
       assertConstitutionalViolation(res, 'GLOBAL_WRITE_AUTHORITY')
     })
@@ -309,9 +320,10 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
 
   test('step 4 — architect (catalog member) writes to global catalog → DRAFT', async () => {
     const res = await catalogApi(tokens.architect).post('/api/knowledge', {
-      topic:   'security',
-      key:     uid('s054-arch'),
-      content: 'Global catalog entry by architect — lands as DRAFT for PA approval (S-05.4)',
+      topic:       'security',
+      key:         uid('s054-arch'),
+      content:     'Global catalog entry by architect — lands as DRAFT for PA approval (S-05.4)',
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')
@@ -319,9 +331,10 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
 
   test('step 5 — product_owner (catalog member) writes to global catalog → DRAFT', async () => {
     const res = await catalogApi(tokens.product).post('/api/knowledge', {
-      topic:   'security',
-      key:     uid('s054-product'),
-      content: 'Global catalog entry by product_owner — lands as DRAFT for PA approval (S-05.4)',
+      topic:       'security',
+      key:         uid('s054-product'),
+      content:     'Global catalog entry by product_owner — lands as DRAFT for PA approval (S-05.4)',
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')
@@ -329,9 +342,10 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
 
   test('step 6 — compliance_officer (catalog member) writes to global catalog → DRAFT', async () => {
     const res = await catalogApi(tokens.compliance).post('/api/knowledge', {
-      topic:   'security',
-      key:     uid('s054-compliance'),
-      content: 'Global catalog entry by compliance_officer — lands as DRAFT for PA approval (S-05.4)',
+      topic:       'security',
+      key:         uid('s054-compliance'),
+      content:     'Global catalog entry by compliance_officer — lands as DRAFT for PA approval (S-05.4)',
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')
@@ -339,9 +353,10 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
 
   test('step 7 — principal_architect (catalog member) writes to global catalog → ACTIVE', async () => {
     const res = await catalogApi(tokens.pe).post('/api/knowledge', {
-      topic:   'security',
-      key:     uid('s054-pa'),
-      content: 'Global catalog entry by PA — lands as ACTIVE directly (S-05.4)',
+      topic:       'security',
+      key:         uid('s054-pa'),
+      content:     'Global catalog entry by PA — lands as ACTIVE directly (S-05.4)',
+      entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('ACTIVE')
@@ -470,7 +485,7 @@ test.describe('S-05.5 — deviation action (DEVIATION_ACTION_AUTHORITY) + deprec
       { reason: 'PA deprecating entry in S-05.5 RBAC test — valid reason with length' },
     )
     expect(res.status).toBe(200)
-    expect(res.data.status).toBe('DEPRECATED')
+    expect(res.data.deprecated).toBe(true)   // route returns { deprecated: true, topic, key }
   })
 })
 

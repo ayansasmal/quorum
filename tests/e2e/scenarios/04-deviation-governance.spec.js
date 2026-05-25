@@ -501,8 +501,10 @@ describe('S-04.7 — Deviations Governance Dashboard', () => {
       // Topic text input
       await expect(page.getByPlaceholder('Topic…')).toBeVisible()
 
-      // Source select — contains 'All sources' default option
-      await expect(page.getByText('All sources')).toBeVisible()
+      // Source select — second <select> in filter rail.
+      // Note: <option> elements inside a <select> are not individually visible
+      // until the dropdown is opened — assert the <select> itself, not the option text.
+      await expect(page.locator('select').nth(1)).toBeVisible()
 
       // Min severity label + number input
       await expect(page.getByText('Min severity')).toBeVisible()

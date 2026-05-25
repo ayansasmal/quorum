@@ -227,7 +227,9 @@ services:
         condition: service_healthy
     healthcheck:
       # wget is available in nginx:alpine — curl is not.
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/ 2>&1 || exit 1"]
+      # Use 127.0.0.1 (not localhost) — BusyBox wget resolves localhost to ::1 (IPv6)
+      # but nginx only binds 0.0.0.0 (IPv4), so the IPv6 connection is refused.
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1/ 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       start_period: 60s    # React build (vite) takes ~30s on first start

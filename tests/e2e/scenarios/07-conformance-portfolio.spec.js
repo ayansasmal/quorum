@@ -314,11 +314,14 @@ describe('S-07.5 — Stats Page Load', () => {
   test('step 1 — stats page loads with 4 summary stat cards visible', async ({ page }) => {
     test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
     await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/`)
+    // Wait for network idle so React's initial data fetches (useStats) have resolved
+    // before asserting on rendered content. Stats data may take a few seconds to
+    // load from the gateway in Docker mode.
+    await page.goto(`${DASHBOARD_URL}/`, { waitUntil: 'networkidle' })
 
     // All 4 StatCard labels must appear (StatCard renders a .text-xs.uppercase label)
-    await expect(page.getByText('Total domains')).toBeVisible()
-    await expect(page.getByText('Active knowledge')).toBeVisible()
+    await expect(page.getByText('Total domains')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('Active knowledge', { exact: true })).toBeVisible()
     await expect(page.getByText('Pending decisions')).toBeVisible()
     await expect(page.getByText('Oldest pending')).toBeVisible()
   })

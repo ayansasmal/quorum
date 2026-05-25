@@ -66,6 +66,11 @@ export default defineConfig({
     //   --disable-gpu         : No GPU in headless CI — avoids driver errors.
     launchOptions: {
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      // Use system Chromium inside Docker (set via PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH).
+      // Playwright 1.60+ does not read this env var directly — must be wired here.
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
     },
   },
 

@@ -12,12 +12,12 @@ const TABS = ['Overview', 'Decaying Knowledge']
 export default function Stats() {
   const [tab, setTab] = useState('Overview')
   const { data, isLoading, error } = useStats()
+  const { data: conformanceData } = useConformance()
 
   if (isLoading) return <LoadingState />
   if (error)     return <ErrorState message={error.message} />
 
   const { domains = [], pending, confidence, lowest_confidence = [], most_accessed = [] } = data ?? {}
-  const { data: conformanceData } = useConformance()
 
   return (
     <div className="space-y-6">
@@ -197,10 +197,10 @@ function ConformanceCard({ data }) {
           </p>
           {isUncertified && (
             <p className="mt-1 text-xs text-gray-500">
-              {scan_count === 0
-                ? 'No scans run yet — use quorum:scan to generate a baseline score.'
-                : catalogs.length === 0
-                  ? 'No linked global catalogs — use quorum:onboard to link catalogs.'
+              {catalogs.length === 0
+                ? 'No linked global catalogs — use quorum:onboard to link catalogs.'
+                : scan_count === 0
+                  ? 'No scans run yet — use quorum:scan to generate a baseline score.'
                   : 'Catalog coverage too sparse (< 10 ACTIVE entries). Seed global catalogs first.'}
             </p>
           )}

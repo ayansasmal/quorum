@@ -36,6 +36,9 @@ const windows = new Map()
  */
 function createLimiter({ windowMs, max, keyFn, errorCode, errorMessage }) {
   return (req, res, next) => {
+    // In test mode, bypass all rate limits so parallel E2E workers don't hit 429.
+    if (process.env.NODE_ENV === 'test') return next()
+
     const key = keyFn(req)
     if (!key) return next()  // no key = no limit (e.g. unauthenticated route)
 
