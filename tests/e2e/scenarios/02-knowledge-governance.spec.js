@@ -33,6 +33,7 @@ import { api }            from '../helpers/api.js'
 import { tokens }         from '../helpers/jwt.js'
 import { graphitiSettle } from '../helpers/graphiti.js'
 import { uid, activeEntry, conflict } from '../helpers/seed.js'
+import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 
 const PROJECT = 'quorum-test-project'
 
@@ -599,16 +600,159 @@ describe('S-02.7 — Coexist-Merge', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // S-02.8 — Dashboard Conflict Review (UI)
 // ─────────────────────────────────────────────────────────────────────────────
-// Deferred: requires full browser automation (click, fill, navigate).
-// Current E2E runner uses PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 — API tests only.
-// Re-enable when browser-mode tests are added (v0.5+).
+//
+// These are full-browser Playwright tests that exercise the React dashboard.
+// They require the dashboard service to be running (QUORUM_DASHBOARD_URL).
+//
+// Auth injection: injectSession() bypasses GitHub OAuth by writing the three
+// sessionStorage keys that AuthContext.jsx reads during its useState() init.
+// Must be called before page.goto() so the init script fires before React boots.
+//
+// Shared state across all 5 steps (serial mode):
+//   beforeAll seeds ONE ACTIVE entry and ONE conflict for the entire describe.
+//   Steps 1–3 do not resolve the conflict.
+//   Step 4 approves it — the card disappears.
+//   Step 5 verifies the resolution appears in the audit timeline.
+//
+// Architecture notes:
+//   DecisionCard header: span.font-mono.text-blue-400 shows conflict_topic:conflict_key
+//   ConflictDiff: "Existing (ACTIVE)" / "Incoming (DRAFT)" labels in the expanded body
+//   ReviewForm: radio labels "Approve" / "Reject" / "Request changes"; submit disabled
+//     when note.trim().length < 10; useReview() onSuccess invalidates ['pending']
+//   After approve: TanStack Query refetches pending — card disappears from DOM.
+//
+// E2E: tests/e2e/scenarios/02-knowledge-governance.spec.js
+//   S-02.8.1 — conflict card visible + diff panel expanded
+//   S-02.8.2 — submit blocked at UI when note < 10 chars
+//   S-02.8.3 — request_changes keeps conflict in pending
+//   S-02.8.4 — approve removes card + transitions entry to ACTIVE
+//   S-02.8.5 — audit page shows 'review' tool entries after resolution
 
 describe('S-02.8 — Dashboard UI', () => {
   test.describe.configure({ mode: 'serial' })
 
-  test.skip('step 1 — pending page shows conflict brief with both content versions [browser required]', () => {})
-  test.skip('step 2 — request_changes with < 10 chars is blocked at UI level [browser required]', () => {})
-  test.skip('step 3 — valid request_changes note keeps conflict in pending [browser required]', () => {})
-  test.skip('step 4 — approve via dashboard removes conflict and transitions to ACTIVE [browser required]', () => {})
-  test.skip('step 5 — audit timeline shows INTENT + OUTCOME entries for resolution [browser required]', () => {})
+  let s028Topic, s028Key
+  const EXISTING_CONTENT = 'Existing ADR: use connection pools with max 10 connections per node.'
+  const INCOMING_CONTENT = 'Proposed: increase connection pool to 25 for high-throughput read endpoints.'
+
+  beforeAll(async () => {
+    const token = uid('s028-ui')
+    s028Topic   = 'db'
+    s028Key     = token
+
+    // Seed an ACTIVE entry that the engineer's draft will conflict with.
+    await activeEntry({ topic: s028Topic, key: s028Key, content: EXISTING_CONTENT })
+
+    // Seed the conflict: engineer writes conflicting DRAFT + pending_decisions row.
+    // The conflict_id is not used directly — we find the card by topic:key in the UI.
+    await conflict({
+      topic:           s028Topic,
+      key:             s028Key,
+      content:         INCOMING_CONTENT,
+      existingContent: EXISTING_CONTENT,
+    })
+  })
+
+  test('step 1 — pending page shows conflict brief with both content versions', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/pending`)
+
+    // Card header: conflict_topic:conflict_key in font-mono span
+    await expect(page.getByText(`${s028Topic}:${s028Key}`)).toBeVisible()
+
+    // Click the header to expand the card body
+    await page.getByText(`${s028Topic}:${s028Key}`).click()
+
+    // ConflictDiff renders two panels with these exact labels
+    await expect(page.getByText('Existing (ACTIVE)')).toBeVisible()
+    await expect(page.getByText('Incoming (DRAFT)')).toBeVisible()
+
+    // Both content strings are rendered in the <pre> diff panels
+    await expect(page.getByText(EXISTING_CONTENT)).toBeVisible()
+    await expect(page.getByText(INCOMING_CONTENT)).toBeVisible()
+  })
+
+  test('step 2 — request_changes with < 10 chars is blocked at UI level', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/pending`)
+
+    // Expand the conflict card
+    await page.getByText(`${s028Topic}:${s028Key}`).click()
+
+    // Open the review form
+    await page.getByRole('button', { name: 'Review this decision' }).click()
+
+    // Select "Request changes" action
+    await page.getByText('Request changes').click()
+
+    // Fill a note shorter than 10 characters
+    const textarea = page.getByPlaceholder('Required: reason for this decision (min 10 chars)')
+    await textarea.fill('too short')
+
+    // Submit button is disabled when note.trim().length < 10 (ReviewForm.jsx:90)
+    await expect(page.getByRole('button', { name: 'Submit review' })).toBeDisabled()
+  })
+
+  test('step 3 — valid request_changes note keeps conflict in pending', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/pending`)
+
+    await page.getByText(`${s028Topic}:${s028Key}`).click()
+    await page.getByRole('button', { name: 'Review this decision' }).click()
+    await page.getByText('Request changes').click()
+
+    const textarea = page.getByPlaceholder('Required: reason for this decision (min 10 chars)')
+    await textarea.fill('Need more context and evidence before this can be approved.')
+
+    await page.getByRole('button', { name: 'Submit review' }).click()
+
+    // request_changes does NOT resolve the conflict — it stays in pending_decisions
+    // with resolved_at = null. TanStack Query refetches and the card reappears.
+    await expect(page.getByText(`${s028Topic}:${s028Key}`)).toBeVisible()
+  })
+
+  test('step 4 — approve via dashboard removes conflict and transitions to ACTIVE', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/pending`)
+
+    await page.getByText(`${s028Topic}:${s028Key}`).click()
+    await page.getByRole('button', { name: 'Review this decision' }).click()
+
+    // "Approve" is the default selected action — no radio change needed
+    const textarea = page.getByPlaceholder('Required: reason for this decision (min 10 chars)')
+    await textarea.fill('Approved — connection pool increase is justified for current load.')
+
+    await page.getByRole('button', { name: 'Submit review' }).click()
+
+    // After approve, useReview() onSuccess invalidates ['pending'] — refetch removes
+    // the resolved conflict from the response. Card disappears from DOM.
+    await expect(page.getByText(`${s028Topic}:${s028Key}`)).not.toBeVisible()
+
+    // Verify via API that the knowledge entry is now ACTIVE (DRAFT superseded → ACTIVE)
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.get(`/pg/versions/${s028Topic}/${s028Key}`)
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('ACTIVE')
+  })
+
+  test('step 5 — audit timeline shows review tool entries after resolution', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/audit`)
+
+    // Filter by "review" tool using the select dropdown (Audit.jsx TOOLS array)
+    await page.getByRole('combobox').selectOption('review')
+
+    // At least one audit entry rendered by AuditEntry.jsx should show 'review' as tool
+    // (text-amber-400 span per TOOL_COLOR map)
+    const reviewBadge = page.locator('span').filter({ hasText: /^review$/ }).first()
+    await expect(reviewBadge).toBeVisible()
+
+    // The PE who approved (test-pe) should appear as the author in the entry
+    await expect(page.getByText('test-pe').first()).toBeVisible()
+  })
 })

@@ -211,6 +211,28 @@ services:
       start_period: 30s
       retries: 3
 
+  # ── Quorum Dashboard ─────────────────────────────────────────────────────────
+  #
+  # Nginx-served React SPA built from source at test-environment startup.
+  # The dashboard nginx.conf proxies /api, /auth, /pg, /config, /health, etc.
+  # to http://gateway:3001 via Docker internal DNS.
+  # Browser tests navigate to this service via QUORUM_DASHBOARD_URL=http://dashboard.
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    networks: [e2e]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      # wget is available in nginx:alpine — curl is not.
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/ 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s    # React build (vite) takes ~30s on first start
+      retries: 6
+
   # ── E2E test runner ─────────────────────────────────────────────────────────
   #
   # Source code is bind-mounted — NOT baked into image. See Dockerfile.e2e.
@@ -231,6 +253,8 @@ services:
     environment:
       # Gateway URL via Docker internal DNS — matches the gateway service above
       - QUORUM_GATEWAY_URL=http://gateway:3001
+      # Dashboard URL via Docker internal DNS — used by browser tests (S-02.8+)
+      - QUORUM_DASHBOARD_URL=http://dashboard
       - NODE_ENV=test
     volumes:
       # Bind-mount: all source code, fixtures, and configs are available at /workspace.
@@ -241,4 +265,6 @@ services:
       - /workspace/node_modules
     depends_on:
       gateway:
+        condition: service_healthy
+      dashboard:
         condition: service_healthy

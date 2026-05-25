@@ -55,6 +55,18 @@ export default defineConfig({
 
     // Per-test extra context (set project header, token, etc. in fixtures)
     extraHTTPHeaders: {},
+
+    // Chromium launch flags required inside Docker containers:
+    //   --no-sandbox          : Docker prevents kernel namespace isolation that
+    //                           Chrome's sandbox needs — disabling it is safe
+    //                           in an already-isolated container environment.
+    //   --disable-dev-shm-usage : Docker limits /dev/shm to 64MB by default;
+    //                           Chrome uses /dev/shm for IPC and crashes without
+    //                           this flag. Uses /tmp instead.
+    //   --disable-gpu         : No GPU in headless CI — avoids driver errors.
+    launchOptions: {
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    },
   },
 
   // T0 infrastructure probes run before any test.
