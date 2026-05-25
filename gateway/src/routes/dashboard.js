@@ -1028,6 +1028,7 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
     const delta        = BUMP_BASE_DELTA * weight
     const currentConf  = existing.confidence        ?? 0.7
     const startingConf = existing.starting_confidence ?? currentConf
+    // E2E: tests/e2e/scenarios/08-confidence-endorsement.spec.js — S-08.3 (cap: confidence_after ≤ starting_confidence)
     const newConf      = Math.min(startingConf, currentConf + delta)
 
     // Wrap cooldown read + insert + confidence update in a transaction to
@@ -1041,6 +1042,7 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
       const lastBump = bumpLogs[0] ?? null
       if (lastBump) {
         const elapsed = Date.now() - new Date(lastBump.bumped_at).getTime()
+        // E2E: tests/e2e/scenarios/08-confidence-endorsement.spec.js — S-08.4 step 2 (429 on re-bump within 7 days)
         if (elapsed < BUMP_COOLDOWN_MS) {
           await client.query('ROLLBACK')
           const nextAllowed = new Date(new Date(lastBump.bumped_at).getTime() + BUMP_COOLDOWN_MS).toISOString()
