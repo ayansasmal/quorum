@@ -173,6 +173,18 @@ graph TD
 - `quorum-mcp/src/tools/remember.js` — `storeFirst()`: return value uses `inserted?.status` (gateway-determined) as authority for `knowledge_status` (was using locally computed status). `storePendingConflictCheck()`: sends `pending_conflict_check: true` flag in body; gateway maps this to `PENDING_CONFLICT_CHECK` status (MCP no longer sends literal status value).
 - Unit tests updated: `verify-jwt.test.js` mock adds `loadProjectConfig: vi.fn().mockResolvedValue(null)`; new test for public project (`access_denied: false`). `pg-routes.test.js` + `pg-extended.test.js`: `fakePool.query.mockResolvedValue({ rows: [] })` added as default after `mockReset()`. Gateway: **681 tests passed** (+1 new). quorum-mcp: 620 unchanged.
 
+**MCP integration gap fixes (complete):** TDD-first fixes for quorum-mcp → gateway integration divergences. All 629 quorum-mcp tests pass.
+- `src/config/schema.js`: added `owner: z.string().min(1)` to `QuorumConfigSchema` — was missing from MCP but required by gateway; closes `/config/validate` divergence (S-21.4)
+- `src/tools/forget.js`: raised `reason` min from 1 → 10 chars in Zod schema — Zod rejects placeholder values before reaching constitutional layer; 3 TDD tests added
+- `src/tools/review.js`: raised `note` min from 1 → 10 chars in Zod schema; 3 TDD tests added
+- `src/tools/reflect.js`: forward `constraints[]` to `POST /governance/extract` request body — was silently dropped; 3 TDD tests added
+- `src/gateway/client.js`: added 4 typed methods — `detectConflict()`, `enrichConflict()`, `extractKnowledge()`, `uploadConfig()` — as typed wrappers around `_post()`
+- `src/governance/conflict.js`: updated `checkContradiction()` and `generateEnrichment()` to use typed gateway methods with `typeof === 'function'` duck-typing fallback
+- `src/tools/config-upload.js`: updated to use typed `uploadConfig()` with duck-typing fallback
+- `gateway/src/shared/graph/schema.js`: synced `Requirement` entity type description and `business_owner` property with quorum-mcp canonical version (S-21.2)
+- `tests/e2e/scenarios/21-mcp-layer-contracts.spec.js`: new S-21 spec (5 sub-scenarios, 20 tests) covering MCP-layer HTTP contracts — `/pg/pending` topic filter, `Requirement` entity round-trip, `/governance/extract` constraints forwarding, `/config/validate` owner requirement, server-side status derivation
+- **quorum-mcp skill docs**: fixed `reflect()` param names (`decisions_made`/`patterns_used`); removed non-existent `requirements` param; added Portfolio Intelligence section; fixed Quick Reference code block formatting; added Phase 3b federation setup guidance to `onboarding.md`; added v0.4 tools to `tool-reference.md`
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)
