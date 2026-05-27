@@ -23,8 +23,8 @@ export const QuorumEntityTypes = {
     properties: ['steps', 'triggers', 'rollback', 'domain'],
   },
   Requirement: {
-    description: 'A business or technical requirement',
-    properties: ['acceptance_criteria', 'priority', 'source', 'domain'],
+    description: 'A business or product requirement — why a feature exists, who it serves, and when it applies. Use for product decisions, compliance constraints, and regulatory rules.',
+    properties: ['acceptance_criteria', 'priority', 'source', 'business_owner', 'domain'],
   },
 }
 
