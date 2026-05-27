@@ -4,11 +4,11 @@
 >
 > **→ Journey index:** [docs/e2e/README.md](e2e/README.md)
 > **→ Individual journeys:** [docs/e2e/journeys/](e2e/journeys/)
-> **→ Test framework & weights:** [docs/RISK_WEIGHTED_TEST_PLAN.md](RISK_WEIGHTED_TEST_PLAN.md)
+> **→ Test framework & weights:** [docs/e2e/TEST-PLAN.md](e2e/TEST-PLAN.md)
 >
 > The blast-radius values that were in this file reflected the old v1.0 single-dimension
 > weight model (W × F, suite total 1107). They are obsolete. Use the `OwnScore` and
-> `FailureCost` columns in `RISK_WEIGHTED_TEST_PLAN.md` §7 for all prioritisation decisions.
+> `FailureCost` columns in `docs/e2e/TEST-PLAN.md` §7 for all prioritisation decisions.
 
 ---
 

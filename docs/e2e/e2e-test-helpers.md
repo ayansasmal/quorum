@@ -406,4 +406,4 @@ Which helpers each scenario needs at a glance.
 ---
 
 *Test infrastructure guide: [README.md](README.md)*
-*Risk-weighted test plan and scenario weights: [../RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md)*
+*Risk-weighted test plan and scenario weights: [TEST-PLAN.md](TEST-PLAN.md)*

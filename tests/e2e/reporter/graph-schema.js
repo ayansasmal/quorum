@@ -14,7 +14,7 @@
  *   C = Criticality (1.0 – 3.0)
  *   D = Detection lag (1.0 – 2.0)
  *
- * Source: docs/RISK_WEIGHTED_TEST_PLAN.md §5, §6
+ * Source: docs/e2e/TEST-PLAN.md §5, §6
  */
 
 /** @type {Record<string, { label: string; ownScoreTotal: number; zeroTolerance: boolean }>} */

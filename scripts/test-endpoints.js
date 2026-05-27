@@ -3,14 +3,14 @@
  * Quorum Gateway — Endpoint smoke-test runner.
  *
  * Tests every documented endpoint in openapi.yaml against a live gateway.
- * Requires a valid JWT (see "Getting a fresh token" section in docs/TOKENS.md).
+ * Requires a valid JWT (see "Getting a fresh token" section in docs/e2e/TOKENS.md).
  *
  * Usage:
  *   node scripts/test-endpoints.js
  *
  * Environment variables:
  *   QUORUM_GATEWAY_URL  — gateway base URL (default: http://localhost:3001)
- *   QUORUM_TEST_JWT     — pre-issued JWT (see docs/TOKENS.md)
+ *   QUORUM_TEST_JWT     — pre-issued JWT (see docs/e2e/TOKENS.md)
  *   QUORUM_GITHUB_TOKEN — GitHub OAuth token; used to obtain a JWT if QUORUM_TEST_JWT not set
  *   QUORUM_PROJECT_ID   — project slug to test against (default: amethyst-munchkin)
  *

@@ -37,14 +37,14 @@ Each journey is its own file. Read the journey before implementing its spec file
 **Suite OwnScore: 3187 | 10% gate: 319 pts | Max single FailureCost: 810 (S-05.1) | Hard block: any ⛔ failure**
 
 > J02 has 8 sub-scenarios spanning four different pillars (Governance ⛔, Data Integrity ⛔,
-> Functional 🟡, Developer Experience 🟡). See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md)
+> Functional 🟡, Developer Experience 🟡). See [TEST-PLAN.md](TEST-PLAN.md)
 > §6 for per-scenario OwnScore and FailureCost breakdown.
 
 ---
 
 ## Risk & Weight Model
 
-See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full weight model, dependency graph, frequency tiers, violation analysis, and CI execution strategy.
+See [TEST-PLAN.md](TEST-PLAN.md) for the full weight model, dependency graph, frequency tiers, violation analysis, and CI execution strategy.
 
 ## Test Helpers
 

@@ -21,7 +21,7 @@ in sub-flows that are already covered by other scenarios).
 
 > Note: graph *layout quality* and *visual clarity* cannot be asserted programmatically.
 > This scenario asserts node presence, panel rendering, and error states — not aesthetics.
-> See MANUAL-TESTS.md MT-04 for the visual quality check.
+> See [MANUAL-TESTS.md](../MANUAL-TESTS.md) MT-04 for the visual quality check.
 
 ---
 

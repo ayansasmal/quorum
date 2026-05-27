@@ -3,7 +3,7 @@
 > ⚠️ **This file is superseded.** The v1.0 weight model (single-dimension blast radius,
 > suite total 1107) described here has been replaced by the Eight-Pillar Quality Framework.
 >
-> **→ Test framework (v2.0):** [docs/RISK_WEIGHTED_TEST_PLAN.md](RISK_WEIGHTED_TEST_PLAN.md)
+> **→ Test framework (v2.0):** [docs/e2e/TEST-PLAN.md](e2e/TEST-PLAN.md)
 > **→ Journey index & running tests:** [docs/e2e/README.md](e2e/README.md)
 >
 > Key differences from the old model:

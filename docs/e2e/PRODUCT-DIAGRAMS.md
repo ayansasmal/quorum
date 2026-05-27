@@ -566,4 +566,4 @@ flowchart TD
 **Total suite weight: 1107 | 10% gate: 110.7 | Max single blast radius: 7.1% (S-05.1)**
 
 > Suite total recalculated after adding J17 (32), J18 (18), J19 (45) and extending J04 (+4), J09 (+2), J10 (+10.5), J12 (+22), J13 (+4), J15 (+12).
-> See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md) for the full binary tree and gate derivation.
+> See [TEST-PLAN.md](TEST-PLAN.md) for the full binary tree and gate derivation.
