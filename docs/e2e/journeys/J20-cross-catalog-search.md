@@ -1,10 +1,11 @@
 # J20 — Cross-Catalog Search and Source Attribution
 
 **Scenario ID:** S-20
-**Weight:** 15 (15 raw leaves × F1.0)
-**Blast radius:** 5.2% of suite
-**Frequency tier:** F1.0 (core — search is on every engineer's critical path; all sub-scenarios
-run on every CI push)
+**Weight:** 64 (16 raw leaves × F4)
+**Blast radius:** 5.2% of suite (recalculated against 1231 suite total)
+**Frequency tier:** F4 (core agent workflow — `search()` fires on every agent write/read;
+cross-catalog scope is active on every search call in a federated project)
+**Pillar:** Federation Correctness — C 1.0, D 1.5, OwnScore 96
 **Spec file:** `tests/e2e/scenarios/20-cross-catalog-search.spec.js`
 
 ---

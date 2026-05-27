@@ -1,10 +1,11 @@
 # J21 — MCP Layer Gateway Contracts
 
 **Scenario ID:** S-21
-**Weight:** 20 (20 raw leaves × F1.0)
-**Blast radius:** 6.2% of suite
-**Frequency tier:** F1.0 (core — MCP contract tests run on every CI push; these routes are the
-primary surface between the MCP server and the gateway)
+**Weight:** 60 (20 raw leaves × F3)
+**Blast radius:** 4.9% of suite (recalculated against 1231 suite total)
+**Frequency tier:** F3 (daily governance — `pending()` is F3; covers session-start behavior and
+MCP write paths exercised on every agent session)
+**Pillar:** Operational Reliability — C 1.5, D 1.0, OwnScore 90
 **Spec file:** `tests/e2e/scenarios/21-mcp-layer-contracts.spec.js`
 
 ---

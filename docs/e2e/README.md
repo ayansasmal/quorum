@@ -31,8 +31,10 @@ Each journey is its own file. Read the journey before implementing its spec file
 | J17 — Conflict: Governance Edge Cases | S-17 | 160 | 160 | ⛔ | [J17](journeys/J17-conflict-edge-cases.md) |
 | J18 — Governance Route: Direct Coverage | S-18 | 27 | 27 | 🟡 | [J18](journeys/J18-governance-route.md) |
 | J19 — Authentication Lifecycle | S-19 | 113 | 113 | ⛔ | [J19](journeys/J19-auth-lifecycle.md) |
+| J20 — Cross-Catalog Search | S-20 | 96 | 96 | 🟡 | [J20](journeys/J20-cross-catalog-search.md) |
+| J21 — MCP Layer Gateway Contracts | S-21 | 90 | 124 | 🟡 | [J21](journeys/J21-mcp-layer-contracts.md) |
 
-**Suite OwnScore: 3001 | 10% gate: 300 pts | Max single FailureCost: 810 (S-05.1) | Hard block: any ⛔ failure**
+**Suite OwnScore: 3187 | 10% gate: 319 pts | Max single FailureCost: 810 (S-05.1) | Hard block: any ⛔ failure**
 
 > J02 has 8 sub-scenarios spanning four different pillars (Governance ⛔, Data Integrity ⛔,
 > Functional 🟡, Developer Experience 🟡). See [RISK_WEIGHTED_TEST_PLAN.md](../RISK_WEIGHTED_TEST_PLAN.md)
@@ -125,7 +127,7 @@ open tests/e2e/viewer/index.html
 
 **Console summary (printed after every run):**
 ```
-✅  Gate: SAFE  |  Fail score: 0/3001 (0.0%)
+✅  Gate: SAFE  |  Fail score: 0/3187 (0.0%)
    passed:31  flaky:0  failed:0  correlated:0  skipped:0
    📊  Graph report → test-results/suite-graph.json
 ```

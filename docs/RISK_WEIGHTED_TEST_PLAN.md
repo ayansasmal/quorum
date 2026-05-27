@@ -1,8 +1,8 @@
 # Quorum — Quality Assurance Framework & Risk-Weighted Test Plan
 
 **Version:** 2.0 — May 2026
-**Scope:** Quorum v0.4 · 19 journeys · 31 scenarios
-**Suite OwnScore:** 3001 pts | **10% gate:** 300 pts | **5% gate:** 150 pts
+**Scope:** Quorum v0.4 · 21 journeys · 33 scenarios
+**Suite OwnScore:** 3187 pts | **10% gate:** 319 pts | **5% gate:** 159 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
 > **For agentic workers (CI, coding agents, deployment pipelines):**
@@ -42,7 +42,7 @@ FOR EACH failing scenario:
     → deployment blocked immediately, no exceptions, no override
 
 ELSE:
-  failure_pct = Σ OwnScore(all unique failing scenarios) / 3001 × 100
+  failure_pct = Σ OwnScore(all unique failing scenarios) / 3187 × 100
 
   IF failure_pct > 10%  → HARD_BLOCK   (block deployment, no exceptions)
   IF failure_pct > 5%   → WARNING       (block merge; require PE manual review + approval)
@@ -66,8 +66,8 @@ Pillars with a ⛔ are zero-tolerance: any single failure triggers a hard block.
 | 2 | **Security & Access Control** | ⛔ | JWT algorithm enforcement; RBAC boundaries; authentication lifecycle; no role escalation | S-05.1–5.6, S-19 |
 | 3 | **Data Integrity** | ⛔ | Atomic state transitions; supersede atomicity; no duplicate ACTIVE; version provenance | S-02.3, S-12 |
 | 4 | **Functional Correctness** | | Core knowledge lifecycle; happy paths; state visible correctly | S-02.1, S-02.4–2.7, S-03, S-04, S-08 |
-| 5 | **Federation Correctness** | | Cross-catalog reads; global catalog discovery; globals validation | S-01 |
-| 6 | **Operational Reliability** | | Graceful degradation; admin ops; config governance; governance routes | S-09, S-13, S-18 |
+| 5 | **Federation Correctness** | | Cross-catalog reads; global catalog discovery; globals validation | S-01, S-20 |
+| 6 | **Operational Reliability** | | Graceful degradation; admin ops; config governance; governance routes; MCP layer contracts | S-09, S-13, S-18, S-21 |
 | 7 | **Observability & Intelligence** | | Conformance scoring; portfolio; audit timeline; knowledge history | S-07, S-16 |
 | 8 | **Developer & Agent Experience** | | Dashboard usability; onboarding; write/read ergonomics | S-02.8, S-14 |
 
@@ -75,15 +75,15 @@ Pillars with a ⛔ are zero-tolerance: any single failure triggers a hard block.
 
 | Pillar | OwnScore total | % of suite |
 |--------|---------------|-----------|
-| Governance Integrity | 1153 | 38.4% |
-| Security | 923 | 30.7% |
-| Data Integrity | 178 | 5.9% |
-| Functional Correctness | 475 | 15.8% |
-| Federation | 34 | 1.1% |
-| Operational Reliability | 86 | 2.9% |
-| Observability | 102 | 3.4% |
-| Developer Experience | 50 | 1.7% |
-| **Total** | **3001** | **100%** |
+| Governance Integrity | 1153 | 36.2% |
+| Security | 923 | 28.9% |
+| Data Integrity | 178 | 5.6% |
+| Functional Correctness | 475 | 14.9% |
+| Federation | 130 | 4.1% |
+| Operational Reliability | 176 | 5.5% |
+| Observability | 102 | 3.2% |
+| Developer Experience | 50 | 1.6% |
+| **Total** | **3187** | **100%** |
 
 ---
 
@@ -182,13 +182,19 @@ S-04 (POST /api/deviations write path)
   Reason: S-07 (conformance scoring) computes a score from existing deviation records.
           If the deviation write path is broken, S-07's conformance score has no input
           data — UNCERTIFIED or wrong score returned.
+
+S-21 (POST /config/validate shared schema code path)
+  correlates → S-01
+  Reason: S-21.4 calls POST /config/validate and asserts the `owner` field is required.
+          S-01 (global catalog onboarding) calls POST /config/upload which internally uses
+          the same Zod schema. A regression in the config schema validation path breaks both.
 ```
 
 ---
 
 ## 6. Scenario Scoring Table
 
-All 31 scenarios. W = leaf_count × F. OwnScore = W × C × D. FailureCost = OwnScore + correlated.
+All 33 scenarios. W = leaf_count × F. OwnScore = W × C × D. FailureCost = OwnScore + correlated.
 Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 
 | Scenario | Journey | leaf | F | W | Pillar | C | D | **OwnScore** | Correlated failures | **FailureCost** | Gate |
@@ -224,10 +230,12 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-17 | J17 | 16 | 2 | 32 | Governance ⛔ | 2.5 | 2.0 | **160** | — | **160** | ⛔ |
 | S-18 | J18 | 12 | 1.5 | 18 | Operational | 1.0 | 1.5 | **27** | — | **27** | 🟡 |
 | S-19 | J19 | 15 | 3 | 45 | Security ⛔ | 2.5 | 1.0 | **113** | — | **113** | ⛔ |
-| **Total** | | | | **1107** | | | | **3001** | | | |
+| S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
+| S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
+| **Total** | | | | **1231** | | | | **3187** | | | |
 
-> **W column sum = 1107** (the legacy FrequencyTier weight). This matches the E2E suite index.
-> **OwnScore total = 3001.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1231** (the legacy FrequencyTier weight). This matches the E2E suite index.
+> **OwnScore total = 3187.** The C × D multipliers reflect severity and detection lag on top of frequency.
 
 ---
 
@@ -250,30 +258,32 @@ before marking the issue resolved.
 | 9 | **S-05.5** RBAC Deviation Action + Forget | **150** | ⛔ | Security | — |
 | 10 | **S-12** State Machine | **138** | ⛔ | Data Integrity | — |
 | 11 | **S-06** Multi-User Conflict | **135** | ⛔ | Governance | — |
-| 12 | **S-05.2** RBAC Promote + Supersede | **120** | ⛔ | Security | — |
-| 13 | **S-05.3** RBAC Deprecate | **120** | ⛔ | Security | — |
-| 14 | **S-19** Authentication Lifecycle | **113** | ⛔ | Security | — |
-| 15 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
-| 16 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
-| 17 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
-| 18 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
-| 19 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
-| 20 | **S-13** Config Management | **45** | 🟡 | Operational | — |
-| 21 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
-| 22 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
-| 23 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
-| 24 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
-| 25 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
-| 26 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
-| 27 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
-| 28 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
-| 29 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
-| 30 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
-| 31 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
+| 12 | **S-21** MCP Layer Gateway Contracts | **124** | 🟡 | Operational | — |
+| 13 | **S-05.2** RBAC Promote + Supersede | **120** | ⛔ | Security | — |
+| 14 | **S-05.3** RBAC Deprecate | **120** | ⛔ | Security | — |
+| 15 | **S-19** Authentication Lifecycle | **113** | ⛔ | Security | — |
+| 16 | **S-20** Cross-Catalog Search | **96** | 🟡 | Federation | — |
+| 17 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
+| 18 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
+| 19 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
+| 20 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
+| 21 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
+| 22 | **S-13** Config Management | **45** | 🟡 | Operational | — |
+| 23 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
+| 24 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
+| 25 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
+| 26 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
+| 27 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
+| 28 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
+| 29 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
+| 30 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
+| 31 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
+| 32 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
+| 33 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
 
-> Ranks 5–31 in the ⛔ column are hard-blocked by pillar membership (Security / Data Integrity),
-> not by FailureCost. Rank 5 (S-04) and 16 (S-03) are score-gated despite high FailureCost because
-> their primary pillar (Functional Correctness) is not zero-tolerance.
+> Ranks 5–33 in the ⛔ column are hard-blocked by pillar membership (Security / Data Integrity),
+> not by FailureCost. Rank 5 (S-04), rank 12 (S-21), rank 16 (S-20), and rank 18 (S-03) are
+> score-gated despite meaningful FailureCost because their primary pillar is not zero-tolerance.
 
 ---
 
@@ -294,7 +304,7 @@ not the percentage of tests that failed — it is the category of what is broken
 ### 8.2 Score-gated (🟡 pillars)
 
 ```
-failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3001 × 100
+failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3187 × 100
 
 failure_pct ≤ 5.0%  → SAFE     (auto-merge allowed)
 5.0% < failure_pct ≤ 10.0%  → WARNING   (block merge; require PE manual review + sign-off)
@@ -331,7 +341,7 @@ Every CI run emits a JSON report. Coding agents and deployment pipelines consume
 {
   "suite_version": "2.0",
   "timestamp": "2026-05-23T12:00:00Z",
-  "total_own_score": 3001,
+  "total_own_score": 3187,
   "gate_threshold_pct": 10,
   "deployment_status": "BLOCKED",
   "block_reason": "Zero-tolerance pillar failure: governance_integrity",
@@ -473,15 +483,15 @@ of HARD_BLOCK items that resolve the moment T0 passes.
 
 ## 11. Suite Dependency Graph (reference)
 
-Updated structure showing all 19 journeys, 31 scenarios, with OwnScore and FailureCost.
+Updated structure showing all 21 journeys, 33 scenarios, with OwnScore and FailureCost.
 The indented tree format below is a rendering aid — the actual structure is a DAG. Several nodes
 have multiple incoming edges (e.g. S-06 is downstream of both S-02.2 and S-15; S-04 appears in
 Functional Correctness but is also the root for S-07 in Observability). See §5 for the full
 code-path correlation edge list. The machine-readable DAG is in `tests/e2e/reporter/graph-schema.js`.
 
 ```
-QUORUM TEST SUITE (OwnScore = 3001)
-  10% gate = 300 pts  |  5% gate = 150 pts
+QUORUM TEST SUITE (OwnScore = 3187)
+  10% gate = 319 pts  |  5% gate = 159 pts
   Hard block: any ⛔ scenario failure
 │
 ├── T0  Infrastructure Probes ─────────────── OUTSIDE BUDGET (stop on failure)
@@ -547,13 +557,20 @@ QUORUM TEST SUITE (OwnScore = 3001)
 │   │         Correlates → S-07
 │   └── S-08  Confidence Endorsement ────── Own=68   FC=68   F2/C1.5/D1.5
 │
-├── FEDERATION CORRECTNESS ───────────────── OwnScore = 34   (1.1%)
-│   └── S-01  Global Catalog Onboarding ─── Own=34   FC=34   F1/C1.5/D1.5
+├── FEDERATION CORRECTNESS ───────────────── OwnScore = 130  (4.1%)
+│   ├── S-01  Global Catalog Onboarding ─── Own=34   FC=34   F1/C1.5/D1.5
+│   └── S-20  Cross-Catalog Search ──────── Own=96   FC=96   F4/C1.0/D1.5
+│             query validation · result field shape · cross-catalog scope · DRAFT exclusion
+│             domain filter · mixed sources · scope isolation
 │
-├── OPERATIONAL RELIABILITY ─────────────── OwnScore = 86   (2.9%)
+├── OPERATIONAL RELIABILITY ─────────────── OwnScore = 176  (5.5%)
 │   ├── S-09  Platform Admin ────────────── Own=14   FC=14   F1/C1.0/D1.0
 │   ├── S-13  Config Management ──────────  Own=45   FC=45   F1/C1.5/D1.5
-│   └── S-18  Governance Route ───────────  Own=27   FC=27   F1.5/C1.0/D1.5
+│   ├── S-18  Governance Route ───────────  Own=27   FC=27   F1.5/C1.0/D1.5
+│   └── S-21  MCP Layer Gateway Contracts ─ Own=90   FC=124  F3/C1.5/D1.0
+│             pending() topic filter · Requirement entity round-trip · constraints acceptance
+│             config owner field · status authority (server-side derivation)
+│             Correlates → S-01
 │
 ├── OBSERVABILITY ───────────────────────── OwnScore = 102  (3.4%)
 │   ├── S-07  Conformance & Portfolio ───── Own=75   FC=75   F2/C1.0/D1.5
