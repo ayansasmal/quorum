@@ -183,7 +183,7 @@ graph TD
 - `src/tools/config-upload.js`: updated to use typed `uploadConfig()` with duck-typing fallback
 - `gateway/src/shared/graph/schema.js`: synced `Requirement` entity type description and `business_owner` property with quorum-mcp canonical version (S-21.2)
 - `tests/e2e/scenarios/21-mcp-layer-contracts.spec.js`: new S-21 spec (5 sub-scenarios, 20 tests) covering MCP-layer HTTP contracts — `/pg/pending` topic filter, `Requirement` entity round-trip, `/governance/extract` constraints forwarding, `/config/validate` owner requirement, server-side status derivation
-- `docs/e2e/journeys/J20-cross-catalog-search.md` + `J21-mcp-layer-contracts.md`: journey docs for both new specs — J01–J21 now complete, matching all 21 scenario specs 1:1
+- `docs/e2e/journeys/J20-cross-catalog-search.md` + `J21-mcp-layer-contracts.md`: journey docs for both new specs — J01–J21 now complete, matching all 21 scenario specs 1:1. Metrics corrected: J20 F4 (search=F4 per tier table), 16 leaves, W=64, Federation C=1.0 D=1.5 OwnScore=96; J21 F3 (pending=F3), 20 leaves, W=60, Operational C=1.5 D=1.0 OwnScore=90; J21 correlates S-01 (config/validate shared Zod path), FailureCost=124. Suite totals updated: W 1107→1231, OwnScore 3001→3187, 10% gate 300→319.
 - **quorum-mcp skill docs**: fixed `reflect()` param names (`decisions_made`/`patterns_used`); removed non-existent `requirements` param; added Portfolio Intelligence section; fixed Quick Reference code block formatting; added Phase 3b federation setup guidance to `onboarding.md`; added v0.4 tools to `tool-reference.md`
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
