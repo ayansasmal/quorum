@@ -7,6 +7,8 @@
  *          Filter / Query API     (S-10.4, S-10.5, S-10.6)
  *          Fetch by ID            (S-10.7)
  *          Lineage                (S-10.8)
+ *          Cross-Project Isolation (S-10.9)  — negative: entry from project A is 404 under project B
+ *          Append-Only Enforcement (S-10.10) — negative: no HTTP verb exists to delete/patch entries
  *
  * Sub-scenarios:
  *   S-10.1  Write creates audit entries — seeding an ACTIVE entry via PA produces ≥ 1
@@ -307,5 +309,98 @@ describe('S-10.8 — Lineage', () => {
   })
 
 }) // S-10.8 — Lineage
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-10.9 — Cross-Project Isolation (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-10.9 — Cross-Project Audit Isolation (NEGATIVE)', () => {
+  /**
+   * An audit entry belongs to exactly one project.
+   * GET /pg/audit/:id returns 200+entry when the requesting project owns it,
+   * but 404 when a valid JWT with a different project header tries to fetch it.
+   *
+   * This prevents members of project B from enumerating entry_ids produced by
+   * project A's operations — even when the user is a member of both projects.
+   *
+   * Steps:
+   *   1  Capture an entry_id created under quorum-test-project (test-pe is PA there)
+   *   2  Fetch the same entry_id with X-Quorum-Project: quorum-test-catalog → 404
+   *      (test-pe is also a member of quorum-test-catalog, so auth passes — only
+   *       the project ownership check differs)
+   *   3  Original project still gets 200 for the same entry_id (isolation, not deletion)
+   */
+
+  let isolatedEntryId
+
+  beforeAll(async () => {
+    // S-10.7's beforeAll already captured an entry_id from quorum-test-project.
+    // Capture our own to avoid serial ordering dependency on S-10.7.
+    const res = await api(tokens.pe, PROJECT).get('/pg/audit?tool=dashboard-create&limit=1')
+    isolatedEntryId = res.data.entries[0]?.entry_id
+  })
+
+  test('step 1 — entry_id is accessible from its own project', async () => {
+    expect(isolatedEntryId).toBeTruthy()
+    const res = await api(tokens.pe, PROJECT).get(`/pg/audit/${isolatedEntryId}`)
+    expect(res.status).toBe(200)
+    expect(res.data).not.toBeNull()
+    expect(res.data.entry_id).toBe(isolatedEntryId)
+  })
+
+  test('step 2 — same entry_id with a different project header returns 404 (cross-project opacity)', async () => {
+    // test-pe is a member of quorum-test-catalog (PA role there) — auth passes.
+    // The entry belongs to quorum-test-project; the cross-project check returns 404.
+    const res = await api(tokens.pe, 'quorum-test-catalog').get(`/pg/audit/${isolatedEntryId}`)
+    expect(res.status).toBe(404)
+  })
+
+  test('step 3 — original project still returns 200 (isolation, not deletion)', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/audit/${isolatedEntryId}`)
+    expect(res.status).toBe(200)
+    expect(res.data.entry_id).toBe(isolatedEntryId)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-10.10 — Append-Only Enforcement (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-10.10 — Audit Append-Only Enforcement (NEGATIVE)', () => {
+  /**
+   * The audit trail is append-only by design.
+   * No HTTP verb exists to delete or modify an audit entry — the gateway
+   * registers only GET routes for /pg/audit/*.
+   * A request with DELETE or PATCH on an audit entry path returns 404
+   * (Express falls through to the 404 handler when no route matches).
+   *
+   * This is the HTTP-level complement to the constitutional enforcement tested
+   * in tests/gateway/constitutional.test.js (updateEntry / deleteEntry always throw).
+   *
+   * Steps:
+   *   1  DELETE /pg/audit/:id with a valid JWT → 404 (no route registered)
+   *   2  PATCH  /pg/audit/:id with a valid JWT → 404 (no route registered)
+   */
+
+  let targetEntryId
+
+  beforeAll(async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/audit?tool=dashboard-create&limit=1')
+    targetEntryId = res.data.entries[0]?.entry_id
+  })
+
+  test('step 1 — DELETE /pg/audit/:id returns 404 (no route registered)', async () => {
+    expect(targetEntryId).toBeTruthy()
+    const res = await api(tokens.pe, PROJECT).delete(`/pg/audit/${targetEntryId}`)
+    expect(res.status).toBe(404)
+  })
+
+  test('step 2 — PATCH /pg/audit/:id returns 404 (no route registered)', async () => {
+    const res = await api(tokens.pe, PROJECT).patch(`/pg/audit/${targetEntryId}`, {
+      tool: 'tampered-tool',
+    })
+    expect(res.status).toBe(404)
+  })
+})
 
 }) // S-10 — Audit Chain Integrity

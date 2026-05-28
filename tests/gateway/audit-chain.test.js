@@ -81,6 +81,41 @@ describe('verifyChain', () => {
     e1.entry_hash = 'deadbeef'.padEnd(64, '0')
     expect(() => verifyChain([e1])).toThrow(ChainIntegrityViolation)
   })
+
+  // GAP-001: the critical adversarial case — DB-level tampering where a hashed content
+  // field (author, tool, etc.) is changed in-place without updating entry_hash.
+  // verifyChain must recompute the hash from the current field values and detect the mismatch.
+  it('throws when a hashed field is silently mutated (stale entry_hash)', () => {
+    // 'author' is a HASHED_FIELD — changing it invalidates the stored entry_hash
+    const e1 = buildEntryWithHash({ entry_id: '1', author: 'alice', operation: 'WRITE' }, null, 1)
+    const tampered = { ...e1, author: 'eve' }  // entry_hash is now stale
+    expect(() => verifyChain([tampered])).toThrow(ChainIntegrityViolation)
+  })
+
+  it('throws when tool field is silently mutated (another HASHED_FIELD)', () => {
+    const e1 = buildEntryWithHash({ entry_id: '1', tool: 'dashboard-create' }, null, 1)
+    const tampered = { ...e1, tool: 'manual-override' }
+    expect(() => verifyChain([tampered])).toThrow(ChainIntegrityViolation)
+  })
+
+  it('ChainIntegrityViolation carries the chain_position, expected (recomputed), and actual (stale) hashes', () => {
+    const e1 = buildEntryWithHash({ entry_id: '1', author: 'alice' }, null, 7)
+    const tampered = { ...e1, author: 'eve' }
+    let caught
+    try {
+      verifyChain([tampered])
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ChainIntegrityViolation)
+    expect(caught.position).toBe(7)
+    // expected = hash recomputed from tampered content
+    expect(caught.expected).toBe(hashEntry(tampered))
+    // actual = stale hash stored on the entry (computed for author='alice')
+    expect(caught.actual).toBe(e1.entry_hash)
+    expect(caught.message).toContain('position 7')
+  })
+
   it('throws when previous_hash link is broken', () => {
     const e1 = buildEntryWithHash({ entry_id: '1' }, null, 1)
     const e2 = buildEntryWithHash({ entry_id: '2' }, e1.entry_hash, 2)
