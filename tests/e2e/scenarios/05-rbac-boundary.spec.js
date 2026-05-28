@@ -754,7 +754,9 @@ test.describe('S-05.9 — role update: new role reflected immediately (Redis cac
   test.afterAll(async () => {
     // Insurance reset — keeps the suite idempotent if steps 2–4 fail mid-test
     await api(tokens.pe, PROJECT).post('/config/update-role', {
-      roles: { 'test-engineer': 'engineer' },
+      github_username: 'test-engineer',
+      role:            'engineer',
+      reason:          'S-05.9 afterAll insurance: resetting test-engineer to baseline engineer role',
     })
   })
 
@@ -765,7 +767,9 @@ test.describe('S-05.9 — role update: new role reflected immediately (Redis cac
 
   test('step 2 — PA promotes test-engineer to director → 200', async () => {
     const res = await api(tokens.pe, PROJECT).post('/config/update-role', {
-      roles: { 'test-engineer': 'director' },
+      github_username: 'test-engineer',
+      role:            'director',
+      reason:          'S-05.9: promoting to director to verify portfolio access is granted immediately',
     })
     expect(res.status).toBe(200)
   })
@@ -781,7 +785,9 @@ test.describe('S-05.9 — role update: new role reflected immediately (Redis cac
 
   test('step 4 — PA resets test-engineer back to engineer → 200', async () => {
     const res = await api(tokens.pe, PROJECT).post('/config/update-role', {
-      roles: { 'test-engineer': 'engineer' },
+      github_username: 'test-engineer',
+      role:            'engineer',
+      reason:          'S-05.9: reverting test-engineer to engineer to verify portfolio access is revoked immediately',
     })
     expect(res.status).toBe(200)
   })

@@ -396,8 +396,10 @@ router.post('/update-role', verifyJwt, async (req, res, next) => {
   const updatedConfig   = { ...config, members: updatedMembers }
   await saveProjectConfig(project, updatedConfig)
 
-  // Update DDB membership record
-  const newBaseConfidence = config.roles?.[role]?.base_confidence ?? 0.5
+  // Update DDB membership record — prefer role-level override, then member's existing value.
+  // config.roles is optional; fixtures that only define members[] have no roles map.
+  const memberRecord      = config.members[memberIdx]
+  const newBaseConfidence = config.roles?.[role]?.base_confidence ?? memberRecord?.base_confidence ?? 0.5
   await updateMemberRecord(github_username, project, { role, base_confidence: newBaseConfidence })
 
   // Invalidate the affected user's profile cache — takes effect on next request
