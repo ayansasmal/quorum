@@ -197,6 +197,8 @@ graph TD
 - `docs/e2e/journeys/J20-cross-catalog-search.md` + `J21-mcp-layer-contracts.md`: journey docs for both new specs — J01–J21 now complete, matching all 21 scenario specs 1:1. Metrics corrected: J20 F4 (search=F4 per tier table), 16 leaves, W=64, Federation C=1.0 D=1.5 OwnScore=96; J21 F3 (pending=F3), 20 leaves, W=60, Operational C=1.5 D=1.0 OwnScore=90; J21 correlates S-01 (config/validate shared Zod path), FailureCost=124. Suite totals updated: W 1107→1231, OwnScore 3001→3187, 10% gate 300→319.
 - **quorum-mcp skill docs**: fixed `reflect()` param names (`decisions_made`/`patterns_used`); removed non-existent `requirements` param; added Portfolio Intelligence section; fixed Quick Reference code block formatting; added Phase 3b federation setup guidance to `onboarding.md`; added v0.4 tools to `tool-reference.md`
 
+**Gap analysis complete (2026-05-28):** `docs/e2e/journey-story-28-05-2026.md` + `docs/e2e/GAP-ANALYSIS.md` — 38 prioritised gaps across P0–P6. Three-layer test architecture: UT (pure function) | GIT (gateway integration, mocked DB) | E2E-API (running stack) | E2E-UI (Playwright browser). P0 gaps: hash chain tamper detection (GAP-001), `is_public` RBAC matrix coverage (GAP-002), self-approval+coexist-merge (GAP-003). P1 silent failure: `constraints` silently dropped from `buildExtractPrompt` (GAP-004 — `governance.js` line 287–290 does not destructure `constraints`; fix: add to destructure + pass to prompt builder). First-sprint ~11h covers all P0+P1 gaps.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)
@@ -367,3 +369,4 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [ROADMAP.md](docs/ROADMAP.md) | v0.2 → v1.0 feature roadmap |
 | [skill/references/](skill/references/) | Tool schemas, conflict guide, knowledge guidelines, onboarding protocol |
 | [docs/e2e/journey-story-28-05-2026.md](docs/e2e/journey-story-28-05-2026.md) | Journey narratives for all 21 E2E journeys — product story, validated sub-scenarios, gap analysis (2026-05-28) |
+| [docs/e2e/GAP-ANALYSIS.md](docs/e2e/GAP-ANALYSIS.md) | 38 prioritised coverage gaps (P0–P6) — each with context, test type, exact code change, and effort estimate |

@@ -602,3 +602,24 @@ Documented here so agents can identify the fix target before running tests.
 *Test helpers: [docs/e2e/e2e-test-helpers.md](e2e/e2e-test-helpers.md)*
 *Product diagrams: [docs/e2e/PRODUCT-DIAGRAMS.md](e2e/PRODUCT-DIAGRAMS.md)*
 *Suite index: [docs/e2e/README.md](e2e/README.md)*
+
+---
+
+## Gap Analysis Companion
+
+[GAP-ANALYSIS.md](GAP-ANALYSIS.md) is the companion document to this test plan. Where
+TEST-PLAN.md answers *"how do we score and prioritise failures in existing tests?"*,
+GAP-ANALYSIS.md answers *"what known gaps exist in coverage and what exactly needs to change?"*
+
+**Relationship to this document:**
+
+| TEST-PLAN.md | GAP-ANALYSIS.md |
+|--------------|-----------------|
+| Scores 33 existing scenarios by FailureCost | Catalogues 38 coverage gaps |
+| Gates CI deployment | Guides new test + feature work |
+| Fix priority for broken tests | Implementation guide for missing tests |
+| OwnScore model | P0–P6 risk tiers |
+
+**Priority bridge:** GAP-ANALYSIS P0 gaps map to TEST-PLAN `HARD_BLOCK` pillars.
+GAP-001 (hash chain tamper detection) belongs in the `data_integrity` zero-tolerance
+pillar — once the unit test is written, a regression there becomes a hard deployment block.
