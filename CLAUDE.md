@@ -366,3 +366,4 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Contribution guidelines, PR process |
 | [ROADMAP.md](docs/ROADMAP.md) | v0.2 → v1.0 feature roadmap |
 | [skill/references/](skill/references/) | Tool schemas, conflict guide, knowledge guidelines, onboarding protocol |
+| [docs/e2e/journey-story-28-05-2026.md](docs/e2e/journey-story-28-05-2026.md) | Journey narratives for all 21 E2E journeys — product story, validated sub-scenarios, gap analysis (2026-05-28) |
