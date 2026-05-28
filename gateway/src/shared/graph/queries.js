@@ -30,6 +30,9 @@ import { KnowledgeStatus } from './schema.js'
 const LEGAL_TRANSITIONS = new Map([
   [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.ACTIVE}`, true],
   [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.REJECTED}`, true],
+  [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.PENDING_CONFLICT_CHECK}`, true],
+  [`${KnowledgeStatus.PENDING_CONFLICT_CHECK}->${KnowledgeStatus.ACTIVE}`, true],
+  [`${KnowledgeStatus.PENDING_CONFLICT_CHECK}->${KnowledgeStatus.DRAFT}`, true],
   [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.SUPERSEDED}`, true],
   [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.DEPRECATED}`, true],
 ])

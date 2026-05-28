@@ -169,6 +169,13 @@ router.post('/upload', async (req, res) => {
           isGlobal:    config.is_global ?? false,
         },
       )
+    } else if (config.is_global === true) {
+      // Update is_global when re-uploading a config that declares itself global.
+      // The initial onboard may have created the row before is_global was in the schema.
+      await pool.query(
+        `UPDATE q_projects SET is_global = true WHERE group_id = $1`,
+        [groupId],
+      )
     }
   } catch (err) {
     console.error(`[Gateway:config] q_projects register failed for ${groupId}: ${err.message}`)
@@ -348,7 +355,9 @@ router.post('/update-role', verifyJwt, async (req, res, next) => {
 
   const config = await loadProjectConfig(project)
 
-  if (config.roles && !config.roles[role]) {
+  // Only reject the role when the config explicitly defines a roles map (non-empty).
+  // Zod defaults roles:null → {} so we check Object.keys().length to avoid false positives.
+  if (config.roles && Object.keys(config.roles).length > 0 && !config.roles[role]) {
     return res.status(400).json({
       error:   'invalid_role',
       message: `Role '${role}' is not defined in project config. Valid roles: ${Object.keys(config.roles).join(', ')}`,

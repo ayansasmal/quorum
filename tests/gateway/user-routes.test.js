@@ -108,7 +108,7 @@ describe('GET /user/profile/:username', () => {
     loadUserProfile.mockResolvedValue({
       github_username: 'bob',
       is_admin:        false,
-      projects:        [],
+      projects:        [{ group_id: 'proj-bob', role: 'engineer' }],
     })
     loadAdminConfig.mockResolvedValue({ admins: [{ github_username: 'bob' }] })
 
@@ -176,7 +176,7 @@ describe('GET /user/profile/:username', () => {
     loadUserProfile
       .mockResolvedValueOnce({ github_username: 'alice', projects: [] }) // verifyJwt
       .mockResolvedValueOnce(null) // Promise.all caller profile → null triggers 403
-      .mockResolvedValueOnce({ github_username: 'bob', projects: [] }) // Promise.all target
+      .mockResolvedValueOnce({ github_username: 'bob', projects: [{ group_id: 'proj-bob' }] }) // Promise.all target (valid — passes target check)
 
     const { status, body } = await get('/user/profile/bob', { Authorization: `Bearer ${tok}` })
 
@@ -188,7 +188,7 @@ describe('GET /user/profile/:username', () => {
     const tok = await makeToken('alice')
     loadUserProfile.mockResolvedValue({
       github_username: 'alice',
-      projects: [],
+      projects: [{ group_id: 'proj-alice', role: 'engineer' }],
     })
     loadAdminConfig.mockResolvedValue({ admins: [{ github_username: 'bob' }] })
 
@@ -200,7 +200,7 @@ describe('GET /user/profile/:username', () => {
 
   it('is_admin is false when admin config returns null', async () => {
     const tok = await makeToken('alice')
-    loadUserProfile.mockResolvedValue({ github_username: 'alice', projects: [] })
+    loadUserProfile.mockResolvedValue({ github_username: 'alice', projects: [{ group_id: 'proj-alice', role: 'engineer' }] })
     loadAdminConfig.mockResolvedValue(null)
 
     const { status, body } = await get('/user/profile/alice', { Authorization: `Bearer ${tok}` })

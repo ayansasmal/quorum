@@ -316,4 +316,6 @@ describe('S-13.5 — Config Schema Validation', () => {
     expect(res.status).not.toBe(500)
   })
 
+}) // S-13.5 — Config Schema Validation
+
 }) // S-13 — Config Governance

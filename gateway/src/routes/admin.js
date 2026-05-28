@@ -110,16 +110,21 @@ router.post('/users', verifyJwt, requireAdmin, async (req, res, next) => {
 })
 
 // GET /admin/projects — all projects across the platform
-router.get('/projects', verifyJwt, requireAdmin, async (req, res) => {
+// E2E: tests/e2e/scenarios/09-admin-operations.spec.js — S-09.3 admin project listing
+router.get('/projects', verifyJwt, requireAdmin, async (req, res, next) => {
   const pool = req.app.locals.pool
-  const { rows } = await pool.query(
-    `SELECT id, slug, name, status,
-            jsonb_array_length(members) AS member_count,
-            created_at
-     FROM projects
-     ORDER BY created_at DESC`,
-  )
-  res.json({ projects: rows })
+  try {
+    const { rows } = await pool.query(
+      `SELECT group_id, display_name, owner, is_global,
+              jsonb_array_length(members) AS member_count,
+              created_at
+       FROM q_projects
+       ORDER BY created_at DESC`,
+    )
+    res.json({ projects: rows })
+  } catch (err) {
+    next(err)
+  }
 })
 
 export default router

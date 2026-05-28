@@ -122,7 +122,7 @@ describe('S-03.2 — Deprecation Validation', () => {
     const client = api(tokens.pe, PROJECT)
     const res = await client.post(`/api/knowledge/${topic}/${guardKey}/deprecate`, {})
     expect(res.status).toBe(400)
-    expect(res.data.error).toBe('reason_required')
+    expect(res.data.rule).toBe('REASON_REQUIRED')
   })
 
   test('step 3 — reason shorter than 10 chars returns 400', async () => {
@@ -131,7 +131,7 @@ describe('S-03.2 — Deprecation Validation', () => {
       reason: 'Too short',  // 9 chars
     })
     expect(res.status).toBe(400)
-    expect(res.data.error).toBe('reason_required')
+    expect(res.data.rule).toBe('REASON_REQUIRED')
   })
 
   test('step 4 — deprecating non-existent key returns 404', async () => {

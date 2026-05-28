@@ -160,6 +160,7 @@ describe('S-20.3 — Cross-Catalog Scope', () => {
       key:     globalToken,
       content: `Global catalog entry ${globalToken} — validates cross-catalog search scope via S-20.3.`,
       project: CATALOG,
+      globalCatalog: true,
     })
   })
 
@@ -354,6 +355,7 @@ describe('S-20.7 — Mixed Sources', () => {
       key:     globalKey,
       content: `Mixed source test ${mixedToken} global entry — catalog-scoped, source:global expected.`,
       project: CATALOG,
+      globalCatalog: true,
     })
   })
 

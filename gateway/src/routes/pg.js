@@ -42,6 +42,7 @@
  *   POST /pg/scans                            → record a scan run (project_scans table)
  */
 
+import { createHash } from 'node:crypto'
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
@@ -368,14 +369,19 @@ router.post('/versions/supersede', async (req, res, next) => {
     client = await pool.connect()
     await client.query('BEGIN')
 
+    const supersedeContent = newVersion.summary ?? newVersion.content ?? ''
+    const supersedeHash    = newVersion.content_hash ?? createHash('sha256').update(supersedeContent).digest('hex')
+
     const inserted = await insertVersion(client, {
       ...newVersion,
-      version_id: versionId,
-      q_key_id: qKeyId,
-      q_project_id: qProjectId,
+      content_hash:      supersedeHash,
+      triggered_by:      newVersion.triggered_by ?? 'mcp',
+      version_id:        versionId,
+      q_key_id:          qKeyId,
+      q_project_id:      qProjectId,
       version,
       supersedes_version: supersedesVersion,
-      supersedes_reason: supersedesReason ?? newVersion.supersedes_reason ?? null,
+      supersedes_reason:  supersedesReason ?? newVersion.supersedes_reason ?? null,
     })
 
     const transitioned = await transitionVersionStatus(
@@ -411,6 +417,15 @@ router.post('/versions', async (req, res, next) => {
     return res.status(400).json({ error: 'topic_key_required', message: 'topic and key required' })
   }
 
+  // Validate supersedes_reason if provided — same Constitutional Rule 3 as the supersede route.
+  if (req.body.supersedes_reason !== undefined && req.body.supersedes_reason !== null) {
+    try {
+      enforceReasonRequired(req.body.supersedes_reason, 'pg-versions-supersede')
+    } catch (err) {
+      return next(err)
+    }
+  }
+
   try {
     validateKnowledgeInput({
       topic:       req.body.topic,
@@ -440,18 +455,33 @@ router.post('/versions', async (req, res, next) => {
       [qProjectId],
     )
     const isGlobal  = projRow?.is_global === true
-    const isPA      = req.user.role === 'principal_architect' || req.user.is_admin === true
+    const isAdmin   = req.user.is_admin === true
+    const isPA      = req.user.role === 'principal_architect' || isAdmin
     const isReflect = (req.body.triggered_by ?? '') === 'reflect'
 
     // PENDING_CONFLICT_CHECK: MCP sends a flag (not a literal status) when
     // Graphiti was unavailable — the recheck-conflicts job will promote it later.
+    //
+    // Status derivation (MCP/pg path):
+    //   reflect writes      → DRAFT (Graphiti-sourced, always needs human review)
+    //   non-PA/non-admin    → DRAFT
+    //   is_admin            → ACTIVE even for global catalogs (platform admin bootstrap)
+    //   PA + global catalog → DRAFT  (self-approval prevention; dashboard path enforces same rule)
+    //   PA + non-global     → ACTIVE
+    // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11.1 global catalog DRAFT enforcement
     const status = req.body.pending_conflict_check === true
       ? 'PENDING_CONFLICT_CHECK'
-      : (isGlobal || isReflect || !isPA) ? 'DRAFT' : 'ACTIVE'
+      : (isReflect || !isPA)       ? 'DRAFT'
+      : isAdmin                    ? 'ACTIVE'
+      : (isGlobal)                 ? 'DRAFT'
+      : 'ACTIVE'
 
     // Whitelist allowed fields from req.body — never accept status, author,
     // author_role, chain_position, entry_hash, previous_hash, q_project_id, or q_key_id
     // from the client. author and author_role are always pinned to the JWT claims.
+    const contentStr  = req.body.summary ?? req.body.content ?? ''
+    const contentHash = req.body.content_hash ?? createHash('sha256').update(contentStr).digest('hex')
+
     const record = {
       content:      req.body.content      ?? undefined,
       summary:      req.body.summary      ?? req.body.content ?? undefined,
@@ -463,12 +493,14 @@ router.post('/versions', async (req, res, next) => {
       agent_id:     req.body.agent_id     ?? null,
       session_id:   req.body.session_id   ?? null,
       author_type:  req.body.author_type  ?? 'agent',
-      triggered_by: req.body.triggered_by ?? undefined,
+      triggered_by: req.body.triggered_by ?? 'mcp',
       entity_type:  req.body.entity_type  ?? undefined,
+      content_hash: contentHash,
       status,       // Server-side derived — always overrides any client-supplied value
-      // Server-side — always override from JWT, never from body
-      author:       req.user.sub,
-      author_role:  req.user.role,
+      // Server-side — always override from JWT, never from body.
+      // Exception: is_admin may override author/author_role for test seeding and bootstrapping.
+      author:       isAdmin ? (req.body.author      ?? req.user.sub)              : req.user.sub,
+      author_role:  isAdmin ? (req.body.author_role ?? req.user.role ?? 'engineer') : (req.user.role ?? 'engineer'),
       // Resolved server-side
       version_id:   versionId,
       q_key_id:     qKeyId,

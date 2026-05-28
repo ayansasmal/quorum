@@ -295,7 +295,7 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
   // vp_engineering) AND non-members (any user with role:null).
   //
   // Allowed: architect (catalog member → DRAFT), product_owner (catalog member → DRAFT),
-  //          compliance_officer (catalog member → DRAFT), PA (catalog member → ACTIVE).
+  //          compliance_officer (catalog member → DRAFT), PA (catalog member → DRAFT, S-11.1).
 
   const globalBlockedTokens = [
     ['engineer',        tokens.engineer],
@@ -351,15 +351,15 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
     expect(res.data.status).toBe('DRAFT')
   })
 
-  test('step 7 — principal_architect (catalog member) writes to global catalog → ACTIVE', async () => {
+  test('step 7 — principal_architect (catalog member) writes to global catalog → DRAFT (self-approval prevention S-11.1)', async () => {
     const res = await catalogApi(tokens.pe).post('/api/knowledge', {
       topic:       'security',
       key:         uid('s054-pa'),
-      content:     'Global catalog entry by PA — lands as ACTIVE directly (S-05.4)',
+      content:     'Global catalog entry by PA — lands as DRAFT; second PA must approve (S-05.4/S-11.1)',
       entity_type: 'Decision',
     })
     expect(res.status).toBe(201)
-    expect(res.data.status).toBe('ACTIVE')
+    expect(res.data.status).toBe('DRAFT')
   })
 })
 
@@ -377,6 +377,7 @@ test.describe('S-05.5 — deviation action (DEVIATION_ACTION_AUTHORITY) + deprec
       key:     devKey,
       content: 'TLS minimum version enforcement standard for S-05.5 RBAC test',
       project: CATALOG,
+      globalCatalog: true,
     })
 
     // Record a deviation from quorum-test-project against the catalog entry

@@ -30,7 +30,13 @@ router.get('/profile/:username', verifyJwt, async (req, res) => {
       loadUserProfile(username),
     ])
 
-    if (!callerProfile || !targetProfile) {
+    // loadUserProfile never returns null — check projects[] to detect nonexistent users.
+    // A user with zero project memberships has never been onboarded to Quorum.
+    if (!targetProfile || targetProfile.projects.length === 0) {
+      return res.status(404).json({ error: 'profile_not_found', message: `No profile found for '${username}'` })
+    }
+
+    if (!callerProfile || callerProfile.projects.length === 0) {
       return res.status(403).json({ error: 'forbidden', message: 'You can only view profiles of users in shared projects' })
     }
 
@@ -46,7 +52,7 @@ router.get('/profile/:username', verifyJwt, async (req, res) => {
   }
 
   const profile = await loadUserProfile(username)
-  if (!profile) {
+  if (!profile || profile.projects.length === 0) {
     return res.status(404).json({ error: 'profile_not_found', message: `No profile found for '${username}'` })
   }
 
@@ -55,6 +61,8 @@ router.get('/profile/:username', verifyJwt, async (req, res) => {
   res.json({
     github_username: profile.github_username,
     is_admin:        isTarget,
+    // role is per-project, not per-user — null at the profile level (resolved per X-Quorum-Project in middleware)
+    role:            null,
     projects:        profile.projects,
   })
 })

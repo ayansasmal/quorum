@@ -164,7 +164,10 @@ router.use((req, res, next) => {
  * Non-fatal — logs errors but never throws.
  * @returns {Promise<{ synced: number, failed: Array<{project_id: string, error: string}>, duration_ms: number }>}
  */
-export async function syncAllConfigs() {
+/**
+ * @param {import('pg').Pool | null} [pool] - optional; when provided, updates q_projects.is_global
+ */
+export async function syncAllConfigs(pool = null) {
   const bucket = process.env.QUORUM_CONFIG_BUCKET
   if (!bucket) {
     console.error('[Gateway] syncAllConfigs: QUORUM_CONFIG_BUCKET not set — skipping')
@@ -226,6 +229,21 @@ export async function syncAllConfigs() {
     }
   }
 
+  // 4. Update q_projects.is_global for all successfully synced global configs.
+  // This ensures that GET /api/globals discovers the right projects even if the row was
+  // created before the is_global field was added to the schema.
+  if (pool) {
+    const globalIds = results
+      .filter((r) => r.ok && r.config?.is_global === true)
+      .map((r) => r.config.group_id ?? r.project_id)
+    if (globalIds.length > 0) {
+      await pool.query(
+        `UPDATE q_projects SET is_global = true WHERE group_id = ANY($1)`,
+        [globalIds],
+      ).catch((err) => console.error(`[Gateway] syncAllConfigs: q_projects is_global update failed — ${err.message}`))
+    }
+  }
+
   return { synced, failed, globals_warnings: globalsWarnings, duration_ms: Date.now() - startedAt }
 }
 
@@ -245,7 +263,7 @@ router.post('/configs', async (req, res) => {
     })
   }
 
-  const result = await syncAllConfigs()
+  const result = await syncAllConfigs(req.app.locals.pool ?? null)
 
   res.json(result)
 })

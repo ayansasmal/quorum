@@ -129,7 +129,7 @@ describe('S-07.2 — CERTIFIED Baseline', () => {
     const keys = STANDARDS.map((_, i) => uid(`testing-standard-${i}`))
     await Promise.all(
       STANDARDS.map((content, i) =>
-        activeEntry({ topic: TOPIC, key: keys[i], content, project: CATALOG }),
+        activeEntry({ topic: TOPIC, key: keys[i], content, project: CATALOG, globalCatalog: true }),
       ),
     )
     // Record a scan run for quorum-test-project so scan_count > 0
@@ -205,7 +205,7 @@ describe('S-07.3 — Score Formula', () => {
 
   beforeAll(async () => {
     stdKey = uid('content-type-validation')
-    await activeEntry({ topic: TOPIC, key: stdKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic: TOPIC, key: stdKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
     // Record a deviation (OPEN — weight 1.0)
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/api/deviations', {
@@ -437,5 +437,7 @@ describe('S-07.8 — Conformance Score Badge', () => {
     // ('Open' also appears in the filter rail for deviations, so use 'Accepted' which is breakdown-only)
     await expect(page.getByText(/\d+ Accepted/, { exact: false })).not.toBeVisible()
   })
+
+}) // S-07.8 — Conformance Score Badge
 
 }) // S-07 — Conformance Scoring

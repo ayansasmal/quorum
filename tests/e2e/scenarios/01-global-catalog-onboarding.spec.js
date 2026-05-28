@@ -150,7 +150,9 @@ describe('S-01 — Global Catalog Onboarding', () => {
     expect(catalogEntries.length).toBe(0)
   })
 
-  test('step 5 — PA write to global catalog lands as ACTIVE', async () => {
+  test('step 5 — PA write to global catalog lands as DRAFT (S-11.1 self-approval prevention)', async () => {
+    // Global catalog PA writes always land as DRAFT — a second PA must approve.
+    // Self-approval prevention is enforced at the dashboard path for all global projects.
     const client = api(tokens.pe, CATALOG)
     const res = await client.post('/api/knowledge', {
       topic:       'security',
@@ -159,18 +161,15 @@ describe('S-01 — Global Catalog Onboarding', () => {
       entity_type: 'Constraint',
     })
     expect(res.status).toBe(201)
-    expect(res.data.status).toBe('ACTIVE')
+    expect(res.data.status).toBe('DRAFT')
   })
 
-  test('step 6 — ACTIVE entry visible in catalog knowledge browser', async () => {
+  test('step 6 — PA-written DRAFT entry appears in /api/drafts for the catalog', async () => {
     const client = api(tokens.pe, CATALOG)
-    const res = await client.get('/api/knowledge')
+    const res = await client.get('/api/drafts')
     expect(res.status).toBe(200)
-    const entries = res.data.items ?? []
-    const activeEntries = Array.isArray(entries)
-      ? entries.filter(e => e.status === 'ACTIVE')
-      : []
-    expect(activeEntries.some(e => e.key === tlsKey && e.topic === 'security')).toBe(true)
+    const drafts = res.data.drafts ?? []
+    expect(drafts.some(d => d.topic === 'security' && d.key === tlsKey)).toBe(true)
   })
 
   test('step 7 — catalog with only 1 ACTIVE entry shows UNCERTIFIED conformance', async () => {
@@ -229,22 +228,23 @@ describe('S-01 — Global Catalog Onboarding', () => {
   // ── Engineer Phase (cross-catalog reads) ────────────────────────────────────
 
   test('step 12 — cross-catalog search from linked project finds global entry with source and catalog_id', async () => {
-    // Graphiti needs time to index the PA-written global entry.
+    // Graphiti needs time to index the promoted entry.
     await graphitiSettle()
 
+    // tokenKey was promoted to ACTIVE in step 10; tlsKey is DRAFT (self-approval prevention).
+    // Search only returns ACTIVE entries — use tokenKey content ("token" / "expiry").
     const client = api(tokens.engineer, PROJECT)
-    const res = await client.get('/api/search?q=TLS')
+    const res = await client.get('/api/search?q=token')
     expect(res.status).toBe(200)
     expect(Array.isArray(res.data.results)).toBe(true)
 
-    // The TLS entry was written to the catalog and the project links to it via globals.
-    // The search route should find it via the postgres fallback (or Graphiti) and
-    // annotate it with source: 'global' and catalog_id: CATALOG.
+    // The token-expiry entry is ACTIVE in the catalog and the project links to it via globals.
+    // The search route annotates it with source: 'global' and catalog_id: CATALOG.
     const globalEntry = res.data.results.find(
       r => r.source === 'global' && r.catalog_id === CATALOG
     )
     expect(globalEntry).toBeDefined()
-    expect(globalEntry.key).toBe(tlsKey)
+    expect(globalEntry.key).toBe(tokenKey)
   })
 
   test('step 13 — knowledge browser for linked project shows NO global entries (no bleed)', async () => {

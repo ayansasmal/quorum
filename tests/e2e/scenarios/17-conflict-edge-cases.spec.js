@@ -59,6 +59,11 @@ import { uid, activeEntry }     from '../helpers/seed.js'
 const PROJECT = 'quorum-test-project'
 const CATALOG = 'quorum-test-catalog'
 
+// GET /pg/pending returns a raw array (not a { conflict_briefs: [] } envelope —
+// that envelope is added by the MCP pending() tool layer, not the gateway).
+const pendingBriefs = (res) =>
+  Array.isArray(res.data) ? res.data : (res.data?.conflict_briefs ?? res.data?.decisions ?? [])
+
 // Serial: state mutations in S-17.2 (PENDING_CONFLICT_CHECK) affect shared project scope
 test.describe.configure({ mode: 'serial' })
 
@@ -86,7 +91,7 @@ describe('S-17.1 — Auto-Supersede State Invariants', () => {
 
     // Record pending count before — auto-supersede must NOT increase this.
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
-    pendingCountBefore = pendingRes.data?.conflict_briefs?.length ?? 0
+    pendingCountBefore = pendingBriefs(pendingRes).length
 
     // Seed v1 ACTIVE with PA write (confidence floored at 0.90 for test-pe)
     await activeEntry({
@@ -148,7 +153,7 @@ describe('S-17.1 — Auto-Supersede State Invariants', () => {
     // Auto-supersede must not create a pending_decisions row.
     // Manually-triggered atomic supersede also must not create one.
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
-    const conflictBriefs = pendingRes.data?.conflict_briefs ?? []
+    const conflictBriefs = pendingBriefs(pendingRes)
     const ourConflict = conflictBriefs.find(
       b => b.conflict_key === key || b.key === key
     )
@@ -285,7 +290,7 @@ describe('S-17.3 — Cross-Catalog Conflict Brief Shape', () => {
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
     expect(pendingRes.status).toBe(200)
 
-    const briefs = pendingRes.data?.conflict_briefs ?? pendingRes.data?.decisions ?? []
+    const briefs = pendingBriefs(pendingRes)
     const ourBrief = briefs.find(
       b => b.conflict_id === conflictId || b.conflict_key === localKey
     )
@@ -294,7 +299,7 @@ describe('S-17.3 — Cross-Catalog Conflict Brief Shape', () => {
 
   test('step 2 — brief existing_content references global catalog standard', async () => {
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
-    const briefs = pendingRes.data?.conflict_briefs ?? pendingRes.data?.decisions ?? []
+    const briefs = pendingBriefs(pendingRes)
     const ourBrief = briefs.find(b => b.conflict_id === conflictId || b.conflict_key === localKey)
 
     expect(ourBrief).toBeTruthy()
@@ -305,7 +310,7 @@ describe('S-17.3 — Cross-Catalog Conflict Brief Shape', () => {
 
   test('step 3 — conflict_reason identifies the cross-catalog source', async () => {
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
-    const briefs = pendingRes.data?.conflict_briefs ?? pendingRes.data?.decisions ?? []
+    const briefs = pendingBriefs(pendingRes)
     const ourBrief = briefs.find(b => b.conflict_id === conflictId || b.conflict_key === localKey)
 
     const reason = ourBrief?.conflict_reason ?? ourBrief?.reason ?? ''
@@ -340,18 +345,11 @@ describe('S-17.4 — Enrichment Response Shape', () => {
     })
     expect([200, 201]).toContain(writeRes.status)
 
-    // Get enrichment from the governance endpoint (uses mock OpenAI)
+    // Get enrichment from the governance endpoint (uses mock OpenAI).
+    // Route expects plain content strings, not graph node objects.
     const enrichRes = await api(tokens.pe, PROJECT).post('/governance/enrich', {
-      existing: {
-        content:    'All API keys must rotate every 90 days.',
-        author:     'test-pe',
-        confidence: 0.90,
-      },
-      incoming: {
-        content:    'API keys do not need expiry for internal service accounts.',
-        author:     'test-engineer',
-        confidence: 0.70,
-      },
+      existing:        'All API keys must rotate every 90 days.',
+      incoming:        'API keys do not need expiry for internal service accounts.',
       conflict_reason: 'Key rotation policy disagreement — project vs global security standard',
     })
 
@@ -374,21 +372,21 @@ describe('S-17.4 — Enrichment Response Shape', () => {
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
     expect(pendingRes.status).toBe(200)
 
-    const briefs = pendingRes.data?.conflict_briefs ?? pendingRes.data?.decisions ?? []
+    const briefs = pendingBriefs(pendingRes)
     const ourBrief = briefs.find(b => b.conflict_id === conflictId || b.conflict_key === key)
     expect(ourBrief).toBeTruthy()
   })
 
   test('step 2 — enrichment.analysis is a non-empty string (> 20 chars)', async () => {
     const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
-    const briefs = pendingRes.data?.conflict_briefs ?? pendingRes.data?.decisions ?? []
+    const briefs = pendingBriefs(pendingRes)
     const ourBrief = briefs.find(b => b.conflict_id === conflictId || b.conflict_key === key)
 
     if (!ourBrief?.enrichment) {
       // If enrichment is not attached (pending record lacks it), get it directly from governance route
       const enrichRes = await api(tokens.pe, PROJECT).post('/governance/enrich', {
-        existing: { content: 'All API keys must rotate every 90 days.', author: 'test-pe', confidence: 0.90 },
-        incoming: { content: 'API keys do not need expiry for internal service accounts.', author: 'test-engineer', confidence: 0.70 },
+        existing:        'All API keys must rotate every 90 days.',
+        incoming:        'API keys do not need expiry for internal service accounts.',
         conflict_reason: 'Key rotation policy disagreement',
       })
       expect(enrichRes.status).toBe(200)
@@ -404,8 +402,8 @@ describe('S-17.4 — Enrichment Response Shape', () => {
   test('step 3 — risks_if_approved is an Array with 2-4 non-empty string items', async () => {
     // Test the governance/enrich endpoint directly — this is what the pending brief enrichment is derived from.
     const enrichRes = await api(tokens.pe, PROJECT).post('/governance/enrich', {
-      existing: { content: 'All API keys must rotate every 90 days.', author: 'test-pe', confidence: 0.90 },
-      incoming: { content: 'API keys do not need expiry for internal service accounts.', author: 'test-engineer', confidence: 0.70 },
+      existing:        'All API keys must rotate every 90 days.',
+      incoming:        'API keys do not need expiry for internal service accounts.',
       conflict_reason: 'Key rotation policy disagreement',
     })
     expect(enrichRes.status).toBe(200)
@@ -421,8 +419,8 @@ describe('S-17.4 — Enrichment Response Shape', () => {
 
   test('step 4 — questions_for_reviewer is an Array with 2-3 non-empty string items', async () => {
     const enrichRes = await api(tokens.pe, PROJECT).post('/governance/enrich', {
-      existing: { content: 'All API keys must rotate every 90 days.', author: 'test-pe', confidence: 0.90 },
-      incoming: { content: 'API keys do not need expiry for internal service accounts.', author: 'test-engineer', confidence: 0.70 },
+      existing:        'All API keys must rotate every 90 days.',
+      incoming:        'API keys do not need expiry for internal service accounts.',
       conflict_reason: 'Key rotation policy disagreement',
     })
     expect(enrichRes.status).toBe(200)

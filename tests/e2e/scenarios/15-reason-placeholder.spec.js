@@ -239,7 +239,7 @@ describe('S-15.6 — POST /api/deviations/:id/action reason', () => {
     // Seed an entry in the global catalog for the deviation to reference
     const devTopic = 'security'
     const devKey   = uid('placeholder-dev-action-s15')
-    await activeEntry({ topic: devTopic, key: devKey, content: `Security standard for deviation action test ${devKey}.`, project: CATALOG })
+    await activeEntry({ topic: devTopic, key: devKey, content: `Security standard for deviation action test ${devKey}.`, project: CATALOG, globalCatalog: true })
 
     // Record a deviation against the catalog entry
     const res = await deviation({

@@ -27,15 +27,35 @@ import { tokens } from './jwt.js'
 export const uid = (prefix) => `${prefix}-${Date.now()}`
 
 /**
- * Creates an ACTIVE knowledge entry using the PA token.
+ * Creates an ACTIVE knowledge entry.
  *
- * PA writes land as ACTIVE directly — no approval step required.
- * Use as prerequisite for scenarios that need an existing ACTIVE entry.
+ * For regular projects: uses the PA token (dashboard path) — PA writes land as ACTIVE.
+ * For global catalog projects: uses the admin token (MCP/pg path) — admin bypasses the
+ * global-catalog DRAFT rule that enforces self-approval prevention (S-11.1).
  *
- * @param {{ topic: string, key: string, content: string, entityType?: string, project?: string }} opts
+ * @param {{ topic: string, key: string, content: string, entityType?: string, project?: string, globalCatalog?: boolean }} opts
  * @returns {Promise<{ topic: string, key: string, versionId: string }>}
  */
-export async function activeEntry({ topic, key, content, entityType = 'Decision', project = 'quorum-test-project' }) {
+export async function activeEntry({ topic, key, content, entityType = 'Decision', project = 'quorum-test-project', globalCatalog = false }) {
+  // Global catalog: use admin token + pg.js path — admin can seed ACTIVE entries in global catalogs.
+  // The admin token overrides author/author_role so entries are still attributed to test-pe (PA)
+  // for correct severity derivation (PA authority_score = 1.0).
+  if (globalCatalog) {
+    const client = api(tokens.admin, project)
+    const res = await client.post('/pg/versions', {
+      topic,
+      key,
+      summary:     content,
+      entity_type: entityType,
+      author:      'test-pe',
+      author_role: 'principal_architect',
+      confidence:  0.9,
+    })
+    if (res.status !== 201 && res.status !== 200) {
+      throw new Error(`seed.activeEntry (globalCatalog) failed: ${res.status} ${JSON.stringify(res.data)}`)
+    }
+    return { topic, key, versionId: res.data.version_id ?? res.data.inserted?.version_id }
+  }
   const client = api(tokens.pe, project)
   const res = await client.post('/api/knowledge', {
     topic,

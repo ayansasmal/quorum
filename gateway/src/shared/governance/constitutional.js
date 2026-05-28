@@ -22,7 +22,7 @@ const PLACEHOLDER_PATTERNS = [
   /^reason here$/i,
   /^add reason$/i,
   /^n\/a$/i,
-  /^na$/i,
+  /^(na\s*)+$/i,
   /^tbd$/i,
   /^placeholder$/i,
   /^test$/i,

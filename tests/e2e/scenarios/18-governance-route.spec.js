@@ -43,17 +43,9 @@ const PROJECT = 'quorum-test-project'
 
 // ─── Shared fixtures ───────────────────────────────────────────────────────────
 
-const EXISTING_NODE = {
-  content:    'Use JWT sessions. Stateless, no server-side state. Tokens are self-contained.',
-  author:     'test-pe',
-  confidence: 0.80,
-}
-
-const INCOMING_NODE = {
-  content:    'Use Redis-backed sessions. JWT cannot be revoked — security risk.',
-  author:     'test-engineer',
-  confidence: 0.65,
-}
+// Route expects plain content strings, not graph node objects.
+const EXISTING_NODE = 'Use JWT sessions. Stateless, no server-side state. Tokens are self-contained.'
+const INCOMING_NODE = 'Use Redis-backed sessions. JWT cannot be revoked — security risk.'
 
 const CONFLICT_REASON = 'Both specify session strategy for the same service context'
 
@@ -292,10 +284,10 @@ describe('S-18.4 — Overlong Input Sanitization', () => {
   // A 2500-char input must be silently truncated — not cause an error.
   const LONG_STRING = 'A'.repeat(2500)
 
-  test('step 1 — 2500-char existing.content to detect-conflict → 200 (not an error)', async () => {
+  test('step 1 — 2500-char existing string to detect-conflict → 200 (not an error)', async () => {
     const res = await api(tokens.pe, PROJECT).post('/governance/detect-conflict', {
-      existing: { content: LONG_STRING, author: 'test-pe',       confidence: 0.80 },
-      incoming: { content: 'Normal incoming content.', author: 'test-engineer', confidence: 0.65 },
+      existing: LONG_STRING,
+      incoming: 'Normal incoming content.',
     })
     expect(res.status).toBe(200)
     // contradicts field proves the LLM call completed on the truncated prompt

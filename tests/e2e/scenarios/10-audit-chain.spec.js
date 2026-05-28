@@ -306,4 +306,6 @@ describe('S-10.8 — Lineage', () => {
     expect(res.data.entries).toHaveLength(0)
   })
 
+}) // S-10.8 — Lineage
+
 }) // S-10 — Audit Chain Integrity

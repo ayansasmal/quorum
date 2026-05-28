@@ -31,17 +31,22 @@ import { writeAuditEntry } from './secondary.js'
  */
 export async function writeGovernanceAudit(pool, entry) {
   return writeAuditEntry(pool, {
-    topic:       '_governance',
-    key:         entry.action,
-    actor:       entry.actor,
-    actor_type:  entry.actor_type,
-    action:      entry.action,
-    project:     entry.project ?? null,
-    from:        entry.from    ?? null,
-    to:          entry.to      ?? null,
-    reason:      entry.reason,
-    timestamp:   new Date().toISOString(),
+    operation:    'GOVERNANCE',
+    tool:         entry.action,
+    author:       entry.actor,
+    author_role:  entry.actor_type ?? 'admin',
+    topic:        '_governance',
+    key:          entry.action,
+    actor:        entry.actor,
+    actor_type:   entry.actor_type,
+    action:       entry.action,
+    project:      entry.project ?? null,
+    from:         entry.from    ?? null,
+    to:           entry.to      ?? null,
+    reason:       entry.reason,
+    timestamp:    new Date().toISOString(),
     triggered_by: 'governance_endpoint',
+    outcome_json: { action: entry.action, to: entry.to ?? null, from: entry.from ?? null },
     ...entry.extra,
   })
 }

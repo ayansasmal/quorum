@@ -141,19 +141,23 @@ export function expiredToken(sub, extra = {}) {
  * Produces a tampered JWT: valid header and payload, but corrupted signature.
  * The gateway's ES256 verify step will reject this with 401.
  *
- * Modifies the last character of the base64url-encoded signature segment so the
- * bytes are syntactically valid base64url but the ECDSA verification fails.
+ * Modifies a middle character of the base64url-encoded signature to reliably
+ * corrupt ECDSA data bytes (avoids the padding region at the end of P-256
+ * signatures where the last char's low 4 bits are always zero-padding).
  *
  * @param {string} validToken - A valid JWT to tamper with
  * @returns {string} JWT with invalidated signature
  */
 export function buildTamperedToken(validToken) {
   const parts = validToken.split('.')
-  // Flip the last character of the signature segment (A→B, B→C, etc.)
-  const sig     = parts[2]
-  const lastChar = sig[sig.length - 1]
-  const flipped  = lastChar === 'A' ? 'B' : 'A'
-  parts[2] = sig.slice(0, -1) + flipped
+  // Corrupt a character in the middle of the signature (well clear of padding).
+  // P-256 ECDSA sigs are 64 bytes → 86 base64url chars; position 40 is safely
+  // in the middle where all 6 bits encode real signature data.
+  const sig    = parts[2]
+  const midIdx = 40
+  const midChar  = sig[midIdx]
+  const flipped  = midChar === 'A' ? 'Z' : 'A'
+  parts[2] = sig.slice(0, midIdx) + flipped + sig.slice(midIdx + 1)
   return parts.join('.')
 }
 

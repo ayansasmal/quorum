@@ -322,11 +322,12 @@ describe('S-21.5 — Status authority on /pg/versions', () => {
   test('step 1 — PA write without status field → ACTIVE', async () => {
     const key = uid('status-pa-s21')
     const res = await api(tokens.pe, PROJECT).post('/pg/versions', {
-      topic:       'auth',
+      topic:        'auth',
       key,
-      summary:     `Status authority test — PA write, no status in body. Key: ${key}`,
-      entity_type: 'Decision',
-      confidence:  0.85,
+      summary:      `Status authority test — PA write, no status in body. Key: ${key}`,
+      entity_type:  'Decision',
+      confidence:   0.85,
+      triggered_by: 'mcp',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('ACTIVE')
@@ -335,11 +336,12 @@ describe('S-21.5 — Status authority on /pg/versions', () => {
   test('step 2 — engineer write without status field → DRAFT', async () => {
     const key = uid('status-eng-s21')
     const res = await api(tokens.engineer, PROJECT).post('/pg/versions', {
-      topic:       'auth',
+      topic:        'auth',
       key,
-      summary:     `Status authority test — engineer write, no status in body. Key: ${key}`,
-      entity_type: 'Decision',
-      confidence:  0.70,
+      summary:      `Status authority test — engineer write, no status in body. Key: ${key}`,
+      entity_type:  'Decision',
+      confidence:   0.70,
+      triggered_by: 'mcp',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')
@@ -350,12 +352,13 @@ describe('S-21.5 — Status authority on /pg/versions', () => {
     // a PA write to DRAFT by including status:'DRAFT' in the payload.
     const key = uid('status-ignore-s21')
     const res = await api(tokens.pe, PROJECT).post('/pg/versions', {
-      topic:       'auth',
+      topic:        'auth',
       key,
-      summary:     `Status authority ignore test — PA sends DRAFT in body. Key: ${key}`,
-      entity_type: 'Decision',
-      confidence:  0.85,
-      status:      'DRAFT',
+      summary:      `Status authority ignore test — PA sends DRAFT in body. Key: ${key}`,
+      entity_type:  'Decision',
+      confidence:   0.85,
+      triggered_by: 'mcp',
+      status:       'DRAFT',
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('ACTIVE')
@@ -370,6 +373,7 @@ describe('S-21.5 — Status authority on /pg/versions', () => {
       summary:                `Status authority PCC flag test. Key: ${key}`,
       entity_type:            'Decision',
       confidence:             0.85,
+      triggered_by:           'mcp',
       pending_conflict_check: true,
     })
     expect(res.status).toBe(201)

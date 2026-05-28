@@ -721,7 +721,7 @@ router.get('/drafts', async (req, res, next) => {
     if (!qProjectId) return
 
     const { rows } = await pool.query(
-      `SELECT version_id, topic, key, entity_type, confidence, author, author_role,
+      `SELECT version_id, version, topic, key, entity_type, confidence, author, author_role,
               tags, summary AS content, created_at, status
        FROM knowledge_versions
        WHERE q_project_id = $1 AND status = 'DRAFT'
@@ -763,10 +763,11 @@ router.post('/review/:conflictId', async (req, res, next) => {
   }
 
   try {
-    // Constitutional Rule 3: note required
+    // Constitutional Rule 3: note required (min 10 chars, no placeholder patterns)
     enforceReasonRequired(note, 'review')
   } catch (err) {
-    return res.status(400).json({ error: 'note_required', message: err.message })
+    // Pass to global error handler so ConstitutionalViolation → { rule, message }
+    return next(err)
   }
 
   try {
@@ -1177,7 +1178,9 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
       triggered_by: 'dashboard',
       content_hash: contentHash,
       version:      nextVer,
-      status:       req.user.role === 'principal_architect' ? 'ACTIVE' : 'DRAFT',
+      // Global catalog writes always land as DRAFT — self-approval guard requires a second PA.
+      // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11.1 global catalog write is DRAFT
+      status:       (req.user.role === 'principal_architect' && projectConfig?.is_global !== true) ? 'ACTIVE' : 'DRAFT',
     }
 
     const inserted = await insertVersion(pool, record)
@@ -1272,7 +1275,7 @@ router.post('/knowledge/:topic/:key/promote', peWriteLimit, async (req, res, nex
       version_impact:  { versions_created: [], versions_superseded: [] },
     })
 
-    res.json({ promoted: true, version: draft.version, version_id: draftVersionId, topic, key })
+    res.json({ promoted: true, status: 'ACTIVE', version: draft.version, version_id: draftVersionId, topic, key })
   } catch (err) {
     next(err)
   }

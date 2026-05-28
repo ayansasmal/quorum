@@ -273,4 +273,6 @@ describe('S-08.5 — Validation Guards', () => {
     expect(res.data.error).toBe('not_found')
   })
 
+}) // S-08.5 — Validation Guards
+
 }) // S-08 — Confidence Endorsement

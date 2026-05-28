@@ -56,6 +56,14 @@ services:
       - AWS_ENDPOINT_URL=http://host.docker.internal:4566
       # Mark as test env — keeps dev-only features enabled without production guards.
       - NODE_ENV=test
+      # Redirect gateway LLM calls (/governance/*) to the local mock service.
+      # Mirrors the Graphiti override above — the gateway checks OPENAI_API_KEY first;
+      # without this the governance tests all get 503 LLM_NOT_CONFIGURED.
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+    depends_on:
+      mock-openai:
+        condition: service_healthy
     extra_hosts:
       # Ensures host.docker.internal resolves correctly on Linux hosts too.
       - "host.docker.internal:host-gateway"

@@ -64,7 +64,7 @@ describe('S-04.1 — Deviation Recording', () => {
 
   beforeAll(async () => {
     stdKey = uid('tls-standard')
-    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
   })
 
   test('step 1 — record deviation from project against catalog entry → recorded, is_new=true, severity set', async () => {
@@ -130,7 +130,7 @@ describe('S-04.2 — Validation Guards', () => {
   beforeAll(async () => {
     // A real catalog entry — used for the "no ACTIVE version" variant indirectly
     realKey = uid('mtls-standard')
-    await activeEntry({ topic, key: realKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic, key: realKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
   })
 
   test('step 1 — catalog not in project globals → HTTP 200, status=not_linked', async () => {
@@ -185,7 +185,7 @@ describe('S-04.3 — Accept Deviation', () => {
 
   beforeAll(async () => {
     stdKey = uid('circuit-breaker-standard')
-    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
     // Record the deviation as engineer
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/api/deviations', {
@@ -244,7 +244,7 @@ describe('S-04.4 — Deny Deviation', () => {
 
   beforeAll(async () => {
     stdKey = uid('parameterised-queries')
-    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/api/deviations', {
       catalog_id:  CATALOG,
@@ -304,7 +304,7 @@ describe('S-04.5 — Defer Deviation', () => {
 
   beforeAll(async () => {
     stdKey = uid('structured-logging')
-    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG })
+    await activeEntry({ topic, key: stdKey, content: STD_CONTENT, project: CATALOG, globalCatalog: true })
     const client = api(tokens.engineer, PROJECT)
     const res = await client.post('/api/deviations', {
       catalog_id:  CATALOG,
@@ -378,8 +378,8 @@ describe('S-04.6 — Batch Recording', () => {
     keyA = uid('jwt-algorithm-standard')
     keyB = uid('refresh-token-rotation')
     await Promise.all([
-      activeEntry({ topic, key: keyA, content: CONTENT_A, project: CATALOG }),
-      activeEntry({ topic, key: keyB, content: CONTENT_B, project: CATALOG }),
+      activeEntry({ topic, key: keyA, content: CONTENT_A, project: CATALOG, globalCatalog: true }),
+      activeEntry({ topic, key: keyB, content: CONTENT_B, project: CATALOG, globalCatalog: true }),
     ])
   })
 
@@ -473,6 +473,7 @@ describe('S-04.7 — Deviations Governance Dashboard', () => {
       key,
       content: 'All service-to-service communication must use TLS 1.3 or higher.',
       project: 'quorum-test-catalog',
+      globalCatalog: true,
     })
 
     // 2. Record deviation from the test project against this catalog entry.
@@ -637,6 +638,7 @@ describe('S-04.8 — Knowledge Denial Hint Badge', () => {
       key:     s048Key,
       content: 'Authentication tokens must be rotated every 24 hours in production.',
       project: 'quorum-test-catalog',
+      globalCatalog: true,
     })
 
     // 2. Record a deviation from the test project against this standard.
@@ -700,5 +702,7 @@ describe('S-04.8 — Knowledge Denial Hint Badge', () => {
       await expect(badge).toHaveAttribute('title', '1 project has denied this standard')
     })
   })
+
+}) // S-04.8 — Knowledge Denial Hint Badge
 
 }) // S-04 — Deviation Governance
