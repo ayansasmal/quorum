@@ -19,6 +19,12 @@
 
 import { defineConfig, devices } from '@playwright/test'
 
+// Default to localhost:3002 so browser test skip guards pass without manual env setup.
+// Docker mode sets QUORUM_DASHBOARD_URL=http://dashboard (non-localhost) which skips webServer.
+process.env.QUORUM_DASHBOARD_URL ??= 'http://localhost:3002'
+
+const isDashboardLocal = process.env.QUORUM_DASHBOARD_URL.startsWith('http://localhost')
+
 export default defineConfig({
   testDir:    'tests/e2e/scenarios',
   testMatch:  '**/*.spec.js',
@@ -73,6 +79,25 @@ export default defineConfig({
         : {}),
     },
   },
+
+  // Auto-start the dashboard Vite dev server when running locally.
+  // In Docker mode (QUORUM_DASHBOARD_URL=http://dashboard), the container is already
+  // running — webServer would fail trying to bind port 3002 inside a non-local env.
+  // reuseExistingServer means iterative local runs don't restart an already-hot server.
+  ...(isDashboardLocal ? {
+    webServer: {
+      command: 'npm --prefix dashboard run dev -- --port 3002 --strictPort',
+      url:     'http://localhost:3002',
+      reuseExistingServer: true,
+      timeout: 60_000,
+      stdout:  'ignore',
+      stderr:  'pipe',
+      env: {
+        ...process.env,
+        VITE_GATEWAY_URL: process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001',
+      },
+    },
+  } : {}),
 
   // T0 infrastructure probes run before any test.
   // Defined in tests/e2e/helpers/setup.js — must export a default function.
