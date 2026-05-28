@@ -107,6 +107,11 @@ function requirePrincipalArchitect(req, res) {
  * @returns {Promise<string | null>}
  */
 async function resolveQProjectId(req, res) {
+  // E2E: tests/e2e/scenarios/05-rbac-boundary.spec.js — S-05.10 is_public non-member enforcement
+  if (req.user.access_denied) {
+    res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' })
+    return null
+  }
   const pool = req.app.locals.pool
   const header = req.user.project ?? 'default'
   // Fast path: header is already a q_project_id (post-Phase-3 MCP clients)
@@ -1730,6 +1735,9 @@ const PA_AUTHORED_FLOOR = 0.70
  */
 router.post('/deviations', async (req, res, next) => {
   try {
+    if (req.user.access_denied) {
+      return res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' })
+    }
     const pool = req.app.locals.pool
     const { catalog_id, topic, key, description, evidence, source = 'agent', author = 'unknown' } = req.body ?? {}
 
@@ -1844,6 +1852,9 @@ router.post('/deviations', async (req, res, next) => {
  */
 router.post('/deviations/batch', async (req, res, next) => {
   try {
+    if (req.user.access_denied) {
+      return res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' })
+    }
     const pool = req.app.locals.pool
     const { deviations } = req.body ?? {}
 
@@ -1923,6 +1934,9 @@ router.post('/deviations/batch', async (req, res, next) => {
  */
 router.get('/deviations', async (req, res, next) => {
   try {
+    if (req.user.access_denied) {
+      return res.status(403).json({ error: 'forbidden', message: 'Not a member of this project' })
+    }
     const pool = req.app.locals.pool
     const qProjectId = await getProjectByGroupId(pool, req.user.project)
     if (!qProjectId) {

@@ -95,10 +95,12 @@ describe('S-07.1 — UNCERTIFIED Gates', () => {
     expect(Array.isArray(res.data.catalogs)).toBe(true)
   })
 
-  test('step 3 — non-existent project returns 404', async () => {
+  test('step 3 — non-existent project returns 403', async () => {
+    // Non-existent project: verify-jwt cannot load config → access_denied=true (fail-safe).
+    // resolveQProjectId returns 403 before the 404 path to prevent project enumeration.
     const client = api(tokens.pe, 'project-that-does-not-exist')
     const res = await client.get('/api/conformance')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(403)
   })
 })
 

@@ -18,6 +18,7 @@
  *   S-05.7  Cross-project role context — same JWT yields different role per project (NEGATIVE)
  *   S-05.8  Concurrent RBAC race — authorized + unauthorized request simultaneously (NEGATIVE)
  *   S-05.9  Role update + cache invalidation — new role reflected immediately (ALTERNATE)
+ *   S-05.10 is_public enforcement — non-member of private project denied on all /api routes (NEGATIVE)
  *
  * All 8 test roles exercised:
  *   test-pe (principal_architect), test-architect (architect),
@@ -88,16 +89,17 @@ test.describe('S-05.1 — knowledge create: DRAFT/ACTIVE split + confidence floo
     })
   }
 
-  test('step 2 — writing to an unknown project returns 404', async () => {
-    // Project not found in DDB → gateway returns 404 after input validation passes.
-    // entity_type is required by validateKnowledgeInput (runs before project lookup).
+  test('step 2 — writing to an unknown project returns 403', async () => {
+    // Non-existent project: verify-jwt sets access_denied=true (fail-safe — cannot load config
+    // → treats as private). resolveQProjectId returns 403 before any DB lookup.
+    // This prevents project enumeration (leaking 404 vs 403 would reveal project existence).
     const res = await api(tokens.pe, 'quorum-nonexistent-project-xyz').post('/api/knowledge', {
       topic:       'rbac',
       key:         uid('s051-xproj'),
       content:     'Cross-project access test — unknown project.',
       entity_type: 'Decision',
     })
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(403)
   })
 })
 
@@ -301,8 +303,10 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
   // quorum-test-catalog has is_global:true. GLOBAL_WRITE_ROLES = [architect,
   // principal_architect, product_owner, compliance_officer].
   //
-  // Blocked: roles not in GLOBAL_WRITE_ROLES (engineer, senior_engineer, director,
-  // vp_engineering) AND non-members (any user with role:null).
+  // Non-members of the catalog (engineer, senior_engineer, director, vp_engineering)
+  // are blocked at the access_denied gate (403) before reaching enforceGlobalWriteAuthority.
+  // The GLOBAL_WRITE_AUTHORITY constitutional rule fires only when a catalog *member* has
+  // a role not in GLOBAL_WRITE_ROLES — enforced at the unit test level (shared-governance.test.js).
   //
   // Allowed: architect (catalog member → DRAFT), product_owner (catalog member → DRAFT),
   //          compliance_officer (catalog member → DRAFT), PA (catalog member → DRAFT, S-11.1).
@@ -315,16 +319,17 @@ test.describe('S-05.4 — review (PE-only) + global write authority (GLOBAL_WRIT
   ]
 
   for (const [role, token] of globalBlockedTokens) {
-    test(`step 3 — ${role} cannot write to global catalog (400 GLOBAL_WRITE_AUTHORITY)`, async () => {
-      // entity_type required by validateKnowledgeInput — must pass validation so
-      // enforceGlobalWriteAuthority fires (runs after validation in the route).
+    test(`step 3 — ${role} (non-member) cannot write to global catalog → 403`, async () => {
+      // Non-members: access_denied=true fires in resolveQProjectId before any route logic.
+      // enforceGlobalWriteAuthority is not reached — the access gate is the first barrier.
       const res = await catalogApi(token).post('/api/knowledge', {
         topic:       'security',
         key:         uid(`s054-${role.replace(/_/g, '-')}-block`),
-        content:     `Global write attempt by ${role} — should be GLOBAL_WRITE_AUTHORITY`,
+        content:     `Global write attempt by ${role} — blocked as non-member`,
         entity_type: 'Decision',
       })
-      assertConstitutionalViolation(res, 'GLOBAL_WRITE_AUTHORITY')
+      expect(res.status).toBe(403)
+      expect(res.data.error).toBe('forbidden')
     })
   }
 
@@ -796,5 +801,52 @@ test.describe('S-05.9 — role update: new role reflected immediately (Redis cac
     // Revocation is also immediate — no TTL-based delay before the restriction takes effect.
     const res = await api(tokens.engineer, PROJECT).get('/api/portfolio')
     expect(res.status).toBe(403)
+  })
+})
+
+// ─── S-05.10  is_public enforcement: non-member blocked on all /api/* routes ──
+
+/**
+ * S-05.10 — Non-member of a private project is denied on every /api/* dashboard route.
+ *
+ * test-engineer is a member of quorum-test-project but NOT quorum-test-catalog.
+ * quorum-test-catalog has no is_public:true → defaults to private.
+ *
+ * verify-jwt.js sets access_denied:true when the JWT sub is not in the project's
+ * member list and the project is not public. resolveQProjectId() in dashboard.js
+ * checks this flag and short-circuits with 403 before any DB query runs.
+ *
+ * This tests that the enforcement gap (access_denied only enforced on pg/* routes
+ * before this fix) is closed for all dashboard BFF routes.
+ *
+ * GAP-002 — P0 gap closed by adding access_denied guard to resolveQProjectId().
+ */
+test.describe('S-05.10 — is_public enforcement: non-member denied on all /api routes', () => {
+  /**
+   * Routes that formerly had no access_denied check before the GAP-002 fix.
+   * Each returns 403 when test-engineer (not a catalog member) sends
+   * X-Quorum-Project: quorum-test-catalog.
+   */
+  const outOfScopeRoutes = [
+    ['GET', '/api/knowledge'],
+    ['GET', '/api/drafts'],
+    ['GET', '/api/stats'],
+    ['GET', '/api/deviations'],
+    ['GET', '/api/conformance'],
+  ]
+
+  for (const [method, path] of outOfScopeRoutes) {
+    test(`${method} ${path} → 403 for non-member of private project`, async () => {
+      const res = await api(tokens.engineer, CATALOG)[method.toLowerCase()](path)
+      expect(res.status).toBe(403)
+      expect(res.data.error).toBe('forbidden')
+    })
+  }
+
+  test('same routes accessible to catalog member (test-architect) → 200', async () => {
+    // Positive guard: verifies the fix does not over-block legitimate members.
+    // test-architect IS a member of quorum-test-catalog with role architect.
+    const res = await api(tokens.architect, CATALOG).get('/api/knowledge')
+    expect(res.status).toBe(200)
   })
 })
