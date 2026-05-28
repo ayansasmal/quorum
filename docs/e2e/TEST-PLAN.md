@@ -2,7 +2,7 @@
 
 **Version:** 2.1 — May 2026
 **Scope:** Quorum v0.4 · 21 journeys · 36 scenarios
-**Suite OwnScore:** 3402 pts | **10% gate:** 340 pts | **5% gate:** 170 pts
+**Suite OwnScore:** 3422 pts | **10% gate:** 342 pts | **5% gate:** 171 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
 > **For agentic workers (CI, coding agents, deployment pipelines):**
@@ -214,14 +214,14 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-02.8 | J02 | 5 | 4 | 20 | Dev Experience | 1.0 | 1.0 | **20** | — | **20** | 🟡 |
 | S-03 | J03 | 20 | 2 | 40 | Functional | 1.5 | 1.5 | **90** | — | **90** | 🟡 |
 | S-04 | J04 | 37 | 2 | 74 | Functional | 1.5 | 1.5 | **167** | S-07 | **242** | 🟡 |
-| S-05.1 | J05 | 18 | 4 | 72 | Security ⛔ | 2.5 | 1.0 | **180** | S-05.2–5.8 | **950** | ⛔ |
+| S-05.1 | J05 | 18 | 4 | 72 | Security ⛔ | 2.5 | 1.0 | **180** | S-05.2–5.8 | **970** | ⛔ |
 | S-05.2 | J05 | 12 | 4 | 48 | Security ⛔ | 2.5 | 1.0 | **120** | — | **120** | ⛔ |
 | S-05.3 | J05 | 12 | 4 | 48 | Security ⛔ | 2.5 | 1.0 | **120** | — | **120** | ⛔ |
 | S-05.4 | J05 | 15 | 4 | 60 | Security ⛔ | 2.5 | 1.0 | **150** | — | **150** | ⛔ |
 | S-05.5 | J05 | 15 | 4 | 60 | Security ⛔ | 2.5 | 1.0 | **150** | — | **150** | ⛔ |
 | S-05.6 | J05 | 15 | 3 | 45 | Security ⛔ | 2.0 | 1.0 | **90** | — | **90** | ⛔ |
 | S-05.7 | J05 | 5 | 4 | 20 | Security ⛔ | 2.5 | 2.0 | **100** | — | **100** | ⛔ |
-| S-05.8 | J05 | 2 | 4 | 8 | Security ⛔ | 2.5 | 2.0 | **40** | — | **40** | ⛔ |
+| S-05.8 | J05 | 3 | 4 | 12 | Security ⛔ | 2.5 | 2.0 | **60** | — | **60** | ⛔ |
 | S-05.9 | J05 | 5 | 3 | 15 | Security ⛔ | 2.5 | 2.0 | **75** | — | **75** | ⛔ |
 | S-06 | J06 | 15 | 3 | 45 | Governance ⛔ | 2.0 | 1.5 | **135** | — | **135** | ⛔ |
 | S-07 | J07 | 25 | 2 | 50 | Observability | 1.0 | 1.5 | **75** | — | **75** | 🟡 |
@@ -239,10 +239,10 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-19 | J19 | 15 | 3 | 45 | Security ⛔ | 2.5 | 1.0 | **113** | — | **113** | ⛔ |
 | S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
 | S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
-| **Total** | | | | **1274** | | | | **3402** | | | |
+| **Total** | | | | **1278** | | | | **3422** | | | |
 
-> **W column sum = 1274** (was 1231 before adding S-05.7/5.8/5.9 negative scenarios).
-> **OwnScore total = 3402.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1278** (was 1231 before S-05.7/5.8/5.9; S-05.8 leaf 2→3 after split).
+> **OwnScore total = 3422.** The C × D multipliers reflect severity and detection lag on top of frequency.
 
 ---
 
@@ -254,7 +254,7 @@ before marking the issue resolved.
 
 | Rank | Scenario | FailureCost | Gate | Primary pillar | Root for |
 |------|----------|------------|------|----------------|---------|
-| 1 | **S-05.1** RBAC Knowledge Create | **950** | ⛔ | Security | S-05.2–5.8 |
+| 1 | **S-05.1** RBAC Knowledge Create | **970** | ⛔ | Security | S-05.2–5.8 |
 | 2 | **S-15** Reason / Placeholder Rejection | **694** | ⛔ | Governance | S-03, S-04, S-09, S-13 |
 | 3 | **S-02.2** Conflict Detection | **415** | ⛔ | Governance | S-06, S-17 |
 | 4 | **S-10** Audit Chain Integrity | **388** | ⛔ | Governance | S-02.1, S-02.2, S-02.3 |
@@ -279,7 +279,7 @@ before marking the issue resolved.
 | 23 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
 | 24 | **S-13** Config Management | **45** | 🟡 | Operational | — |
 | 25 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
-| 26 | **S-05.8** RBAC Concurrent Race | **40** | ⛔ | Security | — |
+| 26 | **S-05.8** RBAC Concurrent Race | **60** | ⛔ | Security | — |
 | 27 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
 | 28 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
 | 29 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |

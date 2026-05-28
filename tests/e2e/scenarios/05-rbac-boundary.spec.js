@@ -628,7 +628,6 @@ test.describe('S-05.7 — cross-project role context: same JWT yields different 
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('DRAFT')
-    expect(res.data.status).not.toBe('ACTIVE')
   })
 
   test('step 3 — test-pe (engineer in peer-project) cannot promote → 403', async () => {
@@ -677,15 +676,19 @@ test.describe('S-05.8 — concurrent RBAC race: authorized + unauthorized simult
    * and an authorized user (PA) fire the same PA-only action concurrently, the
    * authorization middleware must evaluate each request independently in parallel.
    *
-   * This test falsifies the scenario where a race condition could let the engineer's
-   * request "slip through" because the gateway was processing the PA's request at the
-   * same time. The authorization gate must hold under concurrent load.
+   * The concurrent call is made once in beforeAll so the two HTTP responses are
+   * available to all three steps as independent assertions. Each step reports a
+   * distinct failure mode: engineer denied, PA succeeded, no state corruption.
    */
 
   /** @type {string} */
   let raceTopic
   /** @type {string} */
   let raceKey
+  /** @type {import('axios').AxiosResponse} */
+  let engineerRaceRes
+  /** @type {import('axios').AxiosResponse} */
+  let peRaceRes
 
   test.beforeAll(async () => {
     raceTopic = 'rbac-race'
@@ -696,10 +699,8 @@ test.describe('S-05.8 — concurrent RBAC race: authorized + unauthorized simult
       content: 'S-05.8 concurrent RBAC race — seeded by engineer; PA and engineer promote simultaneously.',
       project: PROJECT,
     })
-  })
-
-  test('step 1 — engineer and PA promote simultaneously; engineer always denied, PA always succeeds', async () => {
-    const [engineerRes, peRes] = await Promise.all([
+    // Both requests fire in the same event-loop tick — true concurrent authorization test.
+    ;[engineerRaceRes, peRaceRes] = await Promise.all([
       api(tokens.engineer, PROJECT).post(
         `/api/knowledge/${raceTopic}/${raceKey}/promote`,
         { note: 'engineer concurrent promote attempt — S-05.8 authorization race test.' },
@@ -709,21 +710,27 @@ test.describe('S-05.8 — concurrent RBAC race: authorized + unauthorized simult
         { note: 'PA concurrent promote — must win the authorization check in S-05.8.' },
       ),
     ])
-    // Authorization gate must not be affected by concurrent load: engineer always 403
-    expect(engineerRes.status).toBe(403)
-    expect(engineerRes.data.error).toBe('forbidden')
-    // PA must always succeed regardless of concurrent engineer request
-    expect(peRes.status).toBe(200)
-    expect(peRes.data.promoted).toBe(true)
   })
 
-  test('step 2 — after concurrent race, exactly one ACTIVE version exists (no state corruption)', async () => {
+  test('step 1 — engineer concurrent promote denied → 403 forbidden', () => {
+    // Authorization gate must hold regardless of concurrent PA request in flight.
+    expect(engineerRaceRes.status).toBe(403)
+    expect(engineerRaceRes.data.error).toBe('forbidden')
+  })
+
+  test('step 2 — PA concurrent promote succeeds → 200 promoted', () => {
+    // Authorized request must not be degraded by the concurrent unauthorized request.
+    expect(peRaceRes.status).toBe(200)
+    expect(peRaceRes.data.promoted).toBe(true)
+  })
+
+  test('step 3 — exactly one ACTIVE version after race (no state corruption)', async () => {
     const histRes = await api(tokens.pe, PROJECT).get(
       `/pg/versions/${raceTopic}/${raceKey}/history`,
     )
     expect(histRes.status).toBe(200)
     const activeVersions = histRes.data.filter(v => v.status === 'ACTIVE')
-    // Race must not create duplicate ACTIVE or leave zero ACTIVE
+    // Race must not create duplicate ACTIVE or leave zero ACTIVE versions.
     expect(activeVersions).toHaveLength(1)
   })
 })
