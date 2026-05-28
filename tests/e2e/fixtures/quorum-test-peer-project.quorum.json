@@ -1,0 +1,42 @@
+{
+  "group_id": "quorum-test-peer-project",
+  "project": "Quorum E2E Peer Project",
+  "owner": "test-architect",
+  "is_global": false,
+  "is_public": false,
+  "hierarchy": {
+    "level": "service",
+    "display_name": "E2E Peer Service",
+    "criticality": 2
+  },
+  "members": [
+    {
+      "name": "Test Architect",
+      "github_username": "test-architect",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
+      "name": "Test PE",
+      "github_username": "test-pe",
+      "role": "engineer",
+      "base_confidence": 0.70,
+      "team": "backend"
+    },
+    {
+      "name": "Test Senior",
+      "github_username": "test-senior",
+      "role": "senior_engineer",
+      "base_confidence": 0.75,
+      "team": "backend"
+    },
+    {
+      "name": "Test Engineer",
+      "github_username": "test-engineer",
+      "role": "engineer",
+      "base_confidence": 0.70,
+      "team": "backend"
+    }
+  ]
+}

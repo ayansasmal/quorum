@@ -15,6 +15,9 @@
  *   S-05.4  Review (PE-only) + global catalog write (GLOBAL_WRITE_AUTHORITY constitutional boundary)
  *   S-05.5  Deviation action (DEVIATION_ACTION_AUTHORITY) + forget / deprecate gate (PE-only)
  *   S-05.6  Portfolio access (PA/director/vp) + admin gate (is_admin only) + missing project header
+ *   S-05.7  Cross-project role context — same JWT yields different role per project (NEGATIVE)
+ *   S-05.8  Concurrent RBAC race — authorized + unauthorized request simultaneously (NEGATIVE)
+ *   S-05.9  Role update + cache invalidation — new role reflected immediately (ALTERNATE)
  *
  * All 8 test roles exercised:
  *   test-pe (principal_architect), test-architect (architect),
@@ -31,6 +34,11 @@
  *   - "forget" (MCP deprecation_requested path) is MCP-layer behaviour tested in S-03.
  *     At HTTP level: non-PA → 403 on POST /api/knowledge/:t/:k/deprecate; PA → 200 DEPRECATED.
  *   - ConstitutionalViolation errors return HTTP 400 with { rule, message } body.
+ *   - S-05.7 uses quorum-test-peer-project where test-architect is PA and test-pe is engineer.
+ *     This fixture deliberately inverts the roles from quorum-test-project to make cross-project
+ *     role isolation falsifiable: the same JWT must resolve to different roles in different projects.
+ *   - S-05.9 uses POST /config/update-role to change test-engineer's role mid-test.
+ *     afterAll always resets test-engineer to 'engineer' so the suite is idempotent across reruns.
  */
 
 import { test, expect } from '@playwright/test'
@@ -40,8 +48,10 @@ import { uid, activeEntry, draftEntry, conflict, deviation } from '../helpers/se
 
 test.describe.configure({ mode: 'serial' })
 
-const PROJECT = 'quorum-test-project'
-const CATALOG = 'quorum-test-catalog'
+const PROJECT      = 'quorum-test-project'
+const CATALOG      = 'quorum-test-catalog'
+/** Role-reversed peer project: test-architect is PA here; test-pe is engineer. */
+const PEER_PROJECT = 'quorum-test-peer-project'
 
 // ─── S-05.1  Knowledge create — all roles, outcome matrix ────────────────────
 
@@ -561,5 +571,217 @@ test.describe('S-05.6 — portfolio access + admin gate + missing project header
       validateStatus: () => true,
     })
     expect(res.status).toBe(400)
+  })
+})
+
+// ─── S-05.7  Cross-project role context (NEGATIVE) ───────────────────────────
+
+test.describe('S-05.7 — cross-project role context: same JWT yields different role per project', () => {
+  /**
+   * Role is NOT encoded in the JWT. The gateway resolves it from DDB + Redis cache
+   * keyed by (sub, group_id) on every request. The same ES256 token for test-pe yields:
+   *   - principal_architect in quorum-test-project (PA access — ACTIVE writes, promote)
+   *   - engineer            in quorum-test-peer-project (restricted — DRAFT writes, 403 on promote)
+   *
+   * This is the fundamental RBAC isolation contract: changing X-Quorum-Project changes
+   * the effective role, without any token change.
+   *
+   * @see tests/e2e/fixtures/quorum-test-peer-project.quorum.json
+   */
+
+  /** @type {string} */
+  let peerDraftKey
+
+  test.beforeAll(async () => {
+    peerDraftKey = uid('s057-peer-draft')
+    // test-engineer (engineer in peer-project) seeds the DRAFT so test-architect (PA) can promote it
+    const res = await api(tokens.engineer, PEER_PROJECT).post('/api/knowledge', {
+      topic:       'rbac-xproject',
+      key:         peerDraftKey,
+      content:     'S-05.7 cross-project role context test — seeded by engineer in peer-project.',
+      entity_type: 'Decision',
+    })
+    if (res.status !== 201) {
+      throw new Error(`S-05.7 beforeAll: peer DRAFT seed failed: ${res.status} ${JSON.stringify(res.data)}`)
+    }
+  })
+
+  test('step 1 — test-pe writing to test-project (PA) lands as ACTIVE', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/api/knowledge', {
+      topic:       'rbac-xproject',
+      key:         uid('s057-tp'),
+      content:     'S-05.7 test-pe in test-project (PA role) — must be ACTIVE.',
+      entity_type: 'Decision',
+    })
+    expect(res.status).toBe(201)
+    expect(res.data.status).toBe('ACTIVE')
+  })
+
+  test('step 2 — same test-pe JWT writing to peer-project (engineer) lands as DRAFT', async () => {
+    // test-pe has role:engineer in quorum-test-peer-project per fixture — not PA.
+    // Same JWT, different project header → knowledge must land as DRAFT.
+    const res = await api(tokens.pe, PEER_PROJECT).post('/api/knowledge', {
+      topic:       'rbac-xproject',
+      key:         uid('s057-pp'),
+      content:     'S-05.7 test-pe in peer-project (engineer role) — must be DRAFT.',
+      entity_type: 'Decision',
+    })
+    expect(res.status).toBe(201)
+    expect(res.data.status).toBe('DRAFT')
+    expect(res.data.status).not.toBe('ACTIVE')
+  })
+
+  test('step 3 — test-pe (engineer in peer-project) cannot promote → 403', async () => {
+    const res = await api(tokens.pe, PEER_PROJECT).post(
+      `/api/knowledge/rbac-xproject/${peerDraftKey}/promote`,
+      { note: 'test-pe trying to promote in peer-project as engineer — should be denied.' },
+    )
+    expect(res.status).toBe(403)
+    expect(res.data.error).toBe('forbidden')
+  })
+
+  test('step 4 — test-architect (architect in test-project) cannot promote there → 403', async () => {
+    // test-architect is only architect (not PA) in quorum-test-project — promote denied.
+    const tpDraftKey = uid('s057-tp-arch-attempt')
+    await draftEntry({
+      topic:   'rbac-xproject',
+      key:     tpDraftKey,
+      content: 'S-05.7 DRAFT seeded for architect promote attempt in test-project.',
+      project: PROJECT,
+    })
+    const res = await api(tokens.architect, PROJECT).post(
+      `/api/knowledge/rbac-xproject/${tpDraftKey}/promote`,
+      { note: 'test-architect (architect, not PA) promoting in test-project — should fail.' },
+    )
+    expect(res.status).toBe(403)
+    expect(res.data.error).toBe('forbidden')
+  })
+
+  test('step 5 — test-architect (PA in peer-project) CAN promote peer DRAFT → 200', async () => {
+    // The same test-architect JWT that cannot promote in test-project (architect role)
+    // CAN promote in peer-project (PA role). This is the cross-project role isolation proof.
+    const res = await api(tokens.architect, PEER_PROJECT).post(
+      `/api/knowledge/rbac-xproject/${peerDraftKey}/promote`,
+      { note: 'test-architect (PA in peer-project) promoting — must succeed with 10+ char note.' },
+    )
+    expect(res.status).toBe(200)
+    expect(res.data.promoted).toBe(true)
+  })
+})
+
+// ─── S-05.8  Concurrent RBAC race: authorized + unauthorized simultaneous ─────
+
+test.describe('S-05.8 — concurrent RBAC race: authorized + unauthorized simultaneous request', () => {
+  /**
+   * RBAC checks are per-request, not per-session. When an unauthorized user (engineer)
+   * and an authorized user (PA) fire the same PA-only action concurrently, the
+   * authorization middleware must evaluate each request independently in parallel.
+   *
+   * This test falsifies the scenario where a race condition could let the engineer's
+   * request "slip through" because the gateway was processing the PA's request at the
+   * same time. The authorization gate must hold under concurrent load.
+   */
+
+  /** @type {string} */
+  let raceTopic
+  /** @type {string} */
+  let raceKey
+
+  test.beforeAll(async () => {
+    raceTopic = 'rbac-race'
+    raceKey   = uid('s058')
+    await draftEntry({
+      topic:   raceTopic,
+      key:     raceKey,
+      content: 'S-05.8 concurrent RBAC race — seeded by engineer; PA and engineer promote simultaneously.',
+      project: PROJECT,
+    })
+  })
+
+  test('step 1 — engineer and PA promote simultaneously; engineer always denied, PA always succeeds', async () => {
+    const [engineerRes, peRes] = await Promise.all([
+      api(tokens.engineer, PROJECT).post(
+        `/api/knowledge/${raceTopic}/${raceKey}/promote`,
+        { note: 'engineer concurrent promote attempt — S-05.8 authorization race test.' },
+      ),
+      api(tokens.pe, PROJECT).post(
+        `/api/knowledge/${raceTopic}/${raceKey}/promote`,
+        { note: 'PA concurrent promote — must win the authorization check in S-05.8.' },
+      ),
+    ])
+    // Authorization gate must not be affected by concurrent load: engineer always 403
+    expect(engineerRes.status).toBe(403)
+    expect(engineerRes.data.error).toBe('forbidden')
+    // PA must always succeed regardless of concurrent engineer request
+    expect(peRes.status).toBe(200)
+    expect(peRes.data.promoted).toBe(true)
+  })
+
+  test('step 2 — after concurrent race, exactly one ACTIVE version exists (no state corruption)', async () => {
+    const histRes = await api(tokens.pe, PROJECT).get(
+      `/pg/versions/${raceTopic}/${raceKey}/history`,
+    )
+    expect(histRes.status).toBe(200)
+    const activeVersions = histRes.data.filter(v => v.status === 'ACTIVE')
+    // Race must not create duplicate ACTIVE or leave zero ACTIVE
+    expect(activeVersions).toHaveLength(1)
+  })
+})
+
+// ─── S-05.9  Role update + immediate permission reflection ────────────────────
+
+test.describe('S-05.9 — role update: new role reflected immediately (Redis cache invalidation)', () => {
+  /**
+   * POST /config/update-role modifies the member's role in the project config stored in
+   * S3/DDB, then publishes a Redis pub/sub invalidation event for the affected user.
+   * The gateway's profile cache for (sub, group_id) is cleared synchronously — the
+   * next request for that user re-resolves their role from DDB without any wait.
+   *
+   * This tests both role promotion (access granted) and revocation (access denied),
+   * both visible with zero latency after the update-role call completes.
+   *
+   * afterAll resets test-engineer to 'engineer' unconditionally so that other test
+   * runs see the expected baseline state from the quorum-test-project fixture.
+   */
+
+  test.afterAll(async () => {
+    // Insurance reset — keeps the suite idempotent if steps 2–4 fail mid-test
+    await api(tokens.pe, PROJECT).post('/config/update-role', {
+      roles: { 'test-engineer': 'engineer' },
+    })
+  })
+
+  test('step 1 — baseline: test-engineer (engineer) cannot access portfolio → 403', async () => {
+    const res = await api(tokens.engineer, PROJECT).get('/api/portfolio')
+    expect(res.status).toBe(403)
+  })
+
+  test('step 2 — PA promotes test-engineer to director → 200', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/config/update-role', {
+      roles: { 'test-engineer': 'director' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  test('step 3 — test-engineer immediately accesses portfolio after promotion → 200', async () => {
+    // No sleep — Redis pub/sub invalidation is synchronous to the update-role response.
+    // The profile cache key for (test-engineer, quorum-test-project) is cleared when
+    // the config update is persisted; the next resolve goes to DDB for the fresh role.
+    const res = await api(tokens.engineer, PROJECT).get('/api/portfolio')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.data.projects)).toBe(true)
+  })
+
+  test('step 4 — PA resets test-engineer back to engineer → 200', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/config/update-role', {
+      roles: { 'test-engineer': 'engineer' },
+    })
+    expect(res.status).toBe(200)
+  })
+
+  test('step 5 — test-engineer denied portfolio again after role revocation → 403', async () => {
+    // Revocation is also immediate — no TTL-based delay before the restriction takes effect.
+    const res = await api(tokens.engineer, PROJECT).get('/api/portfolio')
+    expect(res.status).toBe(403)
   })
 })

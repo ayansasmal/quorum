@@ -1,8 +1,8 @@
 # Quorum — Quality Assurance Framework & Risk-Weighted Test Plan
 
-**Version:** 2.0 — May 2026
-**Scope:** Quorum v0.4 · 21 journeys · 33 scenarios
-**Suite OwnScore:** 3187 pts | **10% gate:** 319 pts | **5% gate:** 159 pts
+**Version:** 2.1 — May 2026
+**Scope:** Quorum v0.4 · 21 journeys · 36 scenarios
+**Suite OwnScore:** 3402 pts | **10% gate:** 340 pts | **5% gate:** 170 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
 > **For agentic workers (CI, coding agents, deployment pipelines):**
@@ -151,9 +151,13 @@ compute FailureCost accordingly. Fixing the root cause resolves all correlated f
 
 ```
 S-05.1 (RBAC middleware)
-  correlates → S-05.2, S-05.3, S-05.4, S-05.5, S-05.6
+  correlates → S-05.2, S-05.3, S-05.4, S-05.5, S-05.6, S-05.7, S-05.8
   Reason: All RBAC sub-scenarios exercise the same verify-jwt + role-check code path.
           A bug in permission checking typically breaks the whole RBAC boundary, not one sub-scenario.
+          S-05.7 (cross-project role isolation) and S-05.8 (concurrent RBAC) both depend on the
+          same DDB/Redis role-resolution path — a broken role-check breaks them identically.
+          S-05.9 (cache invalidation) is excluded: it tests POST /config/update-role flush
+          which is a separate code path from the read-time role check.
 
 S-15 (enforceReasonRequired)
   correlates → S-03, S-04, S-09, S-13
@@ -194,7 +198,7 @@ S-21 (POST /config/validate shared schema code path)
 
 ## 6. Scenario Scoring Table
 
-All 33 scenarios. W = leaf_count × F. OwnScore = W × C × D. FailureCost = OwnScore + correlated.
+All 36 scenarios. W = leaf_count × F. OwnScore = W × C × D. FailureCost = OwnScore + correlated.
 Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 
 | Scenario | Journey | leaf | F | W | Pillar | C | D | **OwnScore** | Correlated failures | **FailureCost** | Gate |
@@ -210,12 +214,15 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-02.8 | J02 | 5 | 4 | 20 | Dev Experience | 1.0 | 1.0 | **20** | — | **20** | 🟡 |
 | S-03 | J03 | 20 | 2 | 40 | Functional | 1.5 | 1.5 | **90** | — | **90** | 🟡 |
 | S-04 | J04 | 37 | 2 | 74 | Functional | 1.5 | 1.5 | **167** | S-07 | **242** | 🟡 |
-| S-05.1 | J05 | 18 | 4 | 72 | Security ⛔ | 2.5 | 1.0 | **180** | S-05.2–5.6 | **810** | ⛔ |
+| S-05.1 | J05 | 18 | 4 | 72 | Security ⛔ | 2.5 | 1.0 | **180** | S-05.2–5.8 | **950** | ⛔ |
 | S-05.2 | J05 | 12 | 4 | 48 | Security ⛔ | 2.5 | 1.0 | **120** | — | **120** | ⛔ |
 | S-05.3 | J05 | 12 | 4 | 48 | Security ⛔ | 2.5 | 1.0 | **120** | — | **120** | ⛔ |
 | S-05.4 | J05 | 15 | 4 | 60 | Security ⛔ | 2.5 | 1.0 | **150** | — | **150** | ⛔ |
 | S-05.5 | J05 | 15 | 4 | 60 | Security ⛔ | 2.5 | 1.0 | **150** | — | **150** | ⛔ |
 | S-05.6 | J05 | 15 | 3 | 45 | Security ⛔ | 2.0 | 1.0 | **90** | — | **90** | ⛔ |
+| S-05.7 | J05 | 5 | 4 | 20 | Security ⛔ | 2.5 | 2.0 | **100** | — | **100** | ⛔ |
+| S-05.8 | J05 | 2 | 4 | 8 | Security ⛔ | 2.5 | 2.0 | **40** | — | **40** | ⛔ |
+| S-05.9 | J05 | 5 | 3 | 15 | Security ⛔ | 2.5 | 2.0 | **75** | — | **75** | ⛔ |
 | S-06 | J06 | 15 | 3 | 45 | Governance ⛔ | 2.0 | 1.5 | **135** | — | **135** | ⛔ |
 | S-07 | J07 | 25 | 2 | 50 | Observability | 1.0 | 1.5 | **75** | — | **75** | 🟡 |
 | S-08 | J08 | 15 | 2 | 30 | Functional | 1.5 | 1.5 | **68** | — | **68** | 🟡 |
@@ -232,10 +239,10 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-19 | J19 | 15 | 3 | 45 | Security ⛔ | 2.5 | 1.0 | **113** | — | **113** | ⛔ |
 | S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
 | S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
-| **Total** | | | | **1231** | | | | **3187** | | | |
+| **Total** | | | | **1274** | | | | **3402** | | | |
 
-> **W column sum = 1231** (the legacy FrequencyTier weight). This matches the E2E suite index.
-> **OwnScore total = 3187.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1274** (was 1231 before adding S-05.7/5.8/5.9 negative scenarios).
+> **OwnScore total = 3402.** The C × D multipliers reflect severity and detection lag on top of frequency.
 
 ---
 
@@ -247,7 +254,7 @@ before marking the issue resolved.
 
 | Rank | Scenario | FailureCost | Gate | Primary pillar | Root for |
 |------|----------|------------|------|----------------|---------|
-| 1 | **S-05.1** RBAC Knowledge Create | **810** | ⛔ | Security | S-05.2, S-05.3, S-05.4, S-05.5, S-05.6 |
+| 1 | **S-05.1** RBAC Knowledge Create | **950** | ⛔ | Security | S-05.2–5.8 |
 | 2 | **S-15** Reason / Placeholder Rejection | **694** | ⛔ | Governance | S-03, S-04, S-09, S-13 |
 | 3 | **S-02.2** Conflict Detection | **415** | ⛔ | Governance | S-06, S-17 |
 | 4 | **S-10** Audit Chain Integrity | **388** | ⛔ | Governance | S-02.1, S-02.2, S-02.3 |
@@ -262,24 +269,27 @@ before marking the issue resolved.
 | 13 | **S-05.2** RBAC Promote + Supersede | **120** | ⛔ | Security | — |
 | 14 | **S-05.3** RBAC Deprecate | **120** | ⛔ | Security | — |
 | 15 | **S-19** Authentication Lifecycle | **113** | ⛔ | Security | — |
-| 16 | **S-20** Cross-Catalog Search | **96** | 🟡 | Federation | — |
-| 17 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
-| 18 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
-| 19 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
-| 20 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
-| 21 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
-| 22 | **S-13** Config Management | **45** | 🟡 | Operational | — |
-| 23 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
-| 24 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
-| 25 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
-| 26 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
-| 27 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
-| 28 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
-| 29 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
-| 30 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
-| 31 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
-| 32 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
-| 33 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
+| 16 | **S-05.7** RBAC Cross-Project Role Context | **100** | ⛔ | Security | — |
+| 17 | **S-20** Cross-Catalog Search | **96** | 🟡 | Federation | — |
+| 18 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
+| 19 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
+| 20 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
+| 21 | **S-05.9** Role Update + Cache Invalidation | **75** | ⛔ | Security | — |
+| 22 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
+| 23 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
+| 24 | **S-13** Config Management | **45** | 🟡 | Operational | — |
+| 25 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
+| 26 | **S-05.8** RBAC Concurrent Race | **40** | ⛔ | Security | — |
+| 27 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
+| 28 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
+| 29 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
+| 30 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
+| 31 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
+| 32 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
+| 33 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
+| 34 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
+| 35 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
+| 36 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
 
 > Ranks 5–33 in the ⛔ column are hard-blocked by pillar membership (Security / Data Integrity),
 > not by FailureCost. Rank 5 (S-04), rank 12 (S-21), rank 16 (S-20), and rank 18 (S-03) are

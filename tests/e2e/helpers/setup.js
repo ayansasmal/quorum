@@ -91,17 +91,27 @@ export default async function setup(_config) {
   console.log('[setup] T0.1 gateway healthy ✓')
 
   // ── Fixture upload (idempotent) ─────────────────────────────────────────────
-  // Both fixture configs must be in DDB before any test runs. 409 is accepted
+  // All fixture configs must be in DDB before any test runs. 409 is accepted
   // (already onboarded from a previous run — configs are unchanged).
-  const peToken = makeToken('test-pe')
-  const fixDir  = resolve(__dir, '../fixtures')
+  //
+  // Each fixture is uploaded with the token of its owner (who must be a PA in
+  // that project's member list). quorum-test-peer-project uses the architect
+  // token because test-architect is the owner/PA there; test-pe is only an
+  // engineer in that fixture — the cross-project role inversion is intentional.
+  const peToken        = makeToken('test-pe')
+  const architectToken = makeToken('test-architect')
+  const fixDir         = resolve(__dir, '../fixtures')
 
-  for (const file of [
-    'quorum-test-catalog.quorum.json',
-    'quorum-test-project.quorum.json',
-    'quorum-test-isolated-project.quorum.json',
-  ]) {
-    const res = await uploadFixture(resolve(fixDir, file), peToken)
+  /** @type {Array<[string, string]>} [filename, uploaderToken] */
+  const fixtures = [
+    ['quorum-test-catalog.quorum.json',         peToken],
+    ['quorum-test-project.quorum.json',         peToken],
+    ['quorum-test-isolated-project.quorum.json', peToken],
+    ['quorum-test-peer-project.quorum.json',    architectToken],
+  ]
+
+  for (const [file, token] of fixtures) {
+    const res = await uploadFixture(resolve(fixDir, file), token)
     const label = res.status === 201 ? 'uploaded ✓' : 'already onboarded ✓'
     console.log(`[setup] fixture ${file} — ${label}`)
   }
