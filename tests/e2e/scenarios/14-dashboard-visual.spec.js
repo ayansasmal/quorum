@@ -77,7 +77,7 @@ describe('S-14.1 — Knowledge Graph', () => {
     await expect(domainSelect).toBeVisible({ timeout: 8000 })
 
     // Wait for stats to load so domain options (auth, infra …) are available
-    await expect(page.locator('select option:not([value=""])')).toBeAttached({ timeout: 15000 })
+    await expect(page.locator('select option:not([value=""])').first()).toBeAttached({ timeout: 15000 })
 
     // Select the auth domain — triggers useGraph('auth') → GET /api/graph?domain=auth
     await domainSelect.selectOption('auth')
@@ -95,7 +95,7 @@ describe('S-14.1 — Knowledge Graph', () => {
 
     // Select auth domain and wait for graph to render
     const domainSelect = page.locator('select').first()
-    await expect(page.locator('select option:not([value=""])')).toBeAttached({ timeout: 15000 })
+    await expect(page.locator('select option:not([value=""])').first()).toBeAttached({ timeout: 15000 })
     await domainSelect.selectOption('auth')
     const canvas = page.locator('canvas').first()
     await expect(canvas).toBeVisible({ timeout: 15000 })
@@ -331,6 +331,11 @@ describe('S-14.5 — Project Selector', () => {
     const searchInput = page.locator('input[placeholder*="Search by project name"]')
     await expect(searchInput).toBeVisible({ timeout: 8000 })
 
+    // Search to isolate our test projects — accumulated test runs may add other
+    // projects that paginate our fixtures off the first page.
+    await searchInput.fill('quorum-test')
+    await page.waitForTimeout(400)
+
     // Both projects from the injected list must appear as cards.
     await expect(page.locator('text=quorum-test-project').first()).toBeVisible({ timeout: 5000 })
     await expect(page.locator('text=quorum-test-catalog').first()).toBeVisible({ timeout: 5000 })
@@ -353,8 +358,9 @@ describe('S-14.5 — Project Selector', () => {
     const searchInput = page.locator('input[placeholder*="Search by project name"]')
     await expect(searchInput).toBeVisible({ timeout: 8000 })
 
-    // Type "catalog" — ProjectSelector filters by name or team (case-insensitive).
-    await searchInput.fill('catalog')
+    // Type "quorum-test-catalog" — ProjectSelector filters by name or team (case-insensitive).
+    // Using the full name avoids accumulated j01-catalog-* test entries paginating the result.
+    await searchInput.fill('quorum-test-catalog')
 
     // quorum-test-catalog matches; quorum-test-project does not.
     await expect(page.locator('text=quorum-test-catalog').first()).toBeVisible({ timeout: 3000 })

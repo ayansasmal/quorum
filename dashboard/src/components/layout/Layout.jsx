@@ -12,6 +12,7 @@ const PAGE_TITLES = {
   '/audit':     'Audit Timeline',
   '/config':    'Config Editor',
   '/status':    'System Status',
+  '/admin':     'Admin',
 }
 
 export default function Layout({ children }) {

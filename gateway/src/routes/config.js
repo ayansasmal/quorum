@@ -111,7 +111,28 @@ router.post('/upload', async (req, res) => {
   // Idempotency check — reject if the project is already onboarded in S3
   try {
     await getS3().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-    const qProjId = await getProjectByGroupId(req.app.locals.pool, groupId).catch(() => null)
+    const pool    = req.app.locals.pool
+    let qProjId   = await getProjectByGroupId(pool, groupId).catch(() => null)
+    // PostgreSQL may have been wiped (e.g. Docker volume reset) while S3 persists.
+    // Re-register the project in q_projects so project-scoped routes work correctly.
+    if (!qProjId) {
+      try {
+        qProjId = await createProject(
+          pool,
+          groupId,
+          config.owner,
+          config.members ?? [],
+          { domains: config.domains },
+          {
+            displayName: config.project ?? null,
+            createdBy:   req.user?.sub ?? 'system',
+            isGlobal:    config.is_global ?? false,
+          },
+        )
+      } catch (pgErr) {
+        console.error(`[Gateway:config] q_projects re-register on 409 failed for ${groupId}: ${pgErr.message}`)
+      }
+    }
     return res.status(409).json({
       error:        'already_onboarded',
       message:      `Project '${groupId}' is already onboarded. Use POST /sync/configs to refresh an existing project config.`,
