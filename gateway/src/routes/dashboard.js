@@ -1153,49 +1153,67 @@ router.post('/knowledge', peWriteLimit, async (req, res, next) => {
       })
     }
 
-    const nextVer     = await getNextVersionNumber(pool, qKeyId)
-    const versionId   = `${qKeyId}_v${nextVer}`
     const contentHash = createHash('sha256').update(content).digest('hex')
     const author      = req.user.sub
     const authorRole  = req.user.role
+    const floor       = req.user.base_confidence ?? 0.7
+    const status      = (req.user.role === 'principal_architect' && projectConfig?.is_global !== true) ? 'ACTIVE' : 'DRAFT'
 
-    // Apply role-based confidence floor — mirrors MCP storeFirst() behaviour.
-    const floor = req.user.base_confidence ?? 0.7
+    // Serialize concurrent writes for the same key: FOR UPDATE on the q_keys row ensures
+    // two simultaneous DRAFT writes cannot both read MAX(version)=N and collide on
+    // version_id. Row-level lock — writers for different keys proceed in parallel.
+    // E2E: tests/e2e/scenarios/02-knowledge-governance.spec.js — S-02.10 concurrent DRAFT race
+    const client = await pool.connect()
+    let inserted
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT 1 FROM q_keys WHERE q_key_id = $1 FOR UPDATE', [qKeyId])
 
-    const record = {
-      version_id:   versionId,
-      q_key_id:     qKeyId,
-      q_project_id: qProjectId,
-      topic,
-      key,
-      summary:      content,
-      entity_type,
-      tags:         tags ?? [],
-      confidence:   Math.max(confidence ?? floor, floor),
-      author,
-      author_role:  authorRole,
-      author_type:  'human',
-      triggered_by: 'dashboard',
-      content_hash: contentHash,
-      version:      nextVer,
-      // Global catalog writes always land as DRAFT — self-approval guard requires a second PA.
-      // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11.1 global catalog write is DRAFT
-      status:       (req.user.role === 'principal_architect' && projectConfig?.is_global !== true) ? 'ACTIVE' : 'DRAFT',
+      const nextVer   = await getNextVersionNumber(client, qKeyId)
+      const versionId = `${qKeyId}_v${nextVer}`
+
+      // Apply role-based confidence floor — mirrors MCP storeFirst() behaviour.
+      const record = {
+        version_id:   versionId,
+        q_key_id:     qKeyId,
+        q_project_id: qProjectId,
+        topic,
+        key,
+        summary:      content,
+        entity_type,
+        tags:         tags ?? [],
+        confidence:   Math.max(confidence ?? floor, floor),
+        author,
+        author_role:  authorRole,
+        author_type:  'human',
+        triggered_by: 'dashboard',
+        content_hash: contentHash,
+        version:      nextVer,
+        // Global catalog writes always land as DRAFT — self-approval guard requires a second PA.
+        // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11.1 global catalog write is DRAFT
+        status,
+      }
+
+      inserted = await insertVersion(client, record)
+      await client.query('COMMIT')
+
+      await writeAuditEntry(pool, {
+        operation:    'WRITE',
+        tool:         'dashboard-create',
+        author,
+        author_role:  authorRole,
+        q_project_id: qProjectId,
+        content_hash: contentHash,
+        governance_json: { topic, key, entity_type, confidence: record.confidence },
+        outcome_json:    { status, version: nextVer, version_id: versionId },
+        version_impact:  { versions_created: [versionId], versions_superseded: [] },
+      })
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw err
+    } finally {
+      client.release()
     }
-
-    const inserted = await insertVersion(pool, record)
-
-    await writeAuditEntry(pool, {
-      operation:    'WRITE',
-      tool:         'dashboard-create',
-      author,
-      author_role:  authorRole,
-      q_project_id: qProjectId,
-      content_hash: contentHash,
-      governance_json: { topic, key, entity_type, confidence: record.confidence },
-      outcome_json:    { status: record.status, version: nextVer, version_id: versionId },
-      version_impact:  { versions_created: [versionId], versions_superseded: [] },
-    })
 
     res.status(201).json(inserted)
   } catch (err) {

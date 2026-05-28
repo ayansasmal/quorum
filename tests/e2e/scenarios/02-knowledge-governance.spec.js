@@ -6,7 +6,7 @@
  *          Governance Integrity (S-02.2)
  *          Data Integrity (S-02.3)
  *
- * Sub-scenarios:
+ * Sub-scenarios (happy path):
  *   S-02.1  Write + Recall (PA ACTIVE / engineer DRAFT / search)
  *   S-02.2  Conflict detection (DRAFT against ACTIVE + /governance/detect-conflict)
  *   S-02.3  Resolve: approve → supersede (DRAFT → ACTIVE, old → SUPERSEDED)
@@ -14,6 +14,11 @@
  *   S-02.5  Resolve: request_changes (stays pending with note)
  *   S-02.6  Resolve: coexist_split (PE manually creates two new entries)
  *   S-02.7  Resolve: coexist_merge (PE supersedes with merged content)
+ *
+ * Sub-scenarios (negative / alternate — multi-member):
+ *   S-02.9   Authority fence — non-PA cannot self-approve or review a conflict (NEGATIVE)
+ *   S-02.10  Concurrent competing DRAFTs — two engineers write the same key simultaneously (RACE)
+ *   S-02.11  Supersede-under-review — ACTIVE replaced while conflict is pending (ALTERNATE)
  *
  * Architecture notes:
  *   - POST /api/knowledge as PE → ACTIVE immediately (no pending decision created)
@@ -754,5 +759,303 @@ describe('S-02.8 — Dashboard UI', () => {
 
     // The PE who approved (test-pe) should appear as the author in the entry
     await expect(page.getByText('test-pe').first()).toBeVisible()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-02.9 — Authority Fence: non-PA cannot self-approve or review a conflict
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-02.9 — Authority Fence (NEGATIVE)', () => {
+  /**
+   * A core trust-model claim: only a principal_architect can resolve a conflict.
+   * No other role — regardless of how senior — can call POST /api/review.
+   *
+   * This falsifies the claim for every non-PA role in the project, then confirms
+   * the PA CAN resolve, and verifies the rejected DRAFT is immutably REJECTED
+   * (no hard delete).
+   *
+   * Steps:
+   *   1  PA writes ACTIVE baseline; engineer writes competing DRAFT + conflict
+   *   2  Engineer tries to review their own conflict → 403 forbidden
+   *   3  Senior engineer tries → 403 (higher authority, still not PA)
+   *   4  Architect tries → 403 (highest non-PA role, still blocked)
+   *   5  PA rejects the conflict → 200
+   *   6  DRAFT version is now REJECTED in history (immutable — no hard delete)
+   */
+
+  test.describe.configure({ mode: 'serial' })
+
+  const topic = 'auth'
+  let fenceKey
+  let conflictId
+  const ACTIVE_CONTENT  = 'Use RS256 JWT signed by a rotating key. Rotate every 90 days.'
+  const DRAFT_CONTENT   = 'Use HS256 shared-secret tokens. Simpler to implement for internal services.'
+
+  beforeAll(async () => {
+    fenceKey = uid('s029-authority-fence')
+    await activeEntry({ topic, key: fenceKey, content: ACTIVE_CONTENT })
+    ;({ conflictId } = await conflict({
+      topic,
+      key:             fenceKey,
+      content:         DRAFT_CONTENT,
+      existingContent: ACTIVE_CONTENT,
+    }))
+  })
+
+  test('step 1 — engineer (conflict author) tries to review own conflict → 403', async () => {
+    const res = await api(tokens.engineer, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Engineer self-reject attempt — authority fence test for S-02.9.',
+    })
+    expect(res.status).toBe(403)
+    expect(res.data.error).toBe('forbidden')
+  })
+
+  test('step 2 — senior_engineer tries to review → 403 (not PA)', async () => {
+    const res = await api(tokens.senior, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Senior engineer review attempt — authority fence test for S-02.9.',
+    })
+    expect(res.status).toBe(403)
+    expect(res.data.error).toBe('forbidden')
+  })
+
+  test('step 3 — architect (highest non-PA role) tries to review → 403', async () => {
+    const res = await api(tokens.architect, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Architect review attempt — authority fence test for S-02.9.',
+    })
+    expect(res.status).toBe(403)
+    expect(res.data.error).toBe('forbidden')
+  })
+
+  test('step 4 — PA rejects the conflict → 200', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Rejecting HS256 proposal — RS256 with rotation is the correct approach per security policy.',
+    })
+    expect(res.status).toBe(200)
+  })
+
+  test('step 5 — DRAFT version is REJECTED in history (no hard delete)', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${fenceKey}/history`)
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.data)).toBe(true)
+    const rejected = res.data.find(v => v.status === 'REJECTED')
+    expect(rejected).toBeDefined()
+    expect(rejected.summary).toBe(DRAFT_CONTENT)
+  })
+
+  test('step 6 — original ACTIVE entry is unchanged after rejection', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${fenceKey}`)
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('ACTIVE')
+    expect(res.data.summary).toBe(ACTIVE_CONTENT)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-02.10 — Concurrent Competing DRAFTs (two engineers, same key)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-02.10 — Concurrent Competing DRAFTs (RACE)', () => {
+  /**
+   * Two engineers write different DRAFTs for the same ACTIVE key in parallel.
+   * The gateway must accept both writes independently without losing either.
+   *
+   * This tests write-path serialization: version numbers are allocated atomically
+   * so no two DRAFTs share the same version_id. The PA then sees both DRAFTs in
+   * the governance queue and can promote exactly one.
+   *
+   * Concurrent calls fire in beforeAll so all four assertion steps have the
+   * captured responses available without re-running the writes.
+   *
+   * Steps:
+   *   1  Both engineer writes succeed as DRAFT (no 4xx or 5xx)
+   *   2  Both DRAFTs appear in GET /api/drafts
+   *   3  History: ACTIVE v1 + two DRAFT versions, all with distinct version numbers
+   *   4  PA promotes one DRAFT to ACTIVE; the other DRAFT remains (not auto-rejected)
+   */
+
+  test.describe.configure({ mode: 'serial' })
+
+  const topic = 'infra'
+  let raceKey
+  const ACTIVE_CONTENT    = 'Use Terraform for all infrastructure. No manual console changes.'
+  const ENGINEER_CONTENT  = 'Migrate from Terraform to Pulumi — TypeScript-native IaC with better type safety.'
+  const SENIOR_CONTENT    = 'Adopt OpenTofu (Terraform fork) — same HCL, open-source, no BSL licensing risk.'
+
+  /** @type {import('axios').AxiosResponse} */
+  let engineerRes
+  /** @type {import('axios').AxiosResponse} */
+  let seniorRes
+
+  beforeAll(async () => {
+    raceKey = uid('s0210-iac-strategy')
+    await activeEntry({ topic, key: raceKey, content: ACTIVE_CONTENT })
+
+    // Both DRAFTs fire in the same event-loop tick — genuine concurrent write test.
+    ;[engineerRes, seniorRes] = await Promise.all([
+      api(tokens.engineer, PROJECT).post('/api/knowledge', {
+        topic,
+        key:         raceKey,
+        content:     ENGINEER_CONTENT,
+        entity_type: 'Decision',
+      }),
+      api(tokens.senior, PROJECT).post('/api/knowledge', {
+        topic,
+        key:         raceKey,
+        content:     SENIOR_CONTENT,
+        entity_type: 'Decision',
+      }),
+    ])
+  })
+
+  test('step 1 — both concurrent writes succeed as DRAFT (no write lost)', () => {
+    expect(engineerRes.status).toBe(201)
+    expect(engineerRes.data.status).toBe('DRAFT')
+    expect(seniorRes.status).toBe(201)
+    expect(seniorRes.data.status).toBe('DRAFT')
+  })
+
+  test('step 2 — both DRAFTs appear in GET /api/drafts (governance queue has two entries)', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts')
+    expect(res.status).toBe(200)
+    const drafts = (res.data.drafts ?? []).filter(d => d.topic === topic && d.key === raceKey)
+    // At least two DRAFTs for this key in the queue (concurrent writes both visible to PA)
+    expect(drafts.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('step 3 — history has ACTIVE v1 plus two distinct DRAFT versions (no version collision)', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${raceKey}/history`)
+    expect(res.status).toBe(200)
+    const active = res.data.filter(v => v.status === 'ACTIVE')
+    const drafts = res.data.filter(v => v.status === 'DRAFT')
+    expect(active).toHaveLength(1)
+    expect(drafts.length).toBeGreaterThanOrEqual(2)
+    // Version numbers must be strictly increasing — no two entries share a version number
+    const versions = res.data.map(v => v.version)
+    const unique = new Set(versions)
+    expect(unique.size).toBe(versions.length)
+  })
+
+  test('step 4 — PA promotes one DRAFT; the other DRAFT persists (not auto-rejected)', async () => {
+    // Promote via the dashboard promote endpoint (PA-only path).
+    // promote always picks the latest DRAFT by version number — no author selection.
+    const promoteRes = await api(tokens.pe, PROJECT).post(
+      `/api/knowledge/${topic}/${raceKey}/promote`,
+      { note: 'One IaC strategy approved — remaining proposal stays queued for PA review.' },
+    )
+    expect(promoteRes.status).toBe(200)
+    expect(promoteRes.data.promoted).toBe(true)
+
+    // The other DRAFT must still exist — promote is not a bulk operation.
+    // Which author's DRAFT was promoted depends on concurrent version ordering;
+    // assert the count invariant rather than a specific author.
+    const afterRes = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${raceKey}/history`)
+    const remainingDrafts = afterRes.data.filter(v => v.status === 'DRAFT')
+    expect(remainingDrafts.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-02.11 — Supersede-Under-Review: ACTIVE replaced while conflict pending
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-02.11 — Supersede-Under-Review (ALTERNATE)', () => {
+  /**
+   * The PA supersedes the ACTIVE entry that a pending conflict was written against,
+   * then resolves the now-stale conflict.
+   *
+   * Real-world scenario: engineer opens a conflict against v1 of a policy.
+   * Before the PE reviews it, the PA publishes a completely new v3 (supersede).
+   * The pending conflict is now "stale" — the ACTIVE it challenged no longer exists.
+   *
+   * Rejection is the safe resolution path: the DRAFT gets REJECTED, and the
+   * newer ACTIVE (v3) remains in place unchanged.
+   *
+   * Steps:
+   *   1  PA writes ACTIVE v1; engineer writes DRAFT v2 + conflict (conflictId captured)
+   *   2  PA supersedes v1 with new ACTIVE v3 (independent of the pending conflict)
+   *   3  GET /pg/versions confirms v3 is now ACTIVE; v1 is SUPERSEDED
+   *   4  Pending conflict is still in GET /pg/pending (supersede doesn't auto-clear it)
+   *   5  PA rejects the stale conflict → 200 (safe resolution path)
+   *   6  v3 is still ACTIVE after rejection (not overridden by the stale DRAFT)
+   */
+
+  test.describe.configure({ mode: 'serial' })
+
+  const topic = 'db'
+  let staleKey
+  let conflictId
+  const V1_CONTENT    = 'Use read replicas for reporting queries. Primary handles writes only.'
+  const DRAFT_CONTENT = 'Route all queries through a single primary — simplifies connection management.'
+  const V3_CONTENT    = 'Use CQRS: separate read model (Postgres replica) from write model. No direct replica access from app layer.'
+
+  beforeAll(async () => {
+    staleKey = uid('s0211-stale-conflict')
+    await activeEntry({ topic, key: staleKey, content: V1_CONTENT })
+    ;({ conflictId } = await conflict({
+      topic,
+      key:             staleKey,
+      content:         DRAFT_CONTENT,
+      existingContent: V1_CONTENT,
+    }))
+  })
+
+  test('step 1 — conflict exists in pending queue before any supersede', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const pending = Array.isArray(res.data) ? res.data : []
+    expect(pending.some(d => d.conflict_id === conflictId)).toBe(true)
+  })
+
+  test('step 2 — PA supersedes v1 with new ACTIVE v3 (independent write)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/${topic}/${staleKey}/supersede`, {
+      content:     V3_CONTENT,
+      entity_type: 'Decision',
+      reason:      'CQRS approach adopted team-wide — superseding read-replica pattern with proper command/query separation.',
+    })
+    expect(res.status).toBe(200)
+  })
+
+  test('step 3 — v3 is now ACTIVE; v1 is SUPERSEDED', async () => {
+    const current = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${staleKey}`)
+    expect(current.data.status).toBe('ACTIVE')
+    expect(current.data.summary).toBe(V3_CONTENT)
+
+    const history = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${staleKey}/history`)
+    const v1 = history.data.find(v => v.summary === V1_CONTENT)
+    expect(v1).toBeDefined()
+    expect(v1.status).toBe('SUPERSEDED')
+  })
+
+  test('step 4 — stale conflict is still in GET /pg/pending (supersede does not auto-clear it)', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const pending = Array.isArray(res.data) ? res.data : []
+    expect(pending.some(d => d.conflict_id === conflictId)).toBe(true)
+  })
+
+  test('step 5 — PA rejects stale conflict → 200 (safe path: DRAFT rejected, v3 untouched)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Rejecting stale conflict — the underlying entry has been superseded by the CQRS decision. Original challenge no longer relevant.',
+    })
+    expect(res.status).toBe(200)
+  })
+
+  test('step 6 — v3 remains ACTIVE after stale conflict rejection (no accidental override)', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${staleKey}`)
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('ACTIVE')
+    expect(res.data.summary).toBe(V3_CONTENT)
+
+    // DRAFT (engineer's challenge) must be REJECTED — not promoted, not lost
+    const history = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${staleKey}/history`)
+    const draft = history.data.find(v => v.summary === DRAFT_CONTENT)
+    expect(draft).toBeDefined()
+    expect(draft.status).toBe('REJECTED')
   })
 })

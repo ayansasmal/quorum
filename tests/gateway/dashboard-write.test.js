@@ -224,7 +224,7 @@ describe('POST /api/knowledge', () => {
 
     expect(status).toBe(201)
     expect(insertVersion).toHaveBeenCalledWith(
-      fakePool,
+      fakeClient,
       expect.objectContaining({ status: 'DRAFT' }),
     )
   })
@@ -265,7 +265,7 @@ describe('POST /api/knowledge', () => {
     await post('/api/knowledge', validBody)
 
     expect(insertVersion).toHaveBeenCalledWith(
-      fakePool,
+      fakeClient,
       expect.objectContaining({ author_type: 'human', triggered_by: 'dashboard' }),
     )
   })
