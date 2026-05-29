@@ -77,7 +77,7 @@ The Gateway (`gateway/src/server.js`) is an Express service on port 3001 that fr
 | POST | `/graphiti/*` | JWT-authenticated proxy to Graphiti. `group_id` is injected from the JWT claim (clients cannot spoof project scope) |
 | GET\|POST\|PATCH | `/pg/*` | JWT-authenticated REST API over PostgreSQL — used by Dashboard and MCP server for versions, audit, pending decisions |
 | GET | `/pg/audit/lineage/:topic/:key` | Ordered audit trail for a knowledge node (JOIN audit_log + version_audit_links) |
-| POST | `/config/upload` | Onboard a new project — validate config, upload to S3, sync to DDB. Idempotent-fail: 409 if project already exists. Auth: `X-Quorum-Sync-Token` or `principal_architect` JWT |
+| POST | `/config/upload` | Onboard or update a project config — validate, upload to S3, sync to DDB. True upsert: **201** on first create, **200** on update (re-syncs DDB, invalidates Redis cache). Auth: `X-Quorum-Sync-Token` or `principal_architect` JWT |
 | GET | `/config/:projectId` | Fetch a project's `quorum.config.json` from S3 (cached) |
 | POST | `/config/validate` | Validate a config payload against the Zod schema before write — no auth required |
 | GET | `/schema/config` | Serve `quorum.config.schema.json` for editor validation and autocomplete — no auth required |
@@ -86,7 +86,7 @@ The Gateway (`gateway/src/server.js`) is an Express service on port 3001 that fr
 | GET | `/api/graph` | Dashboard BFF — node + edge payload for Cytoscape rendering |
 | GET | `/api/knowledge` | Dashboard BFF — paginated knowledge browser |
 | GET | `/api/search` | Dashboard BFF — semantic search proxied to Graphiti |
-| POST | `/api/review/:id` | Dashboard BFF — approve / reject / request_changes on a conflict DRAFT, or approve / reject a deprecation request (`decision_type=deprecation_request`) |
+| POST | `/api/review/:id` | Dashboard BFF — `approve` / `reject` / `request_changes` / `coexist_merge` on a conflict DRAFT, or `approve` / `reject` a deprecation request (`decision_type=deprecation_request`). `coexist_merge` requires `merged_content`; creates a new unified ACTIVE entry authored by the reviewer, superseding both source versions atomically. `enforceNoSelfApproval` applies to all four actions. |
 | POST | `/api/bump/:topic/:key` | Dashboard BFF — manual confidence bump from a logged-in user |
 | GET | `/health` | Composite health probe — checks PostgreSQL, Graphiti, FalkorDB (TCP), and S3 (HeadBucket) |
 

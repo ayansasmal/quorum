@@ -1,8 +1,8 @@
 # Quorum — Quality Assurance Framework & Risk-Weighted Test Plan
 
-**Version:** 2.1 — May 2026
+**Version:** 2.2 — May 2026
 **Scope:** Quorum v0.4 · 21 journeys · 36 scenarios
-**Suite OwnScore:** 3422 pts | **10% gate:** 342 pts | **5% gate:** 171 pts
+**Suite OwnScore:** 3530 pts | **10% gate:** 353 pts | **5% gate:** 177 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
 > **For agentic workers (CI, coding agents, deployment pipelines):**
@@ -42,7 +42,7 @@ FOR EACH failing scenario:
     → deployment blocked immediately, no exceptions, no override
 
 ELSE:
-  failure_pct = Σ OwnScore(all unique failing scenarios) / 3187 × 100
+  failure_pct = Σ OwnScore(all unique failing scenarios) / 3530 × 100
 
   IF failure_pct > 10%  → HARD_BLOCK   (block deployment, no exceptions)
   IF failure_pct > 5%   → WARNING       (block merge; require PE manual review + approval)
@@ -75,15 +75,15 @@ Pillars with a ⛔ are zero-tolerance: any single failure triggers a hard block.
 
 | Pillar | OwnScore total | % of suite |
 |--------|---------------|-----------|
-| Governance Integrity | 1153 | 36.2% |
-| Security | 923 | 28.9% |
-| Data Integrity | 178 | 5.6% |
-| Functional Correctness | 475 | 14.9% |
-| Federation | 130 | 4.1% |
-| Operational Reliability | 176 | 5.5% |
-| Observability | 102 | 3.2% |
-| Developer Experience | 50 | 1.6% |
-| **Total** | **3187** | **100%** |
+| Governance Integrity | 1261 | 35.7% |
+| Security | 1158 | 32.8% |
+| Data Integrity | 178 | 5.0% |
+| Functional Correctness | 475 | 13.5% |
+| Federation | 130 | 3.7% |
+| Operational Reliability | 176 | 5.0% |
+| Observability | 102 | 2.9% |
+| Developer Experience | 50 | 1.4% |
+| **Total** | **3530** | **100%** |
 
 ---
 
@@ -228,7 +228,7 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-08 | J08 | 15 | 2 | 30 | Functional | 1.5 | 1.5 | **68** | — | **68** | 🟡 |
 | S-09 | J09 | 14 | 1 | 14 | Operational | 1.0 | 1.0 | **14** | — | **14** | 🟡 |
 | S-10 | J10 | 20 | 1.5 | 30 | Governance ⛔ | 3.0 | 2.0 | **180** | S-02.1, S-02.2, S-02.3 | **388** | ⛔ |
-| S-11 | J11 | 10 | 4 | 40 | Governance ⛔ | 3.0 | 1.5 | **180** | — | **180** | ⛔ |
+| S-11 | J11 | 16 | 4 | 64 | Governance ⛔ | 3.0 | 1.5 | **288** | — | **288** | ⛔ |
 | S-12 | J12 | 23 | 2 | 46 | Data Integrity ⛔ | 2.0 | 1.5 | **138** | — | **138** | ⛔ |
 | S-13 | J13 | 20 | 1 | 20 | Operational | 1.5 | 1.5 | **45** | — | **45** | 🟡 |
 | S-14 | J14 | 20 | 1.5 | 30 | Dev Experience | 1.0 | 1.0 | **30** | — | **30** | 🟡 |
@@ -239,10 +239,10 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-19 | J19 | 15 | 3 | 45 | Security ⛔ | 2.5 | 1.0 | **113** | — | **113** | ⛔ |
 | S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
 | S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
-| **Total** | | | | **1278** | | | | **3422** | | | |
+| **Total** | | | | **1302** | | | | **3530** | | | |
 
-> **W column sum = 1278** (was 1231 before S-05.7/5.8/5.9; S-05.8 leaf 2→3 after split).
-> **OwnScore total = 3422.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1302** (was 1231 before S-05.7/5.8/5.9 (+47); S-11 leaf 10→16 adds +24 for S-11.4 coexist_merge).
+> **OwnScore total = 3530.** The C × D multipliers reflect severity and detection lag on top of frequency.
 
 ---
 
@@ -259,7 +259,7 @@ before marking the issue resolved.
 | 3 | **S-02.2** Conflict Detection | **415** | ⛔ | Governance | S-06, S-17 |
 | 4 | **S-10** Audit Chain Integrity | **388** | ⛔ | Governance | S-02.1, S-02.2, S-02.3 |
 | 5 | **S-04** Deviation Governance | **242** | 🟡 | Functional | S-07 |
-| 6 | **S-11** Self-Approval Prevention | **180** | ⛔ | Governance | — |
+| 6 | **S-11** Self-Approval Prevention | **288** | ⛔ | Governance | — |
 | 7 | **S-17** Conflict Edge Cases | **160** | ⛔ | Governance | — |
 | 8 | **S-05.4** RBAC Governance + Global Write | **150** | ⛔ | Security | — |
 | 9 | **S-05.5** RBAC Deviation Action + Forget | **150** | ⛔ | Security | — |
@@ -314,7 +314,7 @@ not the percentage of tests that failed — it is the category of what is broken
 ### 8.2 Score-gated (🟡 pillars)
 
 ```
-failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3187 × 100
+failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3530 × 100
 
 failure_pct ≤ 5.0%  → SAFE     (auto-merge allowed)
 5.0% < failure_pct ≤ 10.0%  → WARNING   (block merge; require PE manual review + sign-off)
@@ -336,7 +336,7 @@ This is the spider chart value. A pillar at 100% means all its scenarios pass. A
 means all its scenarios fail. The spider chart shape tells you WHERE quality is weak even when
 no deployment is being blocked (useful for continuous quality tracking between releases).
 
-Example: if S-15 fails alone, Governance Integrity drops to `(1153 − 378) / 1153 = 67%`.
+Example: if S-15 fails alone, Governance Integrity drops to `(1261 − 378) / 1261 = 70%`.
 The agent knows to look at enforcement of Constitutional Rule 3 across all governance endpoints.
 
 ---

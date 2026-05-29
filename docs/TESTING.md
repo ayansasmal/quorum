@@ -12,12 +12,12 @@ Constitutional and governance tests live in the `quorum-mcp` repo since they tes
 
 ---
 
-## Gateway Test Suite Snapshot (v0.3)
+## Gateway Test Suite Snapshot (v0.4)
 
 | Metric | Value |
 |--------|-------|
-| Test files | 31 |
-| Passing tests | 476 |
+| Test files | 38 |
+| Passing tests | 685 |
 | Line coverage | **86%** (threshold 75%) |
 | Branch coverage | **77%** (threshold 75%) |
 | Function coverage | **88%** (threshold 75%) |
@@ -81,7 +81,7 @@ This catches real middleware ordering, header parsing, body limits, and error-ha
 ### Running
 
 ```bash
-npm test                       # vitest run (476 tests)
+npm test                       # vitest run (685 tests)
 npm test -- --coverage         # full v8 coverage report (text + json + html)
 npm run test:gateway           # alias for the same target
 ```
@@ -102,6 +102,38 @@ Added as Phase 1 pre-merge gates to define the expected v0.3 behaviour before im
 | `quorum-mcp/tests/tools/set-agent-context.test.js` | quorum-mcp | `set_agent_context` validation (kebab-case, length, leading digit), happy path, `session_id` format (`sess_` + 8 hex), `author_type` always `'agent'`, Gate 3 blocks write tools until context set |
 | `tests/gateway/validate.test.js` | engram | 45 tests covering `validateKnowledgeInput`: all field rules, boundary values (500 chars, 501 chars, HTML chars, empty tags array, 11 tags), reason min/max, confidence range |
 | `tests/gateway/dashboard-write.test.js` | engram | 20 tests covering `POST /api/knowledge`, `POST /api/knowledge/:topic/:key/promote`, `POST /api/knowledge/:topic/:key/supersede`: 403 (wrong role), 413 (body too large), 400 (validation errors), 404 (no draft/active), 409 (duplicate active), 201/200 (success paths), server-set fields (`author`, `author_type`, `triggered_by`) |
+
+### v0.4 Additions — Test File Inventory
+
+Added in v0.4 to cover federation, deviations, conformance, portfolio, and quality hardening (GAP closures):
+
+| File | Repo | What it covers |
+|------|------|---------------|
+| `tests/gateway/dashboard-deviations.test.js` | engram | 27 tests: deviation recording, catalog link validation, severity formula (4 cases: standard/PA floor/missing confidence/unknown role), upsert idempotency, batch partial success, GET filters, PE action constitutional enforcement, denial hint |
+| `tests/gateway/dashboard-conformance.test.js` | engram | 14 tests: conformance UNCERTIFIED/CERTIFIED/catalogs/404; portfolio 403/admin-bypass/roles/rollup/null-rollup/node_id-filter/UNCERTIFIED-rollup |
+| `tests/gateway/config-routes.test.js` | engram | Covers `POST /config/upload` upsert path (200=update, 201=create), validation errors, auth modes |
+| `tests/gateway/audit-chain.test.js` (additions) | engram | 3 adversarial tamper-detection tests (GAP-001 closed): stale `entry_hash` after `author` mutation, after `tool` mutation; `ChainIntegrityViolation` carries `position`, `expected`, `actual` |
+| `tests/gateway/dashboard-write.test.js` (additions) | engram | `coexist_merge` action: `merged_content` required validation, `NO_SELF_APPROVAL` enforcement for DRAFT and `PENDING_CONFLICT_CHECK` authors, transaction-atomic merge (new ACTIVE + both sides SUPERSEDED); `PENDING_CONFLICT_CHECK→SUPERSEDED` legal transition |
+
+### E2E Suite — 498 passing (v0.4)
+
+The Playwright E2E suite covers 21 journeys (S-01 through S-21) across the full stack. It runs against a fully-isolated Docker environment (`npm run test:e2e:docker`) or against a locally-started dev stack with Vite auto-started for browser tests.
+
+```bash
+npm run test:e2e               # local dev mode (auto-starts Vite for browser tests)
+npm run test:e2e:docker        # fully-isolated Docker run (all 21 journeys)
+npm run test:e2e:docker:up     # start isolated stack for iterative development
+npm run test:e2e:docker:run    # run tests against already-running isolated stack
+```
+
+| Metric | Value |
+|--------|-------|
+| Scenarios | 21 journeys (S-01 – S-21, 36 sub-scenarios) |
+| Tests passing | 498 |
+| Tests skipped | 1 (MT-02 variant, requires `QUORUM_DOCKER_E2E=true`) |
+| Tests failing | 0 |
+| Browser tests | ✅ — run in both local dev and Docker mode |
+| Test infrastructure | Fully-isolated Docker E2E stack (no host port bindings) |
 
 ---
 

@@ -1,6 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
+*Updated: 2026-05-29 | Current suite: 498 passed, 0 failed, 1 skipped | All P0 gaps closed*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -45,11 +46,12 @@
 
 ---
 
-### GAP-001 — Hash chain tamper detection never exercised
+### GAP-001 — Hash chain tamper detection never exercised ✅ CLOSED (2026-05-29)
 
 **Journeys:** J10
-**Risk:** P0
+**Risk:** P0 → resolved
 **Test type:** UT
+**Resolution:** 3 adversarial unit tests added to `tests/gateway/audit-chain.test.js`. Tests cover: (1) stale `entry_hash` after `author` field mutation, (2) stale `entry_hash` after `tool` field mutation, (3) `ChainIntegrityViolation` carries `position`, `expected` (recomputed hash), and `actual` (stored hash). Gateway unit tests: 685 passed.
 
 **Context:**
 `audit/chain.js` exports `verifyChain(entries)` which throws `ChainIntegrityViolation` when
@@ -99,11 +101,12 @@ describe('verifyChain — tamper detection', () => {
 
 ---
 
-### GAP-002 — `is_public` non-member enforcement not in RBAC matrix
+### GAP-002 — `is_public` non-member enforcement not in RBAC matrix ✅ CLOSED (2026-05-29)
 
 **Journeys:** J05, J19
-**Risk:** P0
+**Risk:** P0 → resolved
 **Test type:** E2E-API (extend S-05)
+**Resolution:** `resolveQProjectId()` in `gateway/src/routes/dashboard.js` now checks `req.user.access_denied` first and returns 403 before any DB lookup. Inline `access_denied` guards added to `POST /api/deviations`, `POST /api/deviations/batch`, and `GET /api/deviations` (routes that bypass `resolveQProjectId`). Non-existent projects return 403 (not 404) — `verify-jwt.js` sets `access_denied=true` as fail-safe when config cannot be loaded, preventing project enumeration. S-05.10 added (6 E2E tests). E2E suite: 492 passed after this fix.
 
 **Context:**
 S-19.1 step 6 verified that a non-member of a private project gets 403 on
@@ -149,11 +152,12 @@ test.describe('S-05.7 Non-member access to private project is denied on all proj
 
 ---
 
-### GAP-003 — Self-approval + coexist-merge interaction untested
+### GAP-003 — Self-approval + coexist-merge interaction untested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J11, J02
-**Risk:** P0
+**Risk:** P0 → resolved
 **Test type:** E2E-API (extend S-11)
+**Resolution:** `coexist_merge` action implemented in `POST /api/review/:conflictId`. Three correctness fixes required: (1) `getLatestDraftVersion` extended to include `PENDING_CONFLICT_CHECK` status — self-approval was bypassed for PA writes that land as `PENDING_CONFLICT_CHECK` rather than `DRAFT`; (2) `LEGAL_TRANSITIONS` extended with `DRAFT→SUPERSEDED` and `PENDING_CONFLICT_CHECK→SUPERSEDED`; (3) `POST /config/upload` converted to a true upsert so fixture config changes (e.g. `test-pe2` member addition) propagate to the running environment. S-11.4 added (6 E2E tests). E2E suite: 498 passed after this fix.
 
 **Context:**
 `enforceNoSelfApproval` checks whether `req.user.sub === conflict.author` in
