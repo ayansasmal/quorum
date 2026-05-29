@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 687 | GAP-005 deferred to production (no EventBridge in dev stack); GAP-006 closed (S-21.6)*
+*Updated: 2026-05-29 | Gateway unit tests: 687 | E2E: 505 passed | GAP-005 deferred; GAP-006 ✅ (S-21.6); GAP-007 ✅ (S-21.7)*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -386,11 +386,18 @@ test.describe('S-21.6 deviate() MCP HTTP contract', () => {
 
 ---
 
-### GAP-007 — `conformance()` MCP HTTP contract not in S-21
+### GAP-007 — `conformance()` MCP HTTP contract not in S-21 ✅ CLOSED
 
 **Journeys:** J21, J07
 **Risk:** P1
 **Test type:** E2E-API (extend S-21)
+
+**Closed: 2026-05-29** — S-21.7 added to `21-mcp-layer-contracts.spec.js` with 3 tests:
+all 7 fields present (`score`, `status`, `scan_count`, `applicable_entries`, `last_scan_at`,
+`catalogs`, `breakdown`); breakdown has all 6 keys (`open/accepted/denied/deferred/overdue/resolved`);
+UNCERTIFIED isolated project returns the right shape. Note: `include_details:true` in the MCP
+tool triggers a separate `getDeviations()` call — it is NOT a gateway query param, so no
+gateway contract test is needed for it.
 
 **Context:**
 Same category as GAP-006. The `conformance()` MCP tool calls `GET /api/conformance` and

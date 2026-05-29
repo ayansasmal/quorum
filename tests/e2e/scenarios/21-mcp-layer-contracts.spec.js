@@ -13,6 +13,7 @@
  *   S-21.4  Config schema owner field required — POST /config/validate without owner → 400
  *   S-21.5  /pg/versions status authority — status always derived server-side, body value ignored
  *   S-21.6  deviate() MCP HTTP contract — field shapes, severity non-zero, idempotent, not_linked
+ *   S-21.7  conformance() MCP HTTP contract — all 7 fields the MCP reads; UNCERTIFIED shape
  *
  * Architecture notes:
  *   The E2E suite historically exercised dashboard /api/* routes. The MCP GatewayClient
@@ -471,6 +472,59 @@ describe('S-21.6 — deviate() MCP HTTP contract', () => {
       // description intentionally omitted
     })
     expect(res.status).toBe(400)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-21.7 — conformance() MCP HTTP contract
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-21.7 — conformance() MCP HTTP contract', () => {
+  // The conformance() MCP tool reads exactly 7 fields from GET /api/conformance.
+  // A field rename or removal in the gateway silently produces wrong data in the
+  // MCP tool (CERTIFIED projects appear UNCERTIFIED, scores show as undefined).
+  //
+  // Note: include_details:true in the MCP tool triggers a separate getDeviations()
+  // call — it is NOT a gateway query param. This sub-scenario tests the conformance
+  // endpoint fields only.
+
+  test('step 1 — GET /api/conformance returns all 7 fields the MCP tool reads', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/conformance')
+    expect(res.status).toBe(200)
+
+    // These are the exact field names read by quorum-mcp/src/tools/conformance.js
+    expect(typeof res.data.score).toBe('number')
+    expect(['CERTIFIED', 'UNCERTIFIED']).toContain(res.data.status)
+    expect(typeof res.data.scan_count).toBe('number')
+    expect(typeof res.data.applicable_entries).toBe('number')
+    // last_scan_at is null when no scans yet, string when scanned
+    expect(res.data.last_scan_at === null || typeof res.data.last_scan_at === 'string').toBe(true)
+    expect(Array.isArray(res.data.catalogs)).toBe(true)
+    expect(typeof res.data.breakdown).toBe('object')
+  })
+
+  test('step 2 — breakdown contains all 6 expected keys', async () => {
+    // The MCP tool renders a breakdown bar from these keys. A missing key
+    // silently produces NaN in the display without throwing.
+    const res = await api(tokens.pe, PROJECT).get('/api/conformance')
+    expect(res.status).toBe(200)
+    const bd = res.data.breakdown
+    for (const key of ['open', 'accepted', 'denied', 'deferred', 'overdue', 'resolved']) {
+      expect(typeof bd[key]).toBe('number')
+    }
+  })
+
+  test('step 3 — UNCERTIFIED project returns expected shape (no globals)', async () => {
+    // quorum-test-isolated-project has no globals — always UNCERTIFIED.
+    // The MCP tool branches on status==='UNCERTIFIED' and uses scan_count +
+    // catalogs.length + applicable_entries to choose the right message.
+    // All three must be present even in the UNCERTIFIED case.
+    const res = await api(tokens.pe, 'quorum-test-isolated-project').get('/api/conformance')
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('UNCERTIFIED')
+    expect(typeof res.data.scan_count).toBe('number')
+    expect(Array.isArray(res.data.catalogs)).toBe(true)
+    expect(typeof res.data.applicable_entries).toBe('number')
   })
 })
 
