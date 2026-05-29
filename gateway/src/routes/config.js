@@ -223,6 +223,60 @@ router.post('/upload', async (req, res) => {
   })
 })
 
+// PUT /config/:projectId — update existing project config (PA or admin only)
+// E2E: tests/e2e/scenarios/13-config-governance.spec.js — S-13.6 config update write path
+router.put('/:projectId', verifyJwt, async (req, res) => {
+  const { projectId } = req.params
+
+  if (req.user.project !== projectId) {
+    return res.status(403).json({
+      error:   'forbidden',
+      message: `Your JWT grants access to project '${req.user.project}', not '${projectId}'`,
+    })
+  }
+  if (req.user.role !== 'principal_architect' && !req.user.is_admin) {
+    return res.status(403).json({
+      error:   'forbidden',
+      message: 'Config update requires principal_architect role',
+    })
+  }
+
+  const bucket = process.env.QUORUM_CONFIG_BUCKET
+  if (!bucket) {
+    return res.status(500).json({ error: 'config_error', message: 'QUORUM_CONFIG_BUCKET not set' })
+  }
+
+  const result = QuorumConfigSchema.safeParse(req.body)
+  if (!result.success) {
+    return res.status(400).json({
+      error:  'invalid_config',
+      errors: result.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    })
+  }
+
+  const config = result.data
+  if (config.group_id !== projectId) {
+    return res.status(400).json({
+      error:   'group_id_mismatch',
+      message: `config.group_id '${config.group_id}' must match URL projectId '${projectId}'`,
+    })
+  }
+
+  try {
+    await saveProjectConfig(projectId, config)
+  } catch (err) {
+    console.error(`[Gateway:config] PUT update failed for ${projectId}: ${err.message}`)
+    return res.status(502).json({ error: 'storage_error', message: 'Failed to update config in S3' })
+  }
+
+  const syncResult = await syncOneProject(bucket, projectId)
+  if (!syncResult.ok) {
+    console.error(`[Gateway:config] DDB re-sync failed for ${projectId}: ${syncResult.error}`)
+  }
+
+  res.json({ ok: true, project_id: projectId, message: `Config updated successfully.` })
+})
+
 // GET /config/:projectId — fetch project config (JWT required)
 router.get('/:projectId', verifyJwt, async (req, res) => {
   const { projectId } = req.params

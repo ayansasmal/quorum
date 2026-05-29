@@ -11,6 +11,7 @@
  *   S-13.3  Self-reference guard — a project listing itself in globals fails DDB sync
  *   S-13.4  GET /api/globals — returns is_global:true catalogs with correct shape
  *   S-13.5  Config schema validation — v0.4 fields (is_global, global_scope, globals)
+ *   S-13.6  PUT /config/:projectId — PA can update existing config; cache invalidated; non-PA → 403
  *
  * Architecture notes:
  *   POST /sync/configs:
@@ -317,5 +318,58 @@ describe('S-13.5 — Config Schema Validation', () => {
   })
 
 }) // S-13.5 — Config Schema Validation
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-13.6 — PUT /config/:projectId — Config Update Write Path
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-13.6 — Config Update Write Path', () => {
+  // The dashboard Config editor calls PUT /config/:projectId on Save.
+  // This route was not wired in the gateway — any PA saving config changes
+  // received a silent 404. S-13.6 covers the write path end-to-end:
+  //   read current → mutate display name → PUT → re-read verifies cache invalidated.
+
+  let originalConfig
+
+  beforeAll(async () => {
+    // Read the current test-project config so we can restore it after the test.
+    const res = await api(tokens.pe, PROJECT).get(`/config/${PROJECT}`)
+    expect(res.status).toBe(200)
+    originalConfig = res.data
+  })
+
+  test('step 1 — PA can PUT a valid config → 200, ok:true', async () => {
+    const updated = { ...originalConfig, project: `${originalConfig.project ?? PROJECT} [S-13.6 test]` }
+    const res = await api(tokens.pe, PROJECT).put(`/config/${PROJECT}`, updated)
+    expect(res.status).toBe(200)
+    expect(res.data.ok).toBe(true)
+    expect(res.data.project_id).toBe(PROJECT)
+  })
+
+  test('step 2 — GET after PUT reflects the change (cache invalidated)', async () => {
+    // If PUT did not invalidate the Redis cache the stale config would come back.
+    const res = await api(tokens.pe, PROJECT).get(`/config/${PROJECT}`)
+    expect(res.status).toBe(200)
+    expect(res.data.project).toBe(`${originalConfig.project ?? PROJECT} [S-13.6 test]`)
+  })
+
+  test('step 3 — non-PA (engineer) → 403 on PUT', async () => {
+    const res = await api(tokens.engineer, PROJECT).put(`/config/${PROJECT}`, originalConfig)
+    expect(res.status).toBe(403)
+  })
+
+  test('step 4 — group_id mismatch in body → 400', async () => {
+    const mismatch = { ...originalConfig, group_id: 'completely-different-project' }
+    const res = await api(tokens.pe, PROJECT).put(`/config/${PROJECT}`, mismatch)
+    expect(res.status).toBe(400)
+    expect(res.data.error).toBe('group_id_mismatch')
+  })
+
+  test('step 5 — restore original config', async () => {
+    // Cleanup: restore the config so other test runs see the original display name.
+    const res = await api(tokens.pe, PROJECT).put(`/config/${PROJECT}`, originalConfig)
+    expect(res.status).toBe(200)
+  })
+})
 
 }) // S-13 — Config Governance

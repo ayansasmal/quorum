@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 687 | E2E: 505 passed | GAP-005 deferred; GAP-006 ✅ (S-21.6); GAP-007 ✅ (S-21.7)*
+*Updated: 2026-05-29 | Gateway unit tests: 687 | E2E: 510 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6)*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -439,11 +439,17 @@ test.describe('S-21.7 conformance() MCP HTTP contract', () => {
 
 ---
 
-### GAP-008 — Config update workflow not E2E tested
+### GAP-008 — Config update workflow not E2E tested ✅ CLOSED
 
 **Journeys:** J13
 **Risk:** P1
-**Test type:** E2E-API (new sub-scenario in S-13), possibly CODE-FIRST
+**Test type:** E2E-API (new sub-scenario in S-13), CODE-FIRST
+
+**Closed: 2026-05-29** — `PUT /config/:projectId` route added to `gateway/src/routes/config.js`
+(PA/admin only; schema-validated; `group_id` URL mismatch → 400; calls `saveProjectConfig` for
+S3 write + Redis invalidation, then `syncOneProject` for DDB membership sync). S-13.6 added
+(5 tests): PA PUT → 200; GET after PUT reflects change (cache invalidated); engineer → 403;
+`group_id` mismatch → 400; restore cleanup. E2E suite: 510 passed, 1 skipped.
 
 **Context:**
 CLAUDE.md: *"to update an existing project config use the dashboard Config editor or
