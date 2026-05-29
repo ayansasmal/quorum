@@ -264,13 +264,25 @@ Wave G — Documentation ✅
   ✅ docs/FRONTEND.md — Deviations page, Stats update, Pending update, Knowledge update
   ✅ quorum-mcp SKILL.md + README — deviate/conformance tools, scan/onboard skills
 
+Wave H — Quality & Security Hardening ✅ (post-Wave G)
+  ✅ GAP-001: adversarial hash-chain tamper detection tests (3 UT)
+  ✅ GAP-002: is_public non-member enforcement on all /api/* routes (S-05.10, 6 E2E)
+  ✅ GAP-003: coexist_merge conflict resolution + self-approval enforcement (S-11.4, 6 E2E)
+  ✅ coexist_merge: new ACTIVE entry by reviewer, both source versions SUPERSEDED atomically
+  ✅ getLatestDraftVersion includes PENDING_CONFLICT_CHECK (self-approval check was bypassed for PA writes)
+  ✅ LEGAL_TRANSITIONS extended: DRAFT→SUPERSEDED, PENDING_CONFLICT_CHECK→SUPERSEDED
+  ✅ POST /config/upload upsert: 200 on update (re-syncs DDB, invalidates Redis), 201 on create
+  ✅ test-pe2 (second PA) fixture member added; pe2Token() factory in jwt.js
+  ✅ 498 E2E tests passing (up from 492); 685 gateway unit tests (up from 675)
+
 Success criteria met:
   → Cross-project reads: recall() + search() transparently traverse linked global catalogs
   → Conformance scores visible per project in Stats page
   → Deviation governance: PEs can accept/deny/defer with full constitutional enforcement
   → Portfolio view available to principal_architect + executive roles
   → UNCERTIFIED state shown clearly; no misleading scores during cold-start
-  → 675 gateway tests + 620 quorum-mcp tests passing
+  → All three P0 security/trust gaps closed (GAP-001, GAP-002, GAP-003)
+  → 685 gateway tests + 620 quorum-mcp tests passing · 498 E2E tests (Playwright)
 ```
 
 ---

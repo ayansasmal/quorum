@@ -112,8 +112,10 @@ graph TB
 - **Conformance scoring** — `GET /api/conformance` returns weighted score per project; UNCERTIFIED gate when catalog has < 10 ACTIVE entries or no scans; `quorum:scan` skill for incremental CI-driven scanning
 - **Portfolio intelligence** — `GET /api/portfolio` (role-gated: exec + `is_admin`); weighted criticality rollup over all projects; `denial_hint_count` badge on global entries in Knowledge browser
 - **Dashboard** — Stats (ConformanceCard: score badge, breakdown bar, staleness warning), Deviations (filter rail, inline action panel), Pending (overdue deferrals), Knowledge (denial hint badges), Graph, Audit, Config, Admin; full light/dark theme
-- **Tests** — 675 gateway tests · 620 quorum-mcp tests; coverage 86% lines · 77% branches; CI on Node 22
-- **Tooling** — OpenAPI 3.1 spec v0.4.0 at [`gateway/openapi.yaml`](gateway/openapi.yaml) (Federation, Deviations, Conformance, Portfolio tags); `GET /schema/config` public JSON Schema; [`scripts/audit-cli.js`](scripts/audit-cli.js) ops CLI; E2E suite via `npm run test:e2e:docker`
+- **Conflict resolution** — `approve` / `reject` / `request_changes` / `coexist_merge`; `coexist_merge` creates a new unified ACTIVE entry authored by the reviewer, superseding both source versions atomically; self-approval constitutional check applies to all four actions
+- **Config upsert** — `POST /config/upload` is a true upsert: returns 200 on update (re-syncs DDB, invalidates Redis), 201 on first create; allows fixture and team config changes to take effect without environment restarts
+- **Tests** — 685 gateway tests · 620 quorum-mcp tests · 498 E2E (Playwright); coverage 86% lines · 77% branches; CI on Node 22; fully-isolated Docker E2E stack (`npm run test:e2e:docker`)
+- **Tooling** — OpenAPI 3.1 spec v0.4.0 at [`gateway/openapi.yaml`](gateway/openapi.yaml) (Federation, Deviations, Conformance, Portfolio tags); `GET /schema/config` public JSON Schema; [`scripts/audit-cli.js`](scripts/audit-cli.js) ops CLI
 
 ---
 
@@ -222,7 +224,7 @@ Engineering decisions explain *how* things are built. Business requirements expl
 - **v0.1** (shipped) — Core MCP server, Graphiti integration, conflict detection, provenance tracking, dual-store audit pipeline, FalkorDB docker stack
 - **v0.2** (shipped) — Quorum Gateway (ES256 JWT, GitHub OAuth, S3-backed project config), multi-project scoping, authority weighting, confidence decay, human-in-the-loop conflict resolution, Quorum Dashboard, self-evolving SKILL.md
 - **v0.3** (shipped) — Slim JWT `{ sub, is_admin }`, Redis config/profile/admin cache with pub/sub invalidation, `X-Quorum-Project` header, ownership governance, PostgreSQL `summary` as durable content store, deprecation request workflow
-- **v0.4** (shipped) — Federation (global catalogs, cross-project reads), deviation governance (`deviate()`, accept/deny/defer with constitutional enforcement), conformance scoring (`conformance()`, `quorum:scan` CI skill), portfolio intelligence (exec-gated org rollup, denial hint badges), fully-isolated E2E Docker test suite; 675 gateway tests · 620 quorum-mcp tests
+- **v0.4** (shipped) — Federation (global catalogs, cross-project reads), deviation governance (`deviate()`, accept/deny/defer with constitutional enforcement), conformance scoring (`conformance()`, `quorum:scan` CI skill), portfolio intelligence (exec-gated org rollup, denial hint badges), fully-isolated E2E Docker test suite, `coexist_merge` conflict resolution, config upsert; 685 gateway tests · 620 quorum-mcp tests · 498 E2E tests
 - **v0.5** — PR ingestion (`ingest_pr`), Atlassian integration (`enrich_from_jira`, `enrich_from_confluence`), multi-team namespacing, cross-team promotion workflow
 - **v1.0** — Production hardening, external security audit, hosted docs
 
