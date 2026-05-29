@@ -48,10 +48,14 @@ CREATE INDEX IF NOT EXISTS idx_qp_members  ON q_projects USING GIN (members);
 -- Migration guard: add is_global to existing databases.
 -- CREATE TABLE IF NOT EXISTS only covers the column for fresh installs; this
 -- ALTER TABLE ADD COLUMN IF NOT EXISTS handles existing schemas idempotently.
-ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_global BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_global    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_archived  BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS archived_at  TIMESTAMPTZ;
+ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS archived_by  TEXT;
 -- Partial index for GET /api/globals discovery — only indexes global catalog rows.
 -- Must be declared after ADD COLUMN IF NOT EXISTS so it works on existing schemas.
-CREATE INDEX IF NOT EXISTS idx_qp_is_global ON q_projects (is_global) WHERE is_global = TRUE;
+CREATE INDEX IF NOT EXISTS idx_qp_is_global   ON q_projects (is_global)   WHERE is_global = TRUE;
+CREATE INDEX IF NOT EXISTS idx_qp_is_archived ON q_projects (is_archived) WHERE is_archived = TRUE;
 
 -- ── Knowledge entry registry ──────────────────────────────────────────────────
 -- One row per (project, topic, key) triple. Replaces the scattered triple

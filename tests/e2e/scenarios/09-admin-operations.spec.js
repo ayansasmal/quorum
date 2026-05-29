@@ -15,6 +15,7 @@
  *   S-09.5  Dashboard admin panel visible only with is_admin:true JWT (browser)
  *   S-09.6  User profile — GET /user/profile/:username (any authenticated user)
  *   S-09.7  Admin filtered audit log — GET /pg/audit?tool=role_update (GAP-021)
+ *   S-09.8  Project archive — DELETE /admin/projects/:groupId soft-archives; guards 400+403 (GAP-022)
  *
  * Architecture notes:
  *   Admin routes (/admin/*) gate on req.user.is_admin (from JWT is_admin claim).
@@ -33,6 +34,9 @@ import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 
 const PROJECT = 'quorum-test-project'
 const CATALOG = 'quorum-test-catalog'
+
+// Unique throwaway project for S-09.8 archive test — never conflicts with other runs.
+const THROWAWAY_PROJECT = `s09-archive-test-${Date.now()}`
 
 // All admin state mutations are sequential; serial prevents race conditions.
 test.describe.configure({ mode: 'serial' })
@@ -263,5 +267,65 @@ describe('S-09.7 — Admin Filtered Audit Log', () => {
     expect(res.data.ok).toBe(true)
   })
 }) // S-09.7 — Admin Filtered Audit Log
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-09.8 — Project Archive (GAP-022)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-09.8 — Project Archive', () => {
+  // Creates a throwaway project, archives it, and verifies the soft-delete response.
+  // DELETE /admin/projects/:groupId is intentionally admin/dashboard-only (no MCP tool).
+
+  beforeAll(async () => {
+    // Upload a minimal throwaway config so the project exists in q_projects.
+    // Uses tokens.pe (principal_architect in quorum-test-project) — authUpload passes on role check.
+    // Config sent as root body (not wrapped) — QuorumConfigSchema.safeParse(req.body) expects this.
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.post('/config/upload', {
+      group_id:    THROWAWAY_PROJECT,
+      owner:       'test-pe',
+      project:     'S-09.8 Throwaway Archive Test',
+      members: [{ name: 'Test PE', github_username: 'test-pe', role: 'principal_architect', base_confidence: 0.8, team: 'platform' }],
+    })
+    if (res.status !== 201 && res.status !== 200) {
+      throw new Error(`S-09.8 beforeAll: config upload failed with ${res.status}: ${JSON.stringify(res.data)}`)
+    }
+  })
+
+  test('step 1 — DELETE /admin/projects/:groupId with short reason → 400', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.delete(`/admin/projects/${THROWAWAY_PROJECT}`, { data: { reason: 'short' } })
+    expect(res.status).toBe(400)
+    expect(res.data.rule).toBe('REASON_REQUIRED')
+  })
+
+  test('step 2 — DELETE /admin/projects/:groupId as non-admin → 403', async () => {
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.delete(`/admin/projects/${THROWAWAY_PROJECT}`, {
+      data: { reason: 'Attempting archive without admin privileges — should be blocked.' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  test('step 3 — admin archives throwaway project → 200 with archived:true', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.delete(`/admin/projects/${THROWAWAY_PROJECT}`, {
+      data: { reason: 'S-09.8 cleanup — archiving throwaway project created for archive test.' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.archived).toBe(true)
+    expect(res.data.group_id).toBe(THROWAWAY_PROJECT)
+    expect(res.data.archived_by).toBe('test-admin')
+    expect(typeof res.data.versions_deprecated).toBe('number')
+  })
+
+  test('step 4 — archiving an already-archived project → 404', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.delete(`/admin/projects/${THROWAWAY_PROJECT}`, {
+      data: { reason: 'Attempting to archive an already-archived project — should 404.' },
+    })
+    expect(res.status).toBe(404)
+  })
+}) // S-09.8 — Project Archive
 
 }) // S-09 — Admin Operations

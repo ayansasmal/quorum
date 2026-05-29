@@ -17,7 +17,7 @@
 
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
-import { loadAdminConfig, saveAdminConfig } from '../config-cache.js'
+import { loadAdminConfig, saveAdminConfig, invalidateProject } from '../config-cache.js'
 import { writeGovernanceAudit } from '../shared/audit/governance.js'
 import { enforceReasonRequired } from '../shared/governance/constitutional.js'
 
@@ -122,6 +122,69 @@ router.get('/projects', verifyJwt, requireAdmin, async (req, res, next) => {
        ORDER BY created_at DESC`,
     )
     res.json({ projects: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DELETE /admin/projects/:groupId — soft-archive a project (admin-only)
+// Sets is_archived=TRUE + archived_at/by on q_projects, bulk-deprecates ACTIVE knowledge.
+// GOVERNANCE: intentionally admin/dashboard-only — MCP must never expose this.
+// E2E: tests/e2e/scenarios/09-admin-operations.spec.js — S-09.8 (archive + guard)
+router.delete('/projects/:groupId', verifyJwt, requireAdmin, async (req, res, next) => {
+  const { groupId } = req.params
+  const { reason }  = req.body ?? {}
+  const pool        = req.app.locals.pool
+
+  try {
+    enforceReasonRequired(reason, 'archive-project')
+  } catch (err) {
+    return next(err)
+  }
+
+  try {
+    const found = await pool.query(
+      `SELECT q_project_id FROM q_projects WHERE group_id = $1 AND is_archived = FALSE`,
+      [groupId],
+    )
+    if (!found.rows[0]) {
+      return res.status(404).json({ error: 'project_not_found', message: `Project '${groupId}' not found or already archived` })
+    }
+    const qProjectId = found.rows[0].q_project_id
+
+    // Bulk-deprecate all ACTIVE knowledge versions in this project
+    const deprecated = await pool.query(
+      `UPDATE knowledge_versions SET status = 'DEPRECATED'
+       WHERE q_project_id = $1 AND status = 'ACTIVE'
+       RETURNING version_id`,
+      [qProjectId],
+    )
+
+    // Soft-archive the project
+    await pool.query(
+      `UPDATE q_projects SET is_archived = TRUE, archived_at = NOW(), archived_by = $1
+       WHERE q_project_id = $2`,
+      [req.user.sub, qProjectId],
+    )
+
+    // Invalidate config cache so subsequent requests see the archived state
+    await invalidateProject(groupId)
+
+    await writeGovernanceAudit(pool, {
+      actor:      req.user.sub,
+      actor_type: 'admin',
+      action:     'project_archive',
+      project:    null,
+      to:         groupId,
+      reason,
+    })
+
+    res.json({
+      group_id:            groupId,
+      archived:            true,
+      archived_by:         req.user.sub,
+      versions_deprecated: deprecated.rowCount,
+    })
   } catch (err) {
     next(err)
   }

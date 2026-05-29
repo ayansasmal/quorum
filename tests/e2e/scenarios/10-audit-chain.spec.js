@@ -9,6 +9,8 @@
  *          Lineage                (S-10.8)
  *          Cross-Project Isolation (S-10.9)  — negative: entry from project A is 404 under project B
  *          Append-Only Enforcement (S-10.10) — negative: no HTTP verb exists to delete/patch entries
+ *          Server-Side Verify      (S-10.11) — GET /pg/audit/verify returns verified:true; 403 for non-admin
+ *          NDJSON Export           (S-10.12) — GET /pg/audit/export?format=ndjson returns chain fields; 403 for non-admin
  *
  * Sub-scenarios:
  *   S-10.1  Write creates audit entries — seeding an ACTIVE entry via PA produces ≥ 1
@@ -402,5 +404,64 @@ describe('S-10.10 — Audit Append-Only Enforcement (NEGATIVE)', () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-10.11 — Server-Side Chain Verification (GAP-018)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-10.11 — Server-Side Chain Verification', () => {
+  // GET /pg/audit/verify runs verifyChain() server-side over the full global chain.
+  // Unlike the CLI (which re-fetches via HTTP and is vulnerable to pagination gaps),
+  // this route queries the DB directly — guaranteeing complete coverage.
+
+  test('step 1 — GET /pg/audit/verify as admin returns verified:true with entry count', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.get('/pg/audit/verify')
+    expect(res.status).toBe(200)
+    expect(res.data.verified).toBe(true)
+    expect(typeof res.data.entries).toBe('number')
+    expect(res.data.entries).toBeGreaterThan(0)
+  })
+
+  test('step 2 — GET /pg/audit/verify as non-admin returns 403', async () => {
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.get('/pg/audit/verify')
+    expect(res.status).toBe(403)
+  })
+}) // S-10.11 — Server-Side Chain Verification
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-10.12 — NDJSON Compliance Export (GAP-019)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-10.12 — NDJSON Compliance Export', () => {
+  test('step 1 — GET /pg/audit/export?format=ndjson as admin returns all chain fields', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.get('/pg/audit/export?format=ndjson', { responseType: 'text' })
+    expect(res.status).toBe(200)
+    const lines = res.data.trim().split('\n').map(l => JSON.parse(l))
+    expect(lines.length).toBeGreaterThan(0)
+    const first = lines[0]
+    expect(first.entry_hash).toMatch(/^[a-f0-9]{64}$/)
+    // chain_position is BIGINT → serialised as string by pg driver
+    expect(typeof first.chain_position).toBe('string')
+    // previous_hash is null for the first entry, 64-char hex for all others
+    const isNullOrHex = v => v === null || /^[a-f0-9]{64}$/.test(v)
+    expect(isNullOrHex(first.previous_hash)).toBe(true)
+  })
+
+  test('step 2 — GET /pg/audit/export as non-admin returns 403', async () => {
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.get('/pg/audit/export?format=ndjson')
+    expect(res.status).toBe(403)
+  })
+
+  test('step 3 — unsupported format returns 400', async () => {
+    const client = api(tokens.admin, PROJECT)
+    const res = await client.get('/pg/audit/export?format=csv')
+    expect(res.status).toBe(400)
+    expect(res.data.error).toBe('unsupported_format')
+  })
+}) // S-10.12 — NDJSON Compliance Export
 
 }) // S-10 — Audit Chain Integrity

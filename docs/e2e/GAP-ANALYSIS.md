@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 697 | E2E: 541 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅; P4 partial: GAP-021 ✅*
+*Updated: 2026-05-29 | Gateway unit tests: 704 | E2E: 550 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅; P4 all closed: GAP-018 ✅ GAP-019 ✅ GAP-020 ✅ GAP-021 ✅ GAP-022 ✅*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -14,7 +14,7 @@
 | P1 | Silent contract failures — system reports success, delivers wrong behavior | 5 |
 | P2 | API contract coverage — untested integration paths | 6 → 0 (all closed) |
 | P3 | Governance workflow completeness | 5 → 0 (all closed) |
-| P4 | Operational / observability | 6 |
+| P4 | Operational / observability | 6 → 0 (all closed) |
 | P5 | UI/UX completeness | 7 |
 | P6 | Not yet built (v0.5+ or design decision required) | 6 |
 | **Total** | | **38** |
@@ -897,7 +897,7 @@ test('S-02.8.6 stale_warning badge visible on a stale conflict', async () => {
 
 ---
 
-### GAP-018 — Audit chain CLI verification not E2E tested
+### GAP-018 — Audit chain CLI verification not E2E tested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J10
 **Risk:** P4
@@ -931,7 +931,7 @@ See `src/utils/execFileNoThrow.ts` for the safe invocation pattern used in this 
 
 ---
 
-### GAP-019 — Audit export for compliance not E2E tested
+### GAP-019 — Audit export for compliance not E2E tested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J10
 **Risk:** P4
@@ -967,7 +967,7 @@ test('S-10.10 audit NDJSON export contains chain fields on every entry', async (
 
 ---
 
-### GAP-020 — Confidence decay script has no test coverage
+### GAP-020 — Confidence decay script has no test coverage ✅ CLOSED (2026-05-29)
 
 **Journeys:** J08
 **Risk:** P4
@@ -1045,7 +1045,7 @@ test('S-09.7 admin role-update creates audit entry with tool=admin-role-update',
 
 ---
 
-### GAP-022 — Project offboarding flow not E2E tested
+### GAP-022 — Project offboarding flow not E2E tested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J09
 **Risk:** P4

@@ -41,10 +41,11 @@ const pool = new pg.Pool({
 
 /**
  * Compute the decay floor for a given starting_confidence.
+ * Floor = max(ABSOLUTE_FLOOR, startingConfidence × 0.30) — preserves relative authority.
  * @param {number} startingConfidence
  * @returns {number}
  */
-function decayFloor(startingConfidence) {
+export function decayFloor(startingConfidence) {
   return Math.max(ABSOLUTE_FLOOR, startingConfidence * 0.30)
 }
 
@@ -56,6 +57,20 @@ function decayFloor(startingConfidence) {
 function weeksSince(accessedAt) {
   const ref = accessedAt ? new Date(accessedAt) : new Date()
   return (Date.now() - ref.getTime()) / MS_PER_WEEK
+}
+
+/**
+ * Apply time-based confidence decay, clamped to the starting-confidence floor.
+ * This is the combined formula used by the weekly cron: Math.max(floor, onAgeDecay(current, weeks)).
+ * Exported for unit testing — the cron's run() uses this exact logic inline.
+ * @param {number} current           - current confidence [0,1]
+ * @param {number} startingConfidence - the entry's original confidence (used for floor)
+ * @param {number} weeksSinceAccess  - weeks since last access
+ * @returns {number} new confidence, clamped to floor
+ */
+export function computeDecay(current, startingConfidence, weeksSinceAccess) {
+  const floor = decayFloor(startingConfidence)
+  return Math.max(floor, onAgeDecay(current, weeksSinceAccess))
 }
 
 async function run() {

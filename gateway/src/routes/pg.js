@@ -72,11 +72,57 @@ import {
   getAllEntries,
   countEntries,
 } from '../shared/audit/secondary.js'
+import { verifyChain, ChainIntegrityViolation } from '../shared/audit/chain.js'
 
 const router = Router()
 
 // All pg routes require a valid JWT
 router.use(verifyJwt)
+
+// ── Admin-only unscoped routes — registered BEFORE project-scope middleware ───
+// These operate on the global audit chain, not a project-scoped subset.
+
+// GET /pg/audit/verify — server-side chain integrity verification (admin-only)
+// E2E: tests/e2e/scenarios/10-audit-chain.spec.js — S-10.11 step 1+2 (chain verify + 403 gate)
+router.get('/audit/verify', async (req, res, next) => {
+  if (!req.user.is_admin) return res.status(403).json({ error: 'forbidden' })
+  const pool = req.app.locals.pool
+  try {
+    const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY chain_position ASC')
+    try {
+      const result = verifyChain(rows)
+      res.json(result)
+    } catch (err) {
+      if (err instanceof ChainIntegrityViolation) {
+        res.json({
+          verified:  false,
+          entries:   rows.length,
+          broken_at: { position: err.position, expected: err.expected, actual: err.actual },
+        })
+      } else {
+        next(err)
+      }
+    }
+  } catch (err) { next(err) }
+})
+
+// GET /pg/audit/export?format=ndjson — compliance export (admin-only)
+// Returns all audit entries as newline-delimited JSON. Suitable for archival,
+// compliance handoff, and external chain verification tooling.
+// E2E: tests/e2e/scenarios/10-audit-chain.spec.js — S-10.12 (NDJSON fields + admin gate)
+router.get('/audit/export', async (req, res, next) => {
+  if (!req.user.is_admin) return res.status(403).json({ error: 'forbidden' })
+  const { format = 'ndjson' } = req.query
+  if (format !== 'ndjson') {
+    return res.status(400).json({ error: 'unsupported_format', message: 'Only format=ndjson is supported' })
+  }
+  const pool = req.app.locals.pool
+  try {
+    const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY chain_position ASC')
+    res.setHeader('Content-Type', 'application/x-ndjson')
+    res.send(rows.map(r => JSON.stringify(r)).join('\n'))
+  } catch (err) { next(err) }
+})
 
 // All pg routes are project-scoped — X-Quorum-Project header required.
 // Non-members of private projects (access_denied set by verify-jwt.js) are blocked here.
