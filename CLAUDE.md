@@ -204,6 +204,8 @@ graph TD
 
 **Gap analysis complete (2026-05-28):** `docs/e2e/journey-story-28-05-2026.md` + `docs/e2e/GAP-ANALYSIS.md` — 38 prioritised gaps across P0–P6. Three-layer test architecture: UT (pure function) | GIT (gateway integration, mocked DB) | E2E-API (running stack) | E2E-UI (Playwright browser). P0 gaps: hash chain tamper detection (GAP-001 ✅), `is_public` RBAC matrix coverage (GAP-002 ✅), self-approval+coexist-merge (GAP-003 ✅). P1 silent failure: `constraints` silently dropped from `buildExtractPrompt` (GAP-004 — `governance.js` line 287–290 does not destructure `constraints`; fix: add to destructure + pass to prompt builder). All P0 gaps closed as of 2026-05-29. First-sprint ~11h covered all P0 gaps (P1 GAP-004 pending).
 
+**Documentation synced (2026-05-29):** All docs updated to reflect 685 gateway tests, 498 E2E, all P0 gaps closed. Updated: `README.md` (test counts, coexist_merge, config upsert), `docs/ROADMAP.md` (Wave H section), `docs/TESTING.md` (v0.4 snapshot, e2e suite metrics), `docs/e2e/GAP-ANALYSIS.md` (P0 closure notes), `docs/e2e/README.md` + `TEST-PLAN.md` (S-11 OwnScore 180→288, suite total 3422→3530, pillar table corrected), `docs/e2e/journeys/J11-self-approval.md` (S-11.4 Case 4 added), `docs/ARCHITECTURE.md` (config/upload upsert, coexist_merge in /api/review).
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
 
 > [ROADMAP.md](docs/ROADMAP.md)
