@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 688 | E2E: 538 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅*
+*Updated: 2026-05-29 | Gateway unit tests: 697 | E2E: 541 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅; P4 partial: GAP-021 ✅*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -1012,7 +1012,7 @@ it('returns original confidence when no time has elapsed', () => {
 
 ---
 
-### GAP-021 — Admin operations have no filtered audit log view
+### GAP-021 — Admin operations have no filtered audit log view ✅ CLOSED (2026-05-29)
 
 **Journeys:** J09
 **Risk:** P4

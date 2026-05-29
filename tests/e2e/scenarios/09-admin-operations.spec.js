@@ -14,6 +14,7 @@
  *   S-09.4  Reason guard — short reason on admin/users → 400 REASON_REQUIRED
  *   S-09.5  Dashboard admin panel visible only with is_admin:true JWT (browser)
  *   S-09.6  User profile — GET /user/profile/:username (any authenticated user)
+ *   S-09.7  Admin filtered audit log — GET /pg/audit?tool=role_update (GAP-021)
  *
  * Architecture notes:
  *   Admin routes (/admin/*) gate on req.user.is_admin (from JWT is_admin claim).
@@ -212,6 +213,55 @@ describe('S-09.6 — User Profile', () => {
     expect(res.status).toBe(404)
     expect(res.data.error).toBe('profile_not_found')
   })
-}) // S-09 — Admin Operations
+})
 
-}) // outer describe — required by graph reporter extractScenarioId()
+// ─────────────────────────────────────────────────────────────────────────────
+// S-09.7 — Admin Filtered Audit Log (GAP-021)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-09.7 — Admin Filtered Audit Log', () => {
+  // GAP-021: Governance operations (role_update, admin_add) write to the shared
+  // audit_log table. role_update is project-scoped so it is queryable via
+  // GET /pg/audit?tool=role_update — giving admins an isolated governance event view.
+  //
+  // admin_add/admin_remove have project=null and are NOT in the project-scoped log.
+  // That is intentional — platform-level events are cross-project by nature.
+
+  test('step 1 — POST /config/update-role writes a role_update audit entry', async () => {
+    // Change test-architect from architect → senior (then restore in step 3).
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.post('/config/update-role', {
+      github_username: 'test-architect',
+      role:            'senior',
+      reason:          'S-09.7 audit coverage test — role will be restored in step 3.',
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.ok).toBe(true)
+  })
+
+  test('step 2 — GET /pg/audit?tool=role_update returns the governance audit entry', async () => {
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.get('/pg/audit?tool=role_update')
+    expect(res.status).toBe(200)
+    const entries = res.data.entries ?? []
+    expect(entries.length).toBeGreaterThan(0)
+    const entry = entries[0]
+    // Governance entries share the same audit shape as knowledge entries
+    expect(entry.tool).toBe('role_update')
+    expect(entry.entry_hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(typeof entry.chain_position).toBe('string')
+  })
+
+  test('step 3 — restore test-architect role to architect', async () => {
+    const client = api(tokens.pe, PROJECT)
+    const res = await client.post('/config/update-role', {
+      github_username: 'test-architect',
+      role:            'architect',
+      reason:          'S-09.7 cleanup — restoring role to original architect after audit coverage test.',
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.ok).toBe(true)
+  })
+}) // S-09.7 — Admin Filtered Audit Log
+
+}) // S-09 — Admin Operations
