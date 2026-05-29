@@ -9,9 +9,10 @@
  * Sub-scenarios:
  *   S-21.1  pending() topic filter — GET /pg/pending?topic=X narrows to that topic only
  *   S-21.2  Requirement entity round-trip — entity_type='Requirement' accepted by gateway
- *   S-21.3  /governance/extract accepts constraints field — no 400 on the extra param
+ *   S-21.3  /governance/extract constraints forwarding — field accepted + forwarded to LLM prompt
  *   S-21.4  Config schema owner field required — POST /config/validate without owner → 400
  *   S-21.5  /pg/versions status authority — status always derived server-side, body value ignored
+ *   S-21.6  deviate() MCP HTTP contract — field shapes, severity non-zero, idempotent, not_linked
  *
  * Architecture notes:
  *   The E2E suite historically exercised dashboard /api/* routes. The MCP GatewayClient
@@ -27,11 +28,10 @@
  *           Requirement node type includes a 'business_owner' property not yet reflected
  *           in the gateway schema — we test acceptance here, not property storage.
  *
- *   S-21.3: The gateway's POST /governance/extract currently accepts but silently drops
- *           any 'constraints' field — it is not forwarded to buildExtractPrompt(). This
- *           spec verifies HTTP acceptance (no 400). LLM-prompt forwarding is verified by
- *           the quorum-mcp unit test in tests/tools/reflect.test.js.
- *           See also: gateway/src/routes/governance.js buildExtractPrompt() TODO.
+ *   S-21.3: POST /governance/extract forwards constraints[] into the LLM user prompt as a
+ *           "do NOT extract" block (GAP-004 closed). HTTP acceptance + forwarding both
+ *           verified: E2E checks the 200 response, gateway unit test asserts callLLM
+ *           receives the constraint text in the prompt user string.
  *
  *   S-21.4: Gateway QuorumConfigSchema requires owner: z.string().min(1). The quorum-mcp
  *           QuorumConfigSchema (src/config/schema.js) lacks this field — creating a trap
@@ -52,9 +52,9 @@
 import { test, expect } from '@playwright/test'
 
 const { describe, beforeAll } = test
-import { api }    from '../helpers/api.js'
-import { tokens } from '../helpers/jwt.js'
-import { uid }    from '../helpers/seed.js'
+import { api }              from '../helpers/api.js'
+import { tokens }           from '../helpers/jwt.js'
+import { uid, activeEntry } from '../helpers/seed.js'
 
 const PROJECT = 'quorum-test-project'
 
@@ -379,6 +379,98 @@ describe('S-21.5 — Status authority on /pg/versions', () => {
     })
     expect(res.status).toBe(201)
     expect(res.data.status).toBe('PENDING_CONFLICT_CHECK')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-21.6 — deviate() MCP HTTP contract
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-21.6 — deviate() MCP HTTP contract', () => {
+  // The deviate() MCP tool is a thin proxy to POST /api/deviations.
+  // This sub-scenario verifies the request shape the MCP sends maps correctly
+  // onto the gateway contract — wrong field name or missing key silently
+  // produces severity:0 or a not_found body the MCP misreads as success.
+  //
+  // POST /api/deviations always returns HTTP 200.
+  // Body status discriminates: 'recorded' | 'not_linked' | 'not_found'
+
+  let deviationKey
+
+  beforeAll(async () => {
+    // Seed an ACTIVE catalog entry that the deviation will reference.
+    // Uses admin token via activeEntry(globalCatalog:true) to bypass self-approval guard.
+    deviationKey = uid('mcp-contract-deviate-s21')
+    await activeEntry({
+      topic:         'auth',
+      key:           deviationKey,
+      content:       'OAuth 2.0 PKCE required for all mobile clients — no implicit flow',
+      project:       'quorum-test-catalog',
+      globalCatalog: true,
+    })
+  })
+
+  test('step 1 — full valid body → recorded, severity > 0, deviation_id present', async () => {
+    // This mirrors the exact field set deviate() sends. severity must be non-zero —
+    // a missing or misspelled author_role silently produces severity=0 (unknown role fallback).
+    const res = await api(tokens.pe, PROJECT).post('/api/deviations', {
+      topic:       'auth',
+      key:         deviationKey,
+      catalog_id:  'quorum-test-catalog',
+      description: 'Mobile team using implicit flow pending PKCE migration',
+      author_role: 'architect',
+      confidence:  0.75,
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('recorded')
+    // deviation_id is a UUID string
+    expect(typeof res.data.deviation_id).toBe('string')
+    expect(res.data.deviation_id.length).toBeGreaterThan(0)
+    expect(res.data.severity).toBeGreaterThan(0)
+    expect(res.data.severity).toBeLessThanOrEqual(1)
+  })
+
+  test('step 2 — idempotent re-record updates last_seen_at, is_new=false', async () => {
+    // deviate() may be called multiple times for the same key (e.g. on each scan).
+    // Upsert on (q_project_id, catalog_id, topic, key) — same row, is_new flips to false.
+    const res = await api(tokens.pe, PROJECT).post('/api/deviations', {
+      topic:       'auth',
+      key:         deviationKey,
+      catalog_id:  'quorum-test-catalog',
+      description: 'Mobile team using implicit flow (re-scan)',
+      author_role: 'architect',
+      confidence:  0.75,
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('recorded')
+    expect(res.data.is_new).toBe(false)
+  })
+
+  test('step 3 — catalog_id not in project globals → recorded with status not_linked', async () => {
+    // The gateway returns 200 even for unlinked catalogs — the MCP must check body.status.
+    // A MCP that only checks HTTP status code will silently accept a not_linked response.
+    const res = await api(tokens.pe, PROJECT).post('/api/deviations', {
+      topic:       'auth',
+      key:         deviationKey,
+      catalog_id:  'a-catalog-not-linked-to-project',
+      description: 'Testing not_linked contract path',
+      author_role: 'architect',
+      confidence:  0.75,
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('not_linked')
+  })
+
+  test('step 4 — missing description → 400 validation error', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/api/deviations', {
+      topic:      'auth',
+      key:        deviationKey,
+      catalog_id: 'quorum-test-catalog',
+      author_role: 'architect',
+      confidence:  0.75,
+      // description intentionally omitted
+    })
+    expect(res.status).toBe(400)
   })
 })
 
