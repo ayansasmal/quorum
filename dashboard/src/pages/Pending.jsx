@@ -132,7 +132,7 @@ export default function Pending() {
                     <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-300 max-w-xs">
                       <span className="line-clamp-2">{req.reason}</span>
                       {req.stale_warning && (
-                        <span className="mt-1 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 text-[10px]">
+                        <span data-testid="stale-warning-badge" className="mt-1 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 text-[10px]">
                           ⚠ {req.stale_warning}
                         </span>
                       )}

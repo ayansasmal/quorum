@@ -7,6 +7,8 @@
  *          Coexistence            (S-12.3 — non-PE DRAFT alongside ACTIVE)
  *          Immutability           (S-12.4 — terminal status enforcement)
  *          Listing                (S-12.5 — GET /api/drafts)
+ *          REJECTED Reuse         (S-12.6 — new DRAFT on REJECTED key)
+ *          Filter Params          (S-12.7 — max_age_days / stale endpoint)
  *
  * Valid transitions:
  *   DRAFT  → ACTIVE      via promote (PA) or direct PA write
@@ -433,6 +435,132 @@ describe('S-12.5 — GET /api/drafts Endpoint', () => {
     expect(stillDraft).toBeUndefined()
   })
 
-}) // S-12 — Knowledge State Machine
+}) // S-12.5 — GET /api/drafts Endpoint
 
-}) // outer describe — required by graph reporter extractScenarioId()
+// ─────────────────────────────────────────────────────────────────────────────
+// S-12.6 — Re-Write to REJECTED Key Creates Fresh DRAFT
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-12.6 — Re-Write to REJECTED Key', () => {
+  // GAP-014: POST /api/knowledge to a key with only REJECTED history creates a
+  // new independent DRAFT. getCurrentVersion() checks ACTIVE only — REJECTED
+  // history does not block subsequent writes.
+  let rejectTopic, rejectKey, conflictId
+
+  beforeAll(async () => {
+    rejectTopic = 'testing'
+    rejectKey   = uid('rejected-rewrite-s12')
+
+    // Engineer writes → DRAFT (v1)
+    await draftEntry({
+      topic:   rejectTopic,
+      key:     rejectKey,
+      content: `Initial draft for rejected-rewrite test ${rejectKey}.`,
+      project: PROJECT,
+    })
+
+    // Create pending_decision so PA can reject it
+    const pendingRes = await api(tokens.engineer, PROJECT).post('/pg/pending', {
+      conflict_topic:   rejectTopic,
+      conflict_key:     rejectKey,
+      decision_type:    'conflict',
+      existing_content: '',
+      incoming_content: `Initial draft for rejected-rewrite test ${rejectKey}.`,
+      conflict_reason:  'State machine reject-rewrite test (S-12.6)',
+    })
+    expect(pendingRes.status).toBe(201)
+    conflictId = pendingRes.data.conflict_id
+
+    // PA rejects → DRAFT transitions to REJECTED
+    await api(tokens.pe, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'reject',
+      note:   'Entry rejected — insufficient quality, full rewrite required',
+    })
+  })
+
+  test('step 1 — rejected key has no ACTIVE version', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${rejectTopic}/${rejectKey}`)
+    if (res.status === 200 && res.data) {
+      expect(res.data.status).not.toBe('ACTIVE')
+    } else {
+      expect([200, 404]).toContain(res.status)
+    }
+  })
+
+  test('step 2 — engineer re-submits same key → new DRAFT (REJECTED does not block)', async () => {
+    const res = await api(tokens.engineer, PROJECT).post('/api/knowledge', {
+      topic:       rejectTopic,
+      key:         rejectKey,
+      content:     `Revised content after rejection — full rewrite for ${rejectKey}.`,
+      entity_type: 'Decision',
+    })
+    expect([200, 201]).toContain(res.status)
+    expect(res.data.status).toBe('DRAFT')
+  })
+
+  test('step 3 — history shows REJECTED (v1) and DRAFT (v2) coexisting', async () => {
+    const historyRes = await api(tokens.pe, PROJECT).get(`/pg/versions/${rejectTopic}/${rejectKey}/history`)
+    expect(historyRes.status).toBe(200)
+    expect(Array.isArray(historyRes.data)).toBe(true)
+
+    const statuses = historyRes.data.map(v => v.status)
+    expect(statuses).toContain('REJECTED')
+    expect(statuses).toContain('DRAFT')
+    expect(statuses).not.toContain('ACTIVE')
+  })
+
+}) // S-12.6 — Re-Write to REJECTED Key
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-12.7 — GET /api/drafts Filter Params
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-12.7 — Draft Listing Filters', () => {
+  // GAP-015: GET /api/drafts?max_age_days=N and GET /api/drafts/stale?threshold_days=N
+  let filterTopic, filterKey
+
+  beforeAll(async () => {
+    filterTopic = 'testing'
+    filterKey   = uid('filter-draft-s12')
+    await draftEntry({ topic: filterTopic, key: filterKey, content: `Draft for filter test ${filterKey}.`, project: PROJECT })
+  })
+
+  test('step 1 — max_age_days=1 includes recently created DRAFT', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts?max_age_days=1')
+    expect(res.status).toBe(200)
+    const drafts = res.data.drafts ?? []
+    const found = drafts.find(d => d.key === filterKey)
+    expect(found).toBeTruthy()
+  })
+
+  test('step 2 — max_age_days=0 returns 400 invalid_param', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts?max_age_days=0')
+    expect(res.status).toBe(400)
+    expect(res.data.error).toBe('invalid_param')
+  })
+
+  test('step 3 — GET /api/drafts/stale has correct response shape', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts/stale')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.data.stale_drafts)).toBe(true)
+    expect(res.data.threshold_days).toBe(30)
+  })
+
+  test('step 4 — recently created DRAFT does NOT appear in /api/drafts/stale (not old enough)', async () => {
+    // Stale filter: entries OLDER than threshold_days. A just-created DRAFT is not stale.
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts/stale?threshold_days=30')
+    expect(res.status).toBe(200)
+    const staleDrafts = res.data.stale_drafts ?? []
+    const found = staleDrafts.find(d => d.key === filterKey)
+    expect(found).toBeUndefined()
+  })
+
+  test('step 5 — threshold_days=0 returns 400 invalid_param', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/drafts/stale?threshold_days=0')
+    expect(res.status).toBe(400)
+    expect(res.data.error).toBe('invalid_param')
+  })
+
+}) // S-12.7 — Draft Listing Filters
+
+}) // S-12 — Knowledge State Machine

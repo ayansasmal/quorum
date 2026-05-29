@@ -6,6 +6,7 @@
  *          Input Validation  (S-18.2 — enrich guards)
  *          Response Shape    (S-18.3 — extract shape)
  *          Sanitization      (S-18.4 — overlong input truncated, never errors)
+ *          Persistence       (S-18.5 — conflict_id enrichment caching)
  *
  * Sub-scenarios:
  *   S-18.1  POST /governance/detect-conflict — 400 on missing field; 200 happy path
@@ -31,9 +32,10 @@
 
 import { test, expect } from '@playwright/test'
 
-const { describe } = test
-import { api } from '../helpers/api.js'
-import { tokens } from '../helpers/jwt.js'
+const { describe, beforeAll } = test
+import { api }                        from '../helpers/api.js'
+import { tokens }                     from '../helpers/jwt.js'
+import { uid, draftEntry }            from '../helpers/seed.js'
 
 // No state mutations — safe to run in parallel.
 // Tests are grouped for readability but share no beforeAll fixtures.
@@ -302,5 +304,69 @@ describe('S-18.4 — Overlong Input Sanitization', () => {
     expect(Array.isArray(res.data.items)).toBe(true)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-18.5 — Enrichment Persistence via conflict_id
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-18.5 — Enrichment Persistence', () => {
+  // GAP-016: POST /governance/enrich with conflict_id persists the enrichment
+  // object to pending_decisions.enrichment so GET /pg/pending surfaces it.
+  test.describe.configure({ mode: 'serial' })
+
+  let conflictId
+
+  beforeAll(async () => {
+    const key = uid('enrich-persist-s18')
+    await draftEntry({ topic: 'testing', key, content: `Enrichment persistence test ${key}.`, project: PROJECT })
+
+    const pendingRes = await api(tokens.engineer, PROJECT).post('/pg/pending', {
+      conflict_topic:   'testing',
+      conflict_key:     key,
+      decision_type:    'conflict',
+      existing_content: EXISTING_NODE,
+      incoming_content: `Enrichment persistence test ${key}.`,
+      conflict_reason:  'Enrichment persistence test (S-18.5)',
+    })
+    expect(pendingRes.status).toBe(201)
+    conflictId = pendingRes.data.conflict_id
+  })
+
+  test('step 1 — enrich without conflict_id returns shape but does not persist', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/governance/enrich', {
+      existing:        EXISTING_NODE,
+      incoming:        'Use Redis sessions instead of JWT.',
+      conflict_reason: CONFLICT_REASON,
+    })
+    expect(res.status).toBe(200)
+    expect(typeof res.data.analysis).toBe('string')
+    expect(Array.isArray(res.data.risks_if_approved)).toBe(true)
+  })
+
+  test('step 2 — enrich with conflict_id returns 200 and persists to pending_decisions', async () => {
+    const res = await api(tokens.pe, PROJECT).post('/governance/enrich', {
+      existing:        EXISTING_NODE,
+      incoming:        'Use Redis sessions instead of JWT.',
+      conflict_reason: CONFLICT_REASON,
+      conflict_id:     conflictId,
+    })
+    expect(res.status).toBe(200)
+    expect(typeof res.data.analysis).toBe('string')
+  })
+
+  test('step 3 — GET /pg/pending shows enrichment populated on the persisted conflict', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const records = Array.isArray(res.data) ? res.data : []
+    const found = records.find(r => r.conflict_id === conflictId)
+    expect(found).toBeTruthy()
+    expect(found.enrichment).not.toBeNull()
+    const enrichmentData = typeof found.enrichment === 'string'
+      ? JSON.parse(found.enrichment)
+      : found.enrichment
+    expect(typeof enrichmentData.analysis).toBe('string')
+  })
+
+}) // S-18.5 — Enrichment Persistence
 
 }) // outer describe — required by graph reporter extractScenarioId()

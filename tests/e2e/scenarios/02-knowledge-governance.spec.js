@@ -19,6 +19,7 @@
  *   S-02.9   Authority fence — non-PA cannot self-approve or review a conflict (NEGATIVE)
  *   S-02.10  Concurrent competing DRAFTs — two engineers write the same key simultaneously (RACE)
  *   S-02.11  Supersede-under-review — ACTIVE replaced while conflict is pending (ALTERNATE)
+ *   S-02.12  Stale warning badge — request_changes sets stale_warning; badge visible in UI (UI)
  *
  * Architecture notes:
  *   - POST /api/knowledge as PE → ACTIVE immediately (no pending decision created)
@@ -131,7 +132,7 @@ describe('S-02.1 — Write + Recall', () => {
 
   test('step 7 — GET /api/knowledge browser shows ACTIVE entry', async () => {
     const client = api(tokens.pe, PROJECT)
-    const res = await client.get('/api/knowledge')
+    const res = await client.get(`/api/knowledge?domain=${topic}&limit=100`)
     expect(res.status).toBe(200)
     const items = res.data.items ?? []
     expect(items.some(e => e.topic === topic && e.key === poolKey && e.status === 'ACTIVE')).toBe(true)
@@ -1057,5 +1058,65 @@ describe('S-02.11 — Supersede-Under-Review (ALTERNATE)', () => {
     const draft = history.data.find(v => v.summary === DRAFT_CONTENT)
     expect(draft).toBeDefined()
     expect(draft.status).toBe('REJECTED')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-02.12 — Stale Warning Badge (UI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-02.12 — Stale Warning Badge', () => {
+  // GAP-017: request_changes sets stale_warning on a pending decision.
+  // The Pending page must show data-testid="stale-warning-badge" when the field is present.
+  test.describe.configure({ mode: 'serial' })
+
+  let s0212Topic, s0212Key, s0212ConflictId
+  const EXISTING = 'Existing policy: always use TLS 1.3 for all inter-service communication.'
+  const INCOMING = 'Proposed: allow TLS 1.2 for legacy clients on a per-service opt-in basis.'
+  const REQUEST_CHANGES_NOTE = 'This needs a risk assessment from the security team before consideration.'
+
+  beforeAll(async () => {
+    const token  = uid('s0212-stale')
+    s0212Topic   = 'security'
+    s0212Key     = token
+
+    // Seed ACTIVE entry + conflict (engineer DRAFT + pending_decision)
+    await activeEntry({ topic: s0212Topic, key: s0212Key, content: EXISTING })
+    const { conflictId } = await conflict({
+      topic:           s0212Topic,
+      key:             s0212Key,
+      content:         INCOMING,
+      existingContent: EXISTING,
+    })
+    s0212ConflictId = conflictId
+
+    // PA does request_changes → stores note in stale_warning; conflict stays pending
+    await api(tokens.pe, PROJECT).post(`/api/review/${s0212ConflictId}`, {
+      action: 'request_changes',
+      note:   REQUEST_CHANGES_NOTE,
+    })
+  })
+
+  test('step 1 — stale_warning is set on the pending_decision after request_changes', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/pending/${s0212ConflictId}`)
+    expect(res.status).toBe(200)
+    expect(res.data.stale_warning).toBeTruthy()
+  })
+
+  test('step 2 — pending page shows stale warning badge when card is expanded', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
+    await injectSession(page)
+    await page.goto(`${DASHBOARD_URL}/pending`)
+
+    // Expand the conflict card by clicking on the topic:key label
+    const cardHeader = page.getByText(`${s0212Topic}:${s0212Key}`).first()
+    await expect(cardHeader).toBeVisible()
+    await cardHeader.click()
+
+    // Scroll the badge into view — the expanded body may extend below the viewport
+    const badge = page.getByTestId('stale-warning-badge').first()
+    await badge.scrollIntoViewIfNeeded()
+    await expect(badge).toBeVisible()
+    await expect(badge).toContainText('Stale warning')
   })
 })

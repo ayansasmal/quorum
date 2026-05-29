@@ -382,7 +382,7 @@ describe('S-03.5 — Deprecation Request: Reject', () => {
 
   test('step 4 — entry appears in knowledge browser (still ACTIVE)', async () => {
     const client = api(tokens.pe, PROJECT)
-    const res = await client.get('/api/knowledge')
+    const res = await client.get(`/api/knowledge?domain=${topic}&limit=100`)
     expect(res.status).toBe(200)
     const items = res.data.items ?? []
     expect(items.some(e => e.topic === topic && e.key === activeKey && e.status === 'ACTIVE')).toBe(true)

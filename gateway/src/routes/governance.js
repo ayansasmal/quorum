@@ -241,17 +241,23 @@ router.post('/detect-conflict', async (req, res, next) => {
 /**
  * Generate a structured reviewer brief for a confirmed conflict.
  *
- * Request:  { existing, incoming, conflict_reason, possible_split, split_suggestion }
+ * Request:  { existing, incoming, conflict_reason, possible_split, split_suggestion, conflict_id? }
  * Response: { analysis, risks_if_approved, questions_for_reviewer, existing_rationale,
  *             possible_split, split_suggestion }
+ *
+ * If conflict_id is provided, the enrichment is also persisted to
+ * pending_decisions.enrichment so GET /pg/pending surfaces it to reviewers.
+ *
+ * E2E: tests/e2e/scenarios/18-governance-routes.spec.js — S-18.5 enrichment persistence
  */
 router.post('/enrich', async (req, res, next) => {
   const {
     existing,
     incoming,
-    conflict_reason: conflictReason,
-    possible_split:  possibleSplit  = false,
+    conflict_reason:  conflictReason,
+    possible_split:   possibleSplit   = false,
     split_suggestion: splitSuggestion = null,
+    conflict_id:      conflictId      = null,
   } = req.body ?? {}
 
   if (typeof existing !== 'string' || !existing.trim()) {
@@ -266,14 +272,24 @@ router.post('/enrich', async (req, res, next) => {
 
   try {
     const raw = await callLLM(buildEnrichPrompt(existing, incoming, conflictReason, Boolean(possibleSplit), splitSuggestion ?? null))
-    res.json({
-      analysis:                typeof raw.analysis === 'string'     ? raw.analysis : '',
-      risks_if_approved:       Array.isArray(raw.risks_if_approved)       ? raw.risks_if_approved       : [],
-      questions_for_reviewer:  Array.isArray(raw.questions_for_reviewer)  ? raw.questions_for_reviewer  : [],
-      existing_rationale:      raw.existing_rationale ?? null,
-      possible_split:          Boolean(raw.possible_split),
-      split_suggestion:        raw.split_suggestion ?? null,
-    })
+    const enrichment = {
+      analysis:               typeof raw.analysis === 'string'          ? raw.analysis                : '',
+      risks_if_approved:      Array.isArray(raw.risks_if_approved)      ? raw.risks_if_approved       : [],
+      questions_for_reviewer: Array.isArray(raw.questions_for_reviewer) ? raw.questions_for_reviewer  : [],
+      existing_rationale:     raw.existing_rationale ?? null,
+      possible_split:         Boolean(raw.possible_split),
+      split_suggestion:       raw.split_suggestion ?? null,
+    }
+
+    if (conflictId) {
+      const pool = req.app.locals.pool
+      await pool.query(
+        `UPDATE pending_decisions SET enrichment = $1 WHERE conflict_id = $2`,
+        [JSON.stringify(enrichment), conflictId],
+      )
+    }
+
+    res.json(enrichment)
   } catch (err) {
     next(err)
   }

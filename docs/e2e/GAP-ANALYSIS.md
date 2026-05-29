@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 688 | E2E: 525 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅*
+*Updated: 2026-05-29 | Gateway unit tests: 688 | E2E: 538 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -13,7 +13,7 @@
 | P0 | Trust model — an existing guarantee is claimed but never stress-tested | 3 |
 | P1 | Silent contract failures — system reports success, delivers wrong behavior | 5 |
 | P2 | API contract coverage — untested integration paths | 6 → 0 (all closed) |
-| P3 | Governance workflow completeness | 5 |
+| P3 | Governance workflow completeness | 5 → 0 (all closed) |
 | P4 | Operational / observability | 6 |
 | P5 | UI/UX completeness | 7 |
 | P6 | Not yet built (v0.5+ or design decision required) | 6 |
@@ -725,11 +725,12 @@ test.describe('S-06.6 Three-way conflict — third write increments counter', ()
 
 ---
 
-### GAP-014 — REJECTED entry re-submission path undefined
+### GAP-014 ✅ — REJECTED entry re-submission path undefined
 
 **Journeys:** J12
 **Risk:** P3
 **Test type:** E2E-API (after design decision)
+**Closed:** S-12.6 (3 tests) — confirmed behavior correct, no code change needed. `getCurrentVersion()` queries ACTIVE only; REJECTED history never blocks re-writes. New write on REJECTED key creates independent DRAFT; REJECTED entry preserved in history.
 
 **Context:**
 `REJECTED` is a terminal status. An engineer whose proposal was wrongly rejected has no
@@ -768,11 +769,12 @@ test('S-12.6 new write on REJECTED key creates independent DRAFT', async () => {
 
 ---
 
-### GAP-015 — Stale DRAFT cleanup mechanism missing
+### GAP-015 ✅ — Stale DRAFT cleanup mechanism missing
 
 **Journeys:** J12
 **Risk:** P3
 **Test type:** CODE-FIRST + GIT
+**Closed:** CODE-FIRST — added `GET /api/drafts?max_age_days=N` filter and `GET /api/drafts/stale?threshold_days=N` endpoint to `gateway/src/routes/dashboard.js`. Uses `make_interval(days => $2)` for safe parameterized age filter. 9 GIT tests in `tests/gateway/dashboard-drafts.test.js` + 5 E2E tests in S-12.7 (tests/e2e/scenarios/12-knowledge-state-machine.spec.js).
 
 **Context:**
 DRAFTs accumulate indefinitely. A project running for 6 months will have dozens of
@@ -814,11 +816,12 @@ it('GET /api/drafts?max_age_days=30 excludes DRAFTs older than 30 days', async (
 
 ---
 
-### GAP-016 — AI enrichment not persisted on `pending_decisions` row
+### GAP-016 ✅ — AI enrichment not persisted on `pending_decisions` row
 
 **Journeys:** J17
 **Risk:** P3
 **Test type:** E2E-API + CODE-FIRST
+**Closed:** CODE-FIRST — `POST /governance/enrich` now accepts optional `conflict_id`; when provided, persists enrichment JSONB to `pending_decisions.enrichment` via `UPDATE`. `GET /pg/pending` already returns the `enrichment` column — no DB migration needed (column existed). 3 E2E tests in S-18.5 (tests/e2e/scenarios/18-governance-route.spec.js).
 
 **Context:**
 `POST /governance/enrich` generates AI analysis, risks, and reviewer questions. The
@@ -853,11 +856,12 @@ should use cached enrichment when present, call `/governance/enrich` only if
 
 ---
 
-### GAP-017 — Stale-warning badges not browser-tested
+### GAP-017 ✅ — Stale-warning badges not browser-tested
 
 **Journeys:** J02, J03
 **Risk:** P3
 **Test type:** E2E-UI (extend S-02.8 or S-03)
+**Closed:** Added `data-testid="stale-warning-badge"` to `DecisionCard.jsx` (expanded conflict body) and `Pending.jsx` (deprecation request row). S-02.12 (2 tests) in tests/e2e/scenarios/02-knowledge-governance.spec.js — step 1 verifies `stale_warning` set via `request_changes` API; step 2 browser test confirms badge visible in Pending page after card expansion.
 
 **Context:**
 `stale_warning: true` on a `pending_decisions` row is returned in API responses (tested)

@@ -710,14 +710,58 @@ router.get('/search', async (req, res, next) => {
   }
 })
 
+// ── GET /api/drafts/stale ─────────────────────────────────────────────────────
+
+/**
+ * Return DRAFT knowledge versions older than threshold_days (default: 30).
+ * Helps surface DRAFTs that are at risk of being forgotten without PE review.
+ *
+ * Query params:
+ *   threshold_days — positive integer, default 30
+ *
+ * E2E: tests/e2e/scenarios/12-state-machine.spec.js — S-12.7 stale drafts filter
+ */
+router.get('/drafts/stale', async (req, res, next) => {
+  try {
+    const pool        = req.app.locals.pool
+    const qProjectId  = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const thresholdDays = req.query.threshold_days != null
+      ? parseInt(req.query.threshold_days, 10)
+      : 30
+
+    if (isNaN(thresholdDays) || thresholdDays < 1) {
+      return res.status(400).json({ error: 'invalid_param', message: 'threshold_days must be a positive integer' })
+    }
+
+    const { rows } = await pool.query(
+      `SELECT version_id, version, topic, key, entity_type, confidence, author, author_role,
+              tags, summary AS content, created_at, status
+       FROM knowledge_versions
+       WHERE q_project_id = $1 AND status = 'DRAFT'
+         AND created_at < NOW() - make_interval(days => $2)
+       ORDER BY created_at ASC`,
+      [qProjectId, thresholdDays],
+    )
+
+    res.json({ stale_drafts: rows, threshold_days: thresholdDays })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── GET /api/drafts ───────────────────────────────────────────────────────────
 
 /**
  * Return all DRAFT knowledge versions for the current project, ordered oldest-first.
+ * Supports ?max_age_days=N to restrict to entries created within N days.
  * Used by the Pending page to surface non-PE DRAFT entries awaiting PE review.
  *
  * Separate from /pg/pending (which returns conflict decisions) — DRAFTs are
  * governance-pending entries, not conflict-queue entries.
+ *
+ * E2E: tests/e2e/scenarios/12-state-machine.spec.js — S-12.7 max_age_days filter
  */
 router.get('/drafts', async (req, res, next) => {
   try {
@@ -725,13 +769,28 @@ router.get('/drafts', async (req, res, next) => {
     const qProjectId  = await resolveQProjectId(req, res)
     if (!qProjectId) return
 
+    const maxAgeDays = req.query.max_age_days != null
+      ? parseInt(req.query.max_age_days, 10)
+      : null
+
+    if (maxAgeDays !== null && (isNaN(maxAgeDays) || maxAgeDays < 1)) {
+      return res.status(400).json({ error: 'invalid_param', message: 'max_age_days must be a positive integer' })
+    }
+
+    const params = [qProjectId]
+    let ageClause = ''
+    if (maxAgeDays !== null) {
+      params.push(maxAgeDays)
+      ageClause = ` AND created_at >= NOW() - make_interval(days => $2)`
+    }
+
     const { rows } = await pool.query(
       `SELECT version_id, version, topic, key, entity_type, confidence, author, author_role,
               tags, summary AS content, created_at, status
        FROM knowledge_versions
-       WHERE q_project_id = $1 AND status = 'DRAFT'
+       WHERE q_project_id = $1 AND status = 'DRAFT'${ageClause}
        ORDER BY created_at ASC`,
-      [qProjectId],
+      params,
     )
 
     res.json({ drafts: rows })
