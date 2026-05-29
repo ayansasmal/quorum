@@ -209,11 +209,12 @@ describe('S-21.3 — extract constraints acceptance', () => {
     expect(res.data.items.length).toBeGreaterThan(0)
   })
 
-  test('step 2 — with constraints field → 200 (no 400 rejection)', async () => {
-    // Gateway currently accepts but silently drops constraints — does not reject.
-    // Once gateway/src/routes/governance.js buildExtractPrompt() is updated to
-    // incorporate constraints into the LLM prompt, the items may reflect them.
-    // That forwarding behaviour is tested in quorum-mcp unit tests (reflect.test.js).
+  test('step 2 — with constraints field → 200 and constraints forwarded to LLM', async () => {
+    // GAP-004 closed: gateway/src/routes/governance.js buildExtractPrompt() now accepts
+    // a 4th constraintsToAvoid param and appends a "do NOT extract" block to the user prompt.
+    // The mock-openai returns canned items regardless of prompt content, so we verify
+    // the contract at the HTTP layer (200 + items array) and the prompt forwarding
+    // at unit-test level (governance-routes.test.js "forwards constraints array").
     const res = await api(tokens.pe, PROJECT).post('/governance/extract', {
       task_summary: TASK_SUMMARY,
       constraints:  [

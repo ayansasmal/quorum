@@ -143,17 +143,22 @@ Produce the JSON reviewer brief as specified.`,
  * Build the knowledge extraction prompt.
  * Mirrors quorum-mcp/src/prompts/extract-knowledge.md.
  *
- * @param {string} taskSummary
+ * @param {string}   taskSummary
  * @param {string[]} decisionsMade
  * @param {string[]} patternsUsed
+ * @param {string[]} constraintsToAvoid - knowledge candidates the session explicitly excluded
  * @returns {{ system: string, user: string }}
  */
-function buildExtractPrompt(taskSummary, decisionsMade, patternsUsed) {
+function buildExtractPrompt(taskSummary, decisionsMade, patternsUsed, constraintsToAvoid = []) {
   const decisionsBlock = decisionsMade.length > 0
     ? `\nDecisions made:\n${decisionsMade.map((d) => `- ${sanitizeForPrompt(d)}`).join('\n')}`
     : ''
   const patternsBlock = patternsUsed.length > 0
     ? `\nPatterns used:\n${patternsUsed.map((p) => `- ${sanitizeForPrompt(p)}`).join('\n')}`
+    : ''
+  const constraintsBlock = constraintsToAvoid.length > 0
+    ? `\nConstraints — do NOT extract the following (explicitly excluded by session):\n` +
+      constraintsToAvoid.map((c) => `- ${sanitizeForPrompt(c)}`).join('\n')
     : ''
 
   return {
@@ -194,7 +199,7 @@ CONSTRAINTS:
 - Reply with only valid JSON.`,
 
     user: `Task summary:
-"${sanitizeForPrompt(taskSummary)}"${decisionsBlock}${patternsBlock}
+"${sanitizeForPrompt(taskSummary)}"${decisionsBlock}${patternsBlock}${constraintsBlock}
 Extract reusable engineering and business knowledge per the rules. Return the JSON object as specified.`,
   }
 }
@@ -279,14 +284,15 @@ router.post('/enrich', async (req, res, next) => {
 /**
  * Extract reusable knowledge from a task summary.
  *
- * Request:  { task_summary, decisions_made?, patterns_used? }
+ * Request:  { task_summary, decisions_made?, patterns_used?, constraints? }
  * Response: { items: ExtractedItem[] }
  */
 router.post('/extract', async (req, res, next) => {
   const {
     task_summary:    taskSummary,
-    decisions_made:  decisionsMade = [],
-    patterns_used:   patternsUsed  = [],
+    decisions_made:  decisionsMade      = [],
+    patterns_used:   patternsUsed       = [],
+    constraints:     constraintsToAvoid = [],
   } = req.body ?? {}
 
   if (typeof taskSummary !== 'string' || !taskSummary.trim()) {
@@ -296,8 +302,9 @@ router.post('/extract', async (req, res, next) => {
   try {
     const raw = await callLLM(buildExtractPrompt(
       taskSummary,
-      Array.isArray(decisionsMade) ? decisionsMade : [],
-      Array.isArray(patternsUsed)  ? patternsUsed  : [],
+      Array.isArray(decisionsMade)      ? decisionsMade      : [],
+      Array.isArray(patternsUsed)       ? patternsUsed       : [],
+      Array.isArray(constraintsToAvoid) ? constraintsToAvoid : [],
     ))
     res.json({ items: Array.isArray(raw.items) ? raw.items : [] })
   } catch (err) {

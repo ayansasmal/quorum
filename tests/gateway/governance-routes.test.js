@@ -464,4 +464,46 @@ describe('POST /governance/extract', () => {
     expect(status).toBe(200)
     expect(body.items).toEqual([])
   })
+
+  it('forwards constraints array into the LLM prompt user message', async () => {
+    mockProfile()
+    const tok = await makeToken()
+    callLLM.mockResolvedValue({ items: [] })
+
+    await post(
+      '/governance/extract',
+      {
+        task_summary: 'We chose JWT for auth',
+        constraints:  ['do not extract auth patterns', 'skip retry logic'],
+      },
+      { Authorization: `Bearer ${tok}` },
+    )
+
+    expect(callLLM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: expect.stringContaining('do not extract auth patterns'),
+      }),
+    )
+  })
+
+  it('normalises non-array constraints to empty (no prompt block)', async () => {
+    mockProfile()
+    const tok = await makeToken()
+    callLLM.mockResolvedValue({ items: [] })
+
+    await post(
+      '/governance/extract',
+      {
+        task_summary: 'We implemented a feature',
+        constraints:  'not an array',
+      },
+      { Authorization: `Bearer ${tok}` },
+    )
+
+    expect(callLLM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: expect.not.stringContaining('Constraints —'),
+      }),
+    )
+  })
 })

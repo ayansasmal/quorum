@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Current suite: 498 passed, 0 failed, 1 skipped | All P0 gaps closed*
+*Updated: 2026-05-29 | Current suite: 498 passed, 0 failed, 1 skipped | P0 + GAP-004 (P1) closed; 687 gateway unit tests*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -209,19 +209,24 @@ test.describe('S-11.4 PA who wrote entry A can merge A+B (coexist-merge)', () =>
 
 ---
 
-### GAP-004 — `constraints` silently dropped in knowledge extraction
+### GAP-004 — `constraints` silently dropped in knowledge extraction ✅ CLOSED
 
 **Journeys:** J18, J21
 **Risk:** P1
 **Test type:** GIT + E2E-API, code change required first
 
-**Context:**
-`POST /governance/extract` accepts `constraints[]` (confirmed no 400 in S-21.3). The
-`reflect()` MCP tool sends `constraints` to inform the extractor what NOT to extract.
-However, `governance.js` line 287–290 destructures only `task_summary`, `decisions_made`,
-and `patterns_used` — `constraints` is never read. `buildExtractPrompt(...)` receives no
-constraints. An MCP session that calls `reflect("...", { constraints: ["do not extract auth patterns"] })`
-extracts those patterns anyway, looking correct in all logs.
+**Closed: 2026-05-29** — `buildExtractPrompt` extended with 4th `constraintsToAvoid` param;
+`/extract` handler now destructures `constraints` from `req.body` and passes it through.
+2 new GIT tests added (`forwards constraints array into the LLM prompt user message`,
+`normalises non-array constraints to empty`). S-21.3 step 2 comment updated to reflect
+the fix. Gateway unit tests: 687 passed.
+
+**Original context:**
+`POST /governance/extract` accepted `constraints[]` (confirmed no 400 in S-21.3) but
+`governance.js` line 287–290 destructured only `task_summary`, `decisions_made`, and
+`patterns_used` — `constraints` was never read. An MCP session calling
+`reflect("...", { constraints: ["do not extract auth patterns"] })` extracted those
+patterns anyway, looking correct in all logs.
 
 **Change needed (code first):**
 
