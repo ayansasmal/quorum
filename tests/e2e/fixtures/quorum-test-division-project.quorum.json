@@ -1,0 +1,31 @@
+{
+  "group_id": "quorum-test-division-project",
+  "project": "Quorum E2E Division-Scoped Project",
+  "owner": "test-pe",
+  "hierarchy": {
+    "level": "service",
+    "display_name": "Backend Division Test Service",
+    "parent": "div-backend"
+  },
+  "globals": ["quorum-test-division-catalog"],
+  "domains": {
+    "arch": {},
+    "infra": {}
+  },
+  "members": [
+    {
+      "name": "Test PE",
+      "github_username": "test-pe",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
+      "name": "Test Engineer",
+      "github_username": "test-engineer",
+      "role": "engineer",
+      "base_confidence": 0.70,
+      "team": "backend"
+    }
+  ]
+}

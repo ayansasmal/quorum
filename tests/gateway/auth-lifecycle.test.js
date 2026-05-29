@@ -143,6 +143,24 @@ describe('POST /auth/refresh', () => {
     expect(status).toBe(401)
     expect(body.error).toBe('missing_token')
   })
+
+  it('concurrent refresh calls both succeed — stateless sliding-window design', async () => {
+    // Two simultaneous refresh requests from the same client must both return 200.
+    // Quorum uses a stateless sliding-window (access JWT = refresh token) — there is no
+    // JTI blacklist so both are valid until expiry. This test documents the design intent
+    // so a future engineer adding single-use JTI enforcement knows the contract changes.
+    const [r1, r2] = await Promise.all([
+      post('/auth/refresh', {}, { Authorization: `Bearer ${token}` }),
+      post('/auth/refresh', {}, { Authorization: `Bearer ${token}` }),
+    ])
+
+    expect(r1.status).toBe(200)
+    expect(r2.status).toBe(200)
+    // Both return distinct tokens (different iat/jti) — not single-use
+    expect(r1.body.token).not.toBe(r2.body.token)
+    expect(r1.body.expires_in).toBeGreaterThan(0)
+    expect(r2.body.expires_in).toBeGreaterThan(0)
+  })
 })
 
 describe('GET /auth/projects — retired in v0.3', () => {

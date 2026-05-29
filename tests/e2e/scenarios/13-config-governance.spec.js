@@ -372,4 +372,53 @@ describe('S-13.6 — Config Update Write Path', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-13.7 — Hierarchy ancestry filtering on GET /api/globals
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-13.7 — Division-scoped catalog invisible to projects outside that division', () => {
+  // GAP-009: GET /api/globals filters division/department-scoped catalogs by
+  // hierarchy.parent ancestry. A project in div-backend should see the
+  // backend division catalog; a project without hierarchy should NOT.
+  // Fixtures: quorum-test-division-catalog (global_scope: "division:div-backend")
+  //           quorum-test-division-project (hierarchy.parent: "div-backend")
+  const DIV_CATALOG = 'quorum-test-division-catalog'
+  const DIV_PROJECT = 'quorum-test-division-project'
+
+  test('step 1 — division catalog NOT visible to quorum-test-project (no hierarchy)', async () => {
+    // quorum-test-project has no hierarchy.parent → ancestor Set is empty
+    // → isScopeVisible("division:div-backend", {}) → false
+    const res = await api(tokens.pe, PROJECT).get('/api/globals')
+    expect(res.status).toBe(200)
+    const ids = res.data.map(c => c.group_id)
+    expect(ids).not.toContain(DIV_CATALOG)
+  })
+
+  test('step 2 — org-scoped catalog still visible to quorum-test-project', async () => {
+    // Division filtering must not affect org-scoped catalogs
+    const res = await api(tokens.pe, PROJECT).get('/api/globals')
+    expect(res.status).toBe(200)
+    const ids = res.data.map(c => c.group_id)
+    expect(ids).toContain(CATALOG)
+  })
+
+  test('step 3 — division catalog IS visible to quorum-test-division-project (parent: div-backend)', async () => {
+    // quorum-test-division-project has hierarchy.parent: "div-backend"
+    // → ancestor Set = {"div-backend"}
+    // → isScopeVisible("division:div-backend", {"div-backend"}) → true
+    const res = await api(tokens.pe, DIV_PROJECT).get('/api/globals')
+    expect(res.status).toBe(200)
+    const ids = res.data.map(c => c.group_id)
+    expect(ids).toContain(DIV_CATALOG)
+  })
+
+  test('step 4 — division catalog entry has correct global_scope value', async () => {
+    const res = await api(tokens.pe, DIV_PROJECT).get('/api/globals')
+    expect(res.status).toBe(200)
+    const cat = res.data.find(c => c.group_id === DIV_CATALOG)
+    expect(cat).toBeDefined()
+    expect(cat.global_scope).toBe('division:div-backend')
+  })
+})
+
 }) // S-13 — Config Governance

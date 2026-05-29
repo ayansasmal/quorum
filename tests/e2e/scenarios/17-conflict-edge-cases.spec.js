@@ -434,6 +434,62 @@ describe('S-17.4 — Enrichment Response Shape', () => {
     })
   })
 
-}) // S-17 — Conflict Edge Cases
+}) // S-17.4 — Enrichment Response Shape
 
-}) // outer describe — required by graph reporter extractScenarioId()
+// ─────────────────────────────────────────────────────────────────────────────
+// S-17.5 — PENDING_CONFLICT_CHECK → DRAFT full lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-17.5 — PENDING_CONFLICT_CHECK entry can be cleared to DRAFT', () => {
+  // Covers the "Graphiti came back online, conflict check complete, no conflict found"
+  // resolution path. If the clearing mechanism is broken, entries are stuck in
+  // PENDING_CONFLICT_CHECK forever — invisible to the PA's review queue.
+  let pccTopic, pccKey
+  let pccVersion
+
+  beforeAll(async () => {
+    pccTopic = 'arch'
+    pccKey   = uid('pcc-lifecycle')
+
+    // Create a version directly as PENDING_CONFLICT_CHECK (admin path — bypasses self-approval)
+    const write = await api(tokens.admin, PROJECT).post('/pg/versions', {
+      topic:                  pccTopic,
+      key:                    pccKey,
+      summary:                'Microservice boundaries: domain-driven decomposition',
+      entity_type:            'Decision',
+      author:                 'test-pe',
+      pending_conflict_check: true,
+    })
+    expect(write.status).toBe(201)
+    expect(write.data.status).toBe('PENDING_CONFLICT_CHECK')
+    pccVersion = write.data.version
+  })
+
+  test('step 1 — PENDING_CONFLICT_CHECK entry does NOT appear in /api/drafts', async () => {
+    // DRAFT is the status that makes entries visible to the PA review queue.
+    // PENDING_CONFLICT_CHECK entries are held back until conflict check resolves.
+    const drafts = await api(tokens.pe, PROJECT).get('/api/drafts')
+    expect(drafts.status).toBe(200)
+    const keys = (drafts.data.drafts ?? []).map(d => d.key)
+    expect(keys).not.toContain(pccKey)
+  })
+
+  test('step 2 — PATCH transitions PENDING_CONFLICT_CHECK → DRAFT', async () => {
+    const patch = await api(tokens.pe, PROJECT).patch(
+      `/pg/versions/${pccTopic}/${pccKey}/${pccVersion}`,
+      { newStatus: 'DRAFT' },
+    )
+    expect(patch.status).toBe(200)
+    expect(patch.data.status).toBe('DRAFT')
+  })
+
+  test('step 3 — cleared entry now appears in /api/drafts for PA review', async () => {
+    // After clearing to DRAFT, the entry is visible in the PA review queue.
+    const drafts = await api(tokens.pe, PROJECT).get('/api/drafts')
+    expect(drafts.status).toBe(200)
+    const keys = (drafts.data.drafts ?? []).map(d => d.key)
+    expect(keys).toContain(pccKey)
+  })
+})
+
+}) // S-17 — Conflict Edge Cases

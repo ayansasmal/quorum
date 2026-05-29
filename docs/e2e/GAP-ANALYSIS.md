@@ -1,7 +1,7 @@
 # Quorum — Gap Analysis & Remediation Plan
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
-*Updated: 2026-05-29 | Gateway unit tests: 687 | E2E: 510 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6)*
+*Updated: 2026-05-29 | Gateway unit tests: 688 | E2E: 525 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -12,7 +12,7 @@
 |----------|-------------|-------|
 | P0 | Trust model — an existing guarantee is claimed but never stress-tested | 3 |
 | P1 | Silent contract failures — system reports success, delivers wrong behavior | 5 |
-| P2 | API contract coverage — untested integration paths | 6 |
+| P2 | API contract coverage — untested integration paths | 6 → 0 (all closed) |
 | P3 | Governance workflow completeness | 5 |
 | P4 | Operational / observability | 6 |
 | P5 | UI/UX completeness | 7 |
@@ -497,11 +497,13 @@ must be added to `gateway/src/routes/config.js` before the test can be written.
 
 ---
 
-### GAP-009 — Hierarchy ancestry filtering not E2E tested
+### GAP-009 — Hierarchy ancestry filtering not E2E tested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J01, J13
-**Risk:** P2
+**Risk:** P2 → resolved
 **Test type:** E2E-API
+
+**Closed:** Added `quorum-test-division-catalog.quorum.json` (`is_global:true, global_scope:"division:div-backend"`) and `quorum-test-division-project.quorum.json` (hierarchy `parent:"div-backend"`). Both fixtures uploaded in `setup.js`. S-13.7 (4 tests) added to `13-config-governance.spec.js`: confirms `quorum-test-project` (no hierarchy) cannot see the division catalog, org-scoped catalog remains visible, and `quorum-test-division-project` (matching parent) can see it with correct `global_scope`.
 
 **Context:**
 `GET /api/globals` filters division/department-scoped catalogs by `hierarchy.parent`
@@ -533,11 +535,13 @@ test('division-scoped catalog IS visible to a project with matching hierarchy', 
 
 ---
 
-### GAP-010 — Endorsement history endpoint missing
+### GAP-010 — Endorsement history endpoint missing ✅ CLOSED (2026-05-29)
 
 **Journeys:** J08
-**Risk:** P2
+**Risk:** P2 → resolved
 **Test type:** CODE-FIRST, then E2E-API
+
+**Closed:** Added `GET /api/endorsements/:topic/:key` to `gateway/src/routes/dashboard.js`. Uses `resolveQProjectId` + `getKeyId` (already available), then queries `bump_log` for all endorsements for the key ordered by `bumped_at DESC`. Returns `{ topic, key, endorsements: [{ author, role, delta, bumped_at }] }`. 404 on non-existent key. S-08.6 (4 tests) added to `08-confidence-endorsement.spec.js`: list after two-user bump, field shape (NUMERIC→string from pg driver), both authors present, 404 guard. Gateway rebuilt to pick up route change.
 
 **Context:**
 The bump mechanism is tested (S-08) but there is no `GET /api/endorsements/:topic/:key`
@@ -589,11 +593,13 @@ test('GET /api/endorsements returns list after bump', async () => {
 
 ---
 
-### GAP-011 — Concurrent token refresh behavior undocumented
+### GAP-011 — Concurrent token refresh behavior undocumented ✅ CLOSED (2026-05-29)
 
 **Journeys:** J19
-**Risk:** P2
+**Risk:** P2 → resolved
 **Test type:** GIT
+
+**Closed:** Added `'concurrent refresh calls both succeed — stateless sliding-window design'` test to `tests/gateway/auth-lifecycle.test.js` inside the `describe('POST /auth/refresh')` block. Test fires two simultaneous `Promise.all` refresh calls with the same token, asserts both return 200 with distinct tokens (different `iat`). Documents the intentional stateless design so a future engineer adding JTI revocation knows this contract. 688 gateway tests pass.
 
 **Context:**
 The sliding-window refresh design (access JWT = refresh token) means two simultaneous
@@ -625,11 +631,13 @@ it('concurrent refresh calls both succeed — sliding-window design is stateless
 
 ---
 
-### GAP-012 — `PENDING_CONFLICT_CHECK → DRAFT` full lifecycle not tested
+### GAP-012 — `PENDING_CONFLICT_CHECK → DRAFT` full lifecycle not tested ✅ CLOSED (2026-05-29)
 
 **Journeys:** J12, J17
-**Risk:** P2
+**Risk:** P2 → resolved
 **Test type:** E2E-API (extend S-17)
+
+**Closed:** Added `describe('S-17.5 — PENDING_CONFLICT_CHECK entry can be cleared to DRAFT')` to `17-conflict-edge-cases.spec.js` as a sibling of S-17.4. Three tests: (1) PCC entry not visible in `/api/drafts`, (2) `PATCH /pg/versions/:t/:k/:v { newStatus:'DRAFT' }` succeeds, (3) entry appears in `/api/drafts` after clearing. Seed uses admin `POST /pg/versions` with `pending_conflict_check:true` flag (body field `summary`, not `content` — route maps `req.body.summary` to the validator's content param). Key structural lesson: the original file's misleading comment `}) // S-17 — Conflict Edge Cases` was actually closing S-17.4, not S-17 — fixed by inserting explicit `}) // S-17.4` close and removing the now-orphaned extra `})`.
 
 **Context:**
 S-17.2 tests that a version can be stored with `PENDING_CONFLICT_CHECK` status. But the
@@ -666,11 +674,13 @@ test('S-17.5 PENDING_CONFLICT_CHECK entry can be transitioned to DRAFT', async (
 
 ---
 
-### GAP-013 — Three-way concurrent conflict behavior undefined
+### GAP-013 — Three-way concurrent conflict behavior undefined ✅ CLOSED (2026-05-29)
 
 **Journeys:** J06
-**Risk:** P2
-**Test type:** E2E-API (extend S-06), design clarification first
+**Risk:** P2 → resolved
+**Test type:** E2E-API (extend S-06)
+
+**Closed:** Added `describe('S-06.6 — Three-way conflict produces independent pending decisions per writer')` to `06-multi-user-conflict.spec.js`. Design clarified: `pending_decisions` allows multiple rows per topic:key (one per incoming write). `beforeAll` seeds: one ACTIVE entry + three DRAFT writes (engineer/senior/architect) + three manual `POST /pg/pending` calls. Four tests: (1) ≥3 pending entries exist for the key, (2) all three are retrievable via `GET /pg/pending`, (3) `PATCH` sets `more_pending_same_key=2` on all three rows, (4) each has distinct `incoming_content` (no phantom duplicates).
 
 **Context:**
 S-06 tests two-way conflicts exhaustively. If three engineers simultaneously write the same

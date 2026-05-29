@@ -1,0 +1,27 @@
+{
+  "group_id": "quorum-test-division-catalog",
+  "project": "Quorum E2E Division-Scoped Catalog",
+  "owner": "test-pe",
+  "is_global": true,
+  "global_scope": "division:div-backend",
+  "hierarchy": {
+    "level": "division",
+    "display_name": "Backend Division Standards",
+    "node_id": "backend-standards",
+    "parent": "div-backend"
+  },
+  "globals": [],
+  "domains": {
+    "arch": {},
+    "infra": {}
+  },
+  "members": [
+    {
+      "name": "Test PE",
+      "github_username": "test-pe",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    }
+  ]
+}

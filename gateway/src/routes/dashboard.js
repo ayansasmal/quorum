@@ -1176,6 +1176,40 @@ router.post('/bump/:topic/:key', async (req, res, next) => {
   }
 })
 
+// ── GET /api/endorsements/:topic/:key ─────────────────────────────────────────
+
+/**
+ * Return the full endorsement history for a knowledge entry (all bump_log rows).
+ * Allows PAs to audit who endorsed an entry and whether the confidence score
+ * reflects genuine team consensus or a concentrated source.
+ *
+ * E2E: tests/e2e/scenarios/08-confidence-endorsement.spec.js — S-08.6 endorsement history
+ *
+ * @route GET /api/endorsements/:topic/:key
+ */
+router.get('/endorsements/:topic/:key', async (req, res, next) => {
+  const pool = req.app.locals.pool
+  const { topic, key } = req.params
+  try {
+    const qProjectId = await resolveQProjectId(req, res)
+    if (!qProjectId) return
+
+    const qKeyId = await getKeyId(pool, qProjectId, topic, key)
+    if (!qKeyId) return res.status(404).json({ error: 'not_found', topic, key })
+
+    const { rows } = await pool.query(
+      `SELECT author, role, delta_applied AS delta, bumped_at
+         FROM bump_log
+        WHERE q_key_id = $1
+        ORDER BY bumped_at DESC`,
+      [qKeyId],
+    )
+    res.json({ topic, key, endorsements: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── POST /api/knowledge ────────────────────────────────────────────────────────
 
 /**

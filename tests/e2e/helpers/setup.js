@@ -108,10 +108,12 @@ export default async function setup(_config) {
 
   /** @type {Array<[string, string]>} [filename, uploaderToken] */
   const fixtures = [
-    ['quorum-test-catalog.quorum.json',         peToken],
-    ['quorum-test-project.quorum.json',         peToken],
+    ['quorum-test-catalog.quorum.json',          peToken],
+    ['quorum-test-project.quorum.json',          peToken],
     ['quorum-test-isolated-project.quorum.json', peToken],
-    ['quorum-test-peer-project.quorum.json',    architectToken],
+    ['quorum-test-peer-project.quorum.json',     architectToken],
+    ['quorum-test-division-catalog.quorum.json', peToken],
+    ['quorum-test-division-project.quorum.json', peToken],
   ]
 
   for (const [file, token] of fixtures) {

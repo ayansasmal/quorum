@@ -275,4 +275,56 @@ describe('S-08.5 — Validation Guards', () => {
 
 }) // S-08.5 — Validation Guards
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-08.6 — Endorsement History
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-08.6 — Endorsement History', () => {
+  // GAP-010: GET /api/endorsements/:topic/:key exposes bump_log rows for audit.
+  // Without this, a PA cannot verify whether a high-confidence score reflects
+  // genuine team consensus or a single user bumping across multiple accounts.
+  let historyKey
+
+  beforeAll(async () => {
+    historyKey = uid('endorsement-history')
+    await activeEntry({ topic: 'auth', key: historyKey, content: `Endorsement history test entry ${historyKey}` })
+    // Two different users bump the same entry
+    await api(tokens.pe,       PROJECT).post(`/api/bump/auth/${historyKey}`, {})
+    await api(tokens.architect, PROJECT).post(`/api/bump/auth/${historyKey}`, {})
+  })
+
+  test('step 1 — GET /api/endorsements returns endorsement list after bumps', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/api/endorsements/auth/${historyKey}`)
+    expect(res.status).toBe(200)
+    expect(res.data.topic).toBe('auth')
+    expect(res.data.key).toBe(historyKey)
+    expect(Array.isArray(res.data.endorsements)).toBe(true)
+    expect(res.data.endorsements.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('step 2 — each endorsement entry has author, role, delta, bumped_at', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/api/endorsements/auth/${historyKey}`)
+    expect(res.status).toBe(200)
+    for (const e of res.data.endorsements) {
+      expect(typeof e.author).toBe('string')
+      expect(typeof e.role).toBe('string')
+      expect(typeof e.delta).toBe('string')   // NUMERIC → string from pg driver
+      expect(typeof e.bumped_at).toBe('string')
+    }
+  })
+
+  test('step 3 — both authors (test-pe and test-architect) appear in endorsement list', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/api/endorsements/auth/${historyKey}`)
+    const authors = res.data.endorsements.map(e => e.author)
+    expect(authors).toContain('test-pe')
+    expect(authors).toContain('test-architect')
+  })
+
+  test('step 4 — non-existent key returns 404', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/endorsements/auth/totally-nonexistent-key-s08-6')
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('not_found')
+  })
+}) // S-08.6 — Endorsement History
+
 }) // S-08 — Confidence Endorsement

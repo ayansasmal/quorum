@@ -336,3 +336,78 @@ describe('S-06.5 — Coexist-split produces two ACTIVE entries at distinct keys'
     expect(res.data.version).toBeGreaterThan(1)
   })
 })
+
+// ── S-06.6 — Three-way concurrent conflict ────────────────────────────────────
+
+describe('S-06.6 — Three-way conflict produces independent pending decisions per writer', () => {
+  // Design clarification for GAP-013:
+  // pending_decisions rows are not auto-created by POST /api/knowledge — they are
+  // created by the MCP conflict detection layer calling POST /pg/pending.
+  // Multiple POST /pg/pending calls for the same topic:key are all accepted
+  // (no unique-key constraint across topic+key) — each represents a distinct
+  // writer's DRAFT in conflict with the current ACTIVE entry.
+  // The PA uses GET /pg/pending/count/:topic/:key to see the full conflict picture
+  // and PATCH /pg/pending/:id { more_pending_same_key } to annotate individual briefs.
+  let threeWayKey
+  let c1Id, c2Id, c3Id
+
+  beforeAll(async () => {
+    threeWayKey = uid('three-way-conflict')
+
+    // Seed ACTIVE entry (v1)
+    await activeEntry({ topic: TOPIC, key: threeWayKey, content: 'Original stateless JWT policy', project: PROJECT })
+
+    // Three engineers each write a conflicting DRAFT
+    await api(tokens.engineer,   PROJECT).post('/api/knowledge', { topic: TOPIC, key: threeWayKey, content: 'Approach A: short-lived JWTs + rotation', entity_type: 'Decision' })
+    await api(tokens.senior,     PROJECT).post('/api/knowledge', { topic: TOPIC, key: threeWayKey, content: 'Approach B: Redis-backed sessions',        entity_type: 'Decision' })
+    await api(tokens.architect,  PROJECT).post('/api/knowledge', { topic: TOPIC, key: threeWayKey, content: 'Approach C: opaque tokens with introspection', entity_type: 'Decision' })
+
+    // Each writer's MCP conflict detection would POST /pg/pending — simulate all three
+    const base = { conflict_topic: TOPIC, conflict_key: threeWayKey, decision_type: 'conflict',
+                   existing_content: 'Original stateless JWT policy', active_version_at_creation: 1 }
+
+    const r1 = await api(tokens.pe, PROJECT).post('/pg/pending', { ...base, incoming_content: 'Approach A: short-lived JWTs + rotation',          conflict_reason: 'Engineer: rotation improves revocation' })
+    const r2 = await api(tokens.pe, PROJECT).post('/pg/pending', { ...base, incoming_content: 'Approach B: Redis-backed sessions',                  conflict_reason: 'Senior: server-side state enables instant revoke' })
+    const r3 = await api(tokens.pe, PROJECT).post('/pg/pending', { ...base, incoming_content: 'Approach C: opaque tokens with introspection',       conflict_reason: 'Architect: opaque tokens + introspection endpoint' })
+
+    c1Id = r1.data.conflict_id
+    c2Id = r2.data.conflict_id
+    c3Id = r3.data.conflict_id
+  })
+
+  test('step 1 — count endpoint returns 3 pending conflicts for this key', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/pending/count/${TOPIC}/${threeWayKey}`)
+    expect(res.status).toBe(200)
+    expect(res.data.count).toBeGreaterThanOrEqual(3)
+  })
+
+  test('step 2 — GET /pg/pending lists all three conflict decisions', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const ids = res.data.map(r => r.conflict_id)
+    expect(ids).toContain(c1Id)
+    expect(ids).toContain(c2Id)
+    expect(ids).toContain(c3Id)
+  })
+
+  test('step 3 — PA can annotate more_pending_same_key on each conflict brief', async () => {
+    // The PA patches each brief so the dashboard can show "2 more conflicts on this key"
+    const [p1, p2, p3] = await Promise.all([
+      api(tokens.pe, PROJECT).patch(`/pg/pending/${c1Id}`, { more_pending_same_key: 2 }),
+      api(tokens.pe, PROJECT).patch(`/pg/pending/${c2Id}`, { more_pending_same_key: 2 }),
+      api(tokens.pe, PROJECT).patch(`/pg/pending/${c3Id}`, { more_pending_same_key: 2 }),
+    ])
+    expect(p1.data.more_pending_same_key).toBe(2)
+    expect(p2.data.more_pending_same_key).toBe(2)
+    expect(p3.data.more_pending_same_key).toBe(2)
+  })
+
+  test('step 4 — each conflict has distinct incoming_content (no phantom duplicate rows)', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    const conflicts = res.data.filter(r => r.conflict_id === c1Id || r.conflict_id === c2Id || r.conflict_id === c3Id)
+    // Exactly 3 rows — not duplicated
+    expect(conflicts.length).toBe(3)
+    const contents = conflicts.map(c => c.incoming_content)
+    expect(new Set(contents).size).toBe(3)  // all distinct
+  })
+})
