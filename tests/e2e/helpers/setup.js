@@ -57,9 +57,13 @@ async function waitForGateway(timeoutMs = 60_000) {
 }
 
 /**
- * Upload a fixture config. Returns the response.
- * 201 = fresh upload. 409 = already onboarded (idempotent — acceptable).
+ * Upload (or update) a fixture config. Returns the response.
+ * 201 = fresh upload. 200 = config updated (upserted).
  * Any other status is a setup failure.
+ *
+ * POST /config/upload is a true upsert: 201 on first upload, 200 on subsequent
+ * calls. This ensures fixture changes (e.g. new members) are always reflected
+ * in the running test environment without requiring an env restart.
  *
  * @param {string} configPath - absolute path to the .quorum.json fixture
  * @param {string} peToken    - PA JWT (test-pe is PA in both fixtures)
@@ -74,7 +78,7 @@ async function uploadFixture(configPath, peToken) {
       validateStatus: () => true,
     },
   )
-  if (res.status === 201 || res.status === 409) return res
+  if (res.status === 201 || res.status === 200) return res
   throw new Error(
     `T0 setup FAIL — config upload for '${config.group_id}': HTTP ${res.status} — ${JSON.stringify(res.data)}`,
   )
@@ -112,7 +116,7 @@ export default async function setup(_config) {
 
   for (const [file, token] of fixtures) {
     const res = await uploadFixture(resolve(fixDir, file), token)
-    const label = res.status === 201 ? 'uploaded ✓' : 'already onboarded ✓'
+    const label = res.status === 201 ? 'uploaded ✓' : 'updated ✓'
     console.log(`[setup] fixture ${file} — ${label}`)
   }
 

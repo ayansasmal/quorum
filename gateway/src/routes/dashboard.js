@@ -760,11 +760,14 @@ router.post('/review/:conflictId', async (req, res, next) => {
   const reviewer   = req.user.sub
   const reviewerRole = req.user.role ?? 'engineer'
   const { conflictId } = req.params
-  const { action, note } = req.body
+  const { action, note, merged_content } = req.body
 
   // Validate inputs
-  if (!['approve', 'reject', 'request_changes'].includes(action)) {
-    return res.status(400).json({ error: 'invalid_action', message: 'action must be approve | reject | request_changes' })
+  if (!['approve', 'reject', 'request_changes', 'coexist_merge'].includes(action)) {
+    return res.status(400).json({ error: 'invalid_action', message: 'action must be approve | reject | request_changes | coexist_merge' })
+  }
+  if (action === 'coexist_merge' && (!merged_content || typeof merged_content !== 'string' || merged_content.trim().length === 0)) {
+    return res.status(400).json({ error: 'merged_content_required', message: 'coexist_merge requires a non-empty merged_content string' })
   }
 
   try {
@@ -923,6 +926,87 @@ router.post('/review/:conflictId', async (req, res, next) => {
       return res.json({
         status:      'changes_requested',
         conflict_id: conflictId,
+        reviewer,
+        note,
+        stale_warning: staleWarning,
+      })
+    }
+
+    // ── coexist_merge: reviewer writes a unified entry superseding both sides ──────
+    // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11.4 coexist_merge
+    if (action === 'coexist_merge') {
+      const contentHash = createHash('sha256').update(merged_content).digest('hex')
+      const client = await pool.connect()
+      let mergedVersion
+      try {
+        await client.query('BEGIN')
+        const nextVer = await getNextVersionNumber(client, decision.q_key_id)
+        const mergedVersionId = `${decision.q_key_id}_v${nextVer}`
+        mergedVersion = await insertVersion(client, {
+          version_id:   mergedVersionId,
+          q_key_id:     decision.q_key_id,
+          q_project_id: qProjectId,
+          topic:        conflictTopic,
+          key:          conflictKey,
+          summary:      merged_content,
+          entity_type:  currentActive?.entity_type ?? draftVersion?.entity_type ?? 'Decision',
+          tags:         currentActive?.tags ?? [],
+          confidence:   currentActive?.confidence ?? 0.80,
+          author:       reviewer,
+          author_role:  reviewerRole,
+          author_type:  'human',
+          triggered_by: 'dashboard',
+          content_hash: contentHash,
+          version:      nextVer,
+          status:       'ACTIVE',
+        })
+        // Supersede both source entries — neither is deleted, lineage is preserved
+        if (draftVersion) {
+          await transitionVersionStatus(client, `${decision.q_key_id}_v${draftVersion.version}`, 'SUPERSEDED', {
+            version: nextVer, author: reviewer, at: new Date().toISOString(),
+          })
+        }
+        if (currentActive) {
+          await transitionVersionStatus(client, `${decision.q_key_id}_v${currentActive.version}`, 'SUPERSEDED', {
+            version: nextVer, author: reviewer, at: new Date().toISOString(),
+          })
+        }
+        await resolvePendingDecision(client, conflictId, {
+          status: 'resolved', resolution: 'coexist_merge',
+          note, resolvedBy: reviewer, mergedContent: merged_content,
+        })
+        await client.query('COMMIT')
+      } catch (txErr) {
+        await client.query('ROLLBACK')
+        throw txErr
+      } finally {
+        client.release()
+      }
+      await writeAuditEntry(pool, {
+        operation:    'OUTCOME',
+        tool:         'review',
+        author:       reviewer,
+        author_role:  reviewerRole,
+        q_project_id: qProjectId,
+        author_type:  'human',
+        triggered_by: 'dashboard',
+        content_hash: contentHash,
+        governance_json: { action, note, conflict_id: conflictId, merged_content },
+        outcome_json: { status: 'merged', topic: conflictTopic, key: conflictKey, version: mergedVersion?.version },
+        version_impact: {
+          versions_created:    [mergedVersion?.version_id].filter(Boolean),
+          versions_superseded: [
+            draftVersion   && `${decision.q_key_id}_v${draftVersion.version}`,
+            currentActive  && `${decision.q_key_id}_v${currentActive.version}`,
+          ].filter(Boolean),
+        },
+      })
+      return res.json({
+        status:      'merged',
+        conflict_id: conflictId,
+        topic:       conflictTopic,
+        key:         conflictKey,
+        version:     mergedVersion?.version ?? null,
         reviewer,
         note,
         stale_warning: staleWarning,

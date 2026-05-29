@@ -31,8 +31,11 @@ const LEGAL_TRANSITIONS = new Map([
   [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.ACTIVE}`, true],
   [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.REJECTED}`, true],
   [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.PENDING_CONFLICT_CHECK}`, true],
+  // coexist_merge supersedes DRAFT and PENDING_CONFLICT_CHECK entries (both sides of the conflict)
+  [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.SUPERSEDED}`, true],
   [`${KnowledgeStatus.PENDING_CONFLICT_CHECK}->${KnowledgeStatus.ACTIVE}`, true],
   [`${KnowledgeStatus.PENDING_CONFLICT_CHECK}->${KnowledgeStatus.DRAFT}`, true],
+  [`${KnowledgeStatus.PENDING_CONFLICT_CHECK}->${KnowledgeStatus.SUPERSEDED}`, true],
   [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.SUPERSEDED}`, true],
   [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.DEPRECATED}`, true],
 ])
@@ -370,9 +373,12 @@ export async function insertVersionAuditLink(pg, record) {
  */
 export async function getLatestDraftVersion(pg, qKeyId) {
   if (typeof pg.getLatestDraftVersion === 'function') return pg.getLatestDraftVersion(qKeyId)
+  // PENDING_CONFLICT_CHECK is a "pending review" state identical to DRAFT for self-approval purposes.
+  // Both statuses must be checked — a PA writing with pending_conflict_check:true produces
+  // PENDING_CONFLICT_CHECK, not DRAFT, but the reviewer should still be blocked from self-approving.
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1 AND status = 'DRAFT'
+     WHERE q_key_id = $1 AND status IN ('DRAFT', 'PENDING_CONFLICT_CHECK')
      ORDER BY version DESC LIMIT 1`,
     [qKeyId],
   )

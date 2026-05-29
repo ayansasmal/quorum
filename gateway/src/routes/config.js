@@ -108,43 +108,57 @@ router.post('/upload', async (req, res) => {
   const groupId = config.group_id
   const key     = `${groupId}.quorum.json`
 
-  // Idempotency check — reject if the project is already onboarded in S3
+  // Upsert check — if the project already exists in S3, overwrite + re-sync rather than 409.
+  // authUpload already requires PA/owner auth, so the caller has the right to update.
+  let projectExists = false
   try {
     await getS3().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-    const pool    = req.app.locals.pool
-    let qProjId   = await getProjectByGroupId(pool, groupId).catch(() => null)
-    // PostgreSQL may have been wiped (e.g. Docker volume reset) while S3 persists.
-    // Re-register the project in q_projects so project-scoped routes work correctly.
-    if (!qProjId) {
-      try {
-        qProjId = await createProject(
-          pool,
-          groupId,
-          config.owner,
-          config.members ?? [],
-          { domains: config.domains },
-          {
-            displayName: config.project ?? null,
-            createdBy:   req.user?.sub ?? 'system',
-            isGlobal:    config.is_global ?? false,
-          },
-        )
-      } catch (pgErr) {
-        console.error(`[Gateway:config] q_projects re-register on 409 failed for ${groupId}: ${pgErr.message}`)
-      }
-    }
-    return res.status(409).json({
-      error:        'already_onboarded',
-      message:      `Project '${groupId}' is already onboarded. Use POST /sync/configs to refresh an existing project config.`,
-      project_id:   groupId,
-      q_project_id: qProjId,
-    })
+    projectExists = true
   } catch (err) {
-    // 404 / NoSuchKey → project does not exist yet; proceed
     if (err.name !== 'NotFound' && err.$metadata?.httpStatusCode !== 404) {
       console.error(`[Gateway:config] HeadObject failed for ${key}: ${err.message}`)
       return res.status(502).json({ error: 'storage_error', message: 'Failed to check S3 for existing project config' })
     }
+    // 404 / NoSuchKey → project does not exist yet; projectExists stays false
+  }
+
+  if (projectExists) {
+    // Overwrite S3 with the new config, re-sync DDB, and invalidate the Redis cache.
+    // Returns 200 (updated) instead of 201 (created).
+    try {
+      await getS3().send(new PutObjectCommand({
+        Bucket:      bucket,
+        Key:         key,
+        Body:        JSON.stringify(config, null, 2),
+        ContentType: 'application/json',
+      }))
+    } catch (err) {
+      console.error(`[Gateway:config] PutObject (update) failed for ${key}: ${err.message}`)
+      return res.status(502).json({ error: 'storage_error', message: 'Failed to update config in S3' })
+    }
+    const syncResult = await syncOneProject(bucket, groupId)
+    if (!syncResult.ok) {
+      console.error(`[Gateway:config] DDB re-sync failed for ${groupId}: ${syncResult.error}`)
+    }
+    const pool   = req.app.locals.pool
+    let qProjId  = await getProjectByGroupId(pool, groupId).catch(() => null)
+    if (!qProjId) {
+      try {
+        qProjId = await createProject(
+          pool, groupId, config.owner, config.members ?? [],
+          { domains: config.domains },
+          { displayName: config.project ?? null, createdBy: req.user?.sub ?? 'system', isGlobal: config.is_global ?? false },
+        )
+      } catch (pgErr) {
+        console.error(`[Gateway:config] q_projects re-register on update failed for ${groupId}: ${pgErr.message}`)
+      }
+    }
+    await invalidateProject(groupId)
+    return res.status(200).json({
+      project_id:   groupId,
+      q_project_id: qProjId,
+      message:      `Project '${groupId}' config updated successfully.`,
+    })
   }
 
   // Upload config to S3

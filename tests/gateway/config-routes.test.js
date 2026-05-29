@@ -331,6 +331,31 @@ describe('POST /config/upload', () => {
     expect(body.project_id).toBe('new-project')
   })
 
+  it('returns 200 and updates config when project already exists in S3 (upsert)', async () => {
+    // Override S3 mock for this test: HeadObject succeeds (project exists), PutObject succeeds.
+    const { getS3 } = await import('../../gateway/src/routes/sync.js')
+    getS3.mockReturnValueOnce({
+      send: vi.fn(async (cmd) => {
+        // HeadObject succeeds (project exists in S3)
+        if (cmd._type === 'head') return {}
+        // PutObject succeeds
+        return {}
+      }),
+    })
+    const { syncOneProject } = await import('../../gateway/src/routes/sync.js')
+    syncOneProject.mockResolvedValue({ ok: true })
+
+    const { status, body } = await post(
+      '/config/upload',
+      VALID_CONFIG,
+      { 'X-Quorum-Sync-Token': 'sync-secret' },
+    )
+
+    expect(status).toBe(200)
+    expect(body.project_id).toBe('new-project')
+    expect(body.message).toMatch(/updated/)
+  })
+
   it('allows bootstrap upload when JWT user is principal_architect in config', async () => {
     mockProfile('alice', 'bootstrap-project', 'principal_architect')
     const tok = await makeToken('alice')

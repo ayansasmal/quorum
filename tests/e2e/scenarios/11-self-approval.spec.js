@@ -5,6 +5,7 @@
  * Pillars: Governance Integrity (S-11.1 — global catalog case)
  *                               (S-11.2 — standard engineer DRAFT)
  *                               (S-11.3 — MCP-path write)
+ *                               (S-11.4 — coexist_merge two-PA flow)
  *
  * Sub-scenarios:
  *   S-11.1  PA writes DRAFT to global catalog (always DRAFT for globals);
@@ -13,6 +14,10 @@
  *           PE (different user) approves → ACTIVE
  *   S-11.3  MCP-style path: senior writes DRAFT via POST /pg/versions;
  *           self-review attempt blocked → 400 NO_SELF_APPROVAL
+ *   S-11.4  coexist_merge: test-pe2 (second PA) writes PENDING_CONFLICT_CHECK DRAFT;
+ *           test-pe (author of ACTIVE) merges → 200 merged; no self-approval violation
+ *           because reviewer ≠ draft author; both source versions SUPERSEDED; new ACTIVE
+ *           authored by reviewer (test-pe); merged_content required validation enforced
  *
  * Architecture notes:
  *   Constitutional Rule 4 — enforceNoSelfApproval(draftAuthor, reviewer, operation)
@@ -26,6 +31,11 @@
  *   Self-approval comparison is case/whitespace-insensitive: enforced by constitutional.js.
  *   Blocked attempt leaves the DRAFT version untouched (no partial state change).
  *
+ *   coexist_merge self-approval semantics: enforceNoSelfApproval checks reviewer !== draftVersion.author.
+ *   The author of the ACTIVE entry CAN be the merger — they are reviewing someone else's DRAFT.
+ *   This is intentional: the active-entry author is the domain expert best placed to write the
+ *   unified statement that supersedes both versions.
+ *
  * Note on quorum-test-catalog: test-pe is the ONLY PA in the catalog. A global-catalog
  * DRAFT written by test-pe can only be approved by another PA in the catalog — and there
  * is none. S-11.1 therefore only tests the BLOCK path; the approval path for Case 1 would
@@ -36,7 +46,7 @@ import { test, expect } from '@playwright/test'
 
 const { describe, beforeAll } = test
 import { api, catalogApi, assertConstitutionalViolation } from '../helpers/api.js'
-import { tokens }                                          from '../helpers/jwt.js'
+import { tokens, pe2Token }                               from '../helpers/jwt.js'
 import { uid, activeEntry }                               from '../helpers/seed.js'
 
 const PROJECT = 'quorum-test-project'
@@ -240,5 +250,137 @@ describe('S-11.3 — MCP-Path Self-Approval', () => {
   })
 
 }) // S-11 — Self-Approval Prevention
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-11.4 — coexist_merge (two-PA flow — GAP-003)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-11.4 — coexist_merge Two-PA Flow', () => {
+  let conflictId
+  let activeVersion
+  let mergedVersion
+  const topic = 'infra'
+  const key   = uid('coexist-merge-s11')
+
+  const ACTIVE_CONTENT  = 'Always use exponential back-off with a 30s cap for retries.'
+  const DRAFT_CONTENT   = 'Use exponential back-off with a 60s cap and jitter for retries.'
+  const MERGED_CONTENT  = 'Use exponential back-off with jitter: cap 30s for internal calls, 60s for external services.'
+
+  beforeAll(async () => {
+    // Step 1: test-pe (first PA) writes ACTIVE entry via dashboard path.
+    // PA writes to non-global projects land as ACTIVE immediately (no self-approval block applies
+    // because the project is not is_global:true — S-11.1 global-catalog rule does not apply here).
+    const activeRes = await activeEntry({ topic, key, content: ACTIVE_CONTENT, project: PROJECT })
+    activeVersion = activeRes.versionId
+
+    // Step 2: test-pe2 (second PA) writes conflicting content via pg.js path with
+    // pending_conflict_check:true — this produces a PENDING_CONFLICT_CHECK status entry.
+    // POST /pg/versions derives status server-side: pending_conflict_check flag → PENDING_CONFLICT_CHECK.
+    const draftRes = await api(pe2Token(), PROJECT).post('/pg/versions', {
+      topic,
+      key,
+      summary:              DRAFT_CONTENT,
+      entity_type:          'Pattern',
+      author:               'test-pe2',
+      author_role:          'principal_architect',
+      pending_conflict_check: true,
+    })
+    expect(draftRes.status).toBe(201)
+
+    // Step 3: create a pending_decision record so POST /api/review/:conflictId can find it.
+    // POST /pg/versions does NOT auto-create a pending_decisions row.
+    const pendingRes = await api(tokens.pe, PROJECT).post('/pg/pending', {
+      conflict_topic:   topic,
+      conflict_key:     key,
+      decision_type:    'conflict',
+      existing_content: ACTIVE_CONTENT,
+      incoming_content: DRAFT_CONTENT,
+      conflict_reason:  'Conflicting retry cap values — requires unified standard (S-11.4 coexist_merge)',
+    })
+    expect(pendingRes.status).toBe(201)
+    conflictId = pendingRes.data.conflict_id
+  })
+
+  test('step 1 — coexist_merge with missing merged_content → 400 merged_content_required', async () => {
+    // Validation guard: coexist_merge requires a non-empty merged_content string.
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${conflictId}`, {
+      action: 'coexist_merge',
+      note:   'Attempting merge without providing merged content for validation test',
+    })
+    expect(res.status).toBe(400)
+    expect(res.data.error).toBe('merged_content_required')
+  })
+
+  test('step 2 — test-pe2 (DRAFT author) self-merge → 400 NO_SELF_APPROVAL', async () => {
+    // Reviewer === draft author → self-approval violation.
+    // test-pe2 authored the DRAFT; test-pe2 cannot be the merger.
+    const res = await api(pe2Token(), PROJECT).post(`/api/review/${conflictId}`, {
+      action:          'coexist_merge',
+      note:            'Attempting self-merge of my own conflicting draft as second PA',
+      merged_content:  MERGED_CONTENT,
+    })
+    // ConstitutionalViolation → HTTP 400 (NOT 403 — role guard doesn't fire, both are PA)
+    assertConstitutionalViolation(res, 'NO_SELF_APPROVAL')
+  })
+
+  test('step 3 — test-pe (ACTIVE author, NOT DRAFT author) merges → 200 merged', async () => {
+    // test-pe is the ACTIVE author — this is PERMITTED because enforceNoSelfApproval only
+    // checks reviewer !== draftVersion.author (test-pe2). The active-entry author is the
+    // domain expert best placed to write the unified statement.
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${conflictId}`, {
+      action:         'coexist_merge',
+      note:           'Unified both retry cap proposals into a context-sensitive standard',
+      merged_content: MERGED_CONTENT,
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('merged')
+    expect(res.data.conflict_id).toBe(conflictId)
+    expect(res.data.topic).toBe(topic)
+    expect(res.data.key).toBe(key)
+    expect(res.data.reviewer).toBe('test-pe')
+    expect(typeof res.data.version).toBe('number')
+    mergedVersion = res.data.version
+  })
+
+  test('step 4 — merged entry is ACTIVE and authored by the reviewer (test-pe)', async () => {
+    // The new ACTIVE version must be attributed to the reviewer (test-pe), not either original author.
+    const vRes = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${key}`)
+    expect(vRes.status).toBe(200)
+    expect(vRes.data).toBeTruthy()
+    expect(vRes.data.status).toBe('ACTIVE')
+    expect(vRes.data.author).toBe('test-pe')
+    expect(vRes.data.summary).toBe(MERGED_CONTENT)
+    expect(vRes.data.version).toBe(mergedVersion)
+  })
+
+  test('step 5 — history shows both source versions SUPERSEDED, new ACTIVE as newest', async () => {
+    // After coexist_merge: original ACTIVE (v1, test-pe) and DRAFT (v2, test-pe2) are both
+    // SUPERSEDED; the merged entry (v3, test-pe) is the sole ACTIVE version.
+    const hRes = await api(tokens.pe, PROJECT).get(`/pg/versions/${topic}/${key}/history`)
+    expect(hRes.status).toBe(200)
+    expect(Array.isArray(hRes.data)).toBe(true)
+
+    const superseded = hRes.data.filter(v => v.status === 'SUPERSEDED')
+    const active     = hRes.data.filter(v => v.status === 'ACTIVE')
+
+    expect(active.length).toBe(1)
+    expect(active[0].author).toBe('test-pe')
+    expect(active[0].summary).toBe(MERGED_CONTENT)
+
+    // Both original entries (ACTIVE v1 and DRAFT/PENDING_CONFLICT_CHECK v2) must be SUPERSEDED.
+    expect(superseded.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('step 6 — pending decision is resolved with resolution coexist_merge', async () => {
+    // After a successful merge, the pending_decision row must be resolved — it must NOT
+    // appear in the open conflict_briefs list.
+    const pendingRes = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(pendingRes.status).toBe(200)
+    const open = pendingRes.data.conflict_briefs ?? pendingRes.data.decisions ?? pendingRes.data ?? []
+    const stillOpen = open.find(d => d.conflict_id === conflictId)
+    expect(stillOpen).toBeUndefined()
+  })
+
+}) // S-11.4
 
 }) // outer describe — required by graph reporter extractScenarioId()

@@ -77,6 +77,8 @@ export function token(sub, extra = {}) {
 
 /** @returns {string} Fresh principal_architect JWT */
 export const peToken         = () => token('test-pe')
+/** @returns {string} Fresh second principal_architect JWT (test-pe2 — for coexist_merge tests) */
+export const pe2Token        = () => token('test-pe2')
 /** @returns {string} Fresh architect JWT */
 export const architectToken  = () => token('test-architect')
 /** @returns {string} Fresh engineer JWT */
@@ -107,6 +109,7 @@ export const adminToken      = () => token('test-admin', { is_admin: true })
  */
 export const tokens = {
   pe:         peToken(),
+  pe2:        pe2Token(),
   architect:  architectToken(),
   engineer:   engineerToken(),
   senior:     seniorToken(),

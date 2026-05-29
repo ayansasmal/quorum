@@ -25,6 +25,13 @@
       "team": "platform"
     },
     {
+      "name": "Test PE2",
+      "github_username": "test-pe2",
+      "role": "principal_architect",
+      "base_confidence": 0.90,
+      "team": "platform"
+    },
+    {
       "name": "Test Architect",
       "github_username": "test-architect",
       "role": "architect",
