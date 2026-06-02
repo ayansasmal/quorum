@@ -292,11 +292,13 @@ describe('GET /api/portfolio', () => {
       { groupId: 'payments-service', qProjectId: 'q_p1', displayName: 'Payments', hierarchyLevel: 'service',
         criticality: 2, score: 90, status: 'CERTIFIED',
         breakdown: { open: 0, accepted: 1, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
-        scan_count: 1, last_scan_at: '2026-05-01T00:00:00Z' },
+        scan_count: 1, last_scan_at: '2026-05-01T00:00:00Z',
+        owner: null, hierarchyParent: null, isGlobal: false },
       { groupId: 'auth-service', qProjectId: 'q_p2', displayName: 'Auth', hierarchyLevel: 'service',
         criticality: 1, score: 60, status: 'CERTIFIED',
         breakdown: { open: 2, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
-        scan_count: 2, last_scan_at: '2026-05-02T00:00:00Z' },
+        scan_count: 2, last_scan_at: '2026-05-02T00:00:00Z',
+        owner: null, hierarchyParent: null, isGlobal: false },
     ])
 
     const app = makeServer({ role: 'principal_architect' }, { query: mockQuery })
@@ -313,6 +315,33 @@ describe('GET /api/portfolio', () => {
     expect(body.rollup.status).toBe('CERTIFIED')
     expect(body.rollup.certified_count).toBe(2)
     expect(body.rollup.uncertified_count).toBe(0)
+  })
+
+  it('returns owner, hierarchy_parent, and is_global per project', async () => {
+    const mockQuery = vi.fn().mockResolvedValue({
+      rows: [{ q_project_id: 'q_p1', group_id: 'payments-service' }],
+    })
+    mockLoadProjectConfig.mockResolvedValue({
+      globals: [],
+      owner: 'ayansasmal',
+      is_global: false,
+      hierarchy: { criticality: 1, level: 'service', parent: 'platform-team' },
+    })
+    mockGetPortfolioScores.mockResolvedValue([
+      { groupId: 'payments-service', qProjectId: 'q_p1', displayName: 'Payments',
+        hierarchyLevel: 'service', criticality: 1, score: 88, status: 'CERTIFIED',
+        breakdown: { open: 0, accepted: 1, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
+        scan_count: 1, last_scan_at: '2026-06-01T00:00:00Z',
+        owner: 'ayansasmal', hierarchyParent: 'platform-team', isGlobal: false },
+    ])
+
+    const app = makeServer({ role: 'principal_architect' }, { query: mockQuery })
+    const { status, body } = await request(app, 'GET', '/api/portfolio')
+
+    expect(status).toBe(200)
+    expect(body.projects[0].owner).toBe('ayansasmal')
+    expect(body.projects[0].hierarchy_parent).toBe('platform-team')
+    expect(body.projects[0].is_global).toBe(false)
   })
 
   it('rollup is null when no projects returned', async () => {

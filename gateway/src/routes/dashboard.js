@@ -2322,12 +2322,15 @@ router.get('/portfolio', async (req, res, next) => {
           // Apply node_id filter: include only projects whose hierarchy.parent === node_id
           if (nodeId && cfg?.hierarchy?.parent !== nodeId) return null
           return {
-            groupId:        group_id,
-            qProjectId:     q_project_id,
+            groupId:         group_id,
+            qProjectId:      q_project_id,
             catalogGroupIds: cfg?.globals ?? [],
-            criticality:    cfg?.hierarchy?.criticality ?? 1,
-            displayName:    cfg?.hierarchy?.display_name ?? cfg?.project ?? group_id,
-            hierarchyLevel: cfg?.hierarchy?.level ?? null,
+            criticality:     cfg?.hierarchy?.criticality ?? 1,
+            displayName:     cfg?.hierarchy?.display_name ?? cfg?.project ?? group_id,
+            hierarchyLevel:  cfg?.hierarchy?.level   ?? null,
+            hierarchyParent: cfg?.hierarchy?.parent  ?? null,
+            owner:           cfg?.owner              ?? null,
+            isGlobal:        cfg?.is_global          ?? false,
           }
         }),
       )
@@ -2354,15 +2357,18 @@ router.get('/portfolio', async (req, res, next) => {
 
     return res.json({
       projects: scores.map((p) => ({
-        group_id:        p.groupId,
-        display_name:    p.displayName,
-        hierarchy_level: p.hierarchyLevel,
-        criticality:     p.criticality,
-        score:           p.score,
-        status:          p.status,
-        breakdown:       p.breakdown,
-        scan_count:      p.scan_count,
-        last_scan_at:    p.last_scan_at,
+        group_id:         p.groupId,
+        display_name:     p.displayName,
+        hierarchy_level:  p.hierarchyLevel,
+        hierarchy_parent: p.hierarchyParent ?? null,
+        owner:            p.owner           ?? null,
+        is_global:        p.isGlobal        ?? false,
+        criticality:      p.criticality,
+        score:            p.score,
+        status:           p.status,
+        breakdown:        p.breakdown,
+        scan_count:       p.scan_count,
+        last_scan_at:     p.last_scan_at,
       })),
       rollup,
     })
