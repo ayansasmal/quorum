@@ -38,16 +38,21 @@ export default function Portfolio() {
   if (isLoading) return <p className="text-sm text-gray-500 py-8 text-center">Loading portfolio…</p>
   if (error)     return <p className="text-sm text-red-400 py-8 text-center">{error.message}</p>
 
-  const rollupColor = rollup?.score >= 80 ? 'text-green-400'
-    : rollup?.score >= 50 ? 'text-amber-400'
-    : rollup?.score !== null && rollup?.score !== undefined ? 'text-red-400'
-    : 'text-gray-400'
+  const rollupColor = scoreColor(rollup?.score)
+
+  const bannerClass = rollup?.score >= 80
+    ? 'border-green-900/40 bg-green-950/20 dark:border-green-900/40 dark:bg-green-950/20'
+    : rollup?.score >= 50
+    ? 'border-amber-900/40 bg-amber-950/20 dark:border-amber-900/40 dark:bg-amber-950/20'
+    : rollup?.score !== null && rollup?.score !== undefined
+    ? 'border-red-900/40 bg-red-950/20 dark:border-red-900/40 dark:bg-red-950/20'
+    : 'border-gray-700 bg-gray-800/30 dark:border-gray-700 dark:bg-gray-800/30'
 
   return (
     <div className="space-y-5 max-w-6xl">
 
       {/* ── Rollup banner ─────────────────────────────────────── */}
-      <div className="flex items-center gap-6 rounded-lg border border-green-900/40 bg-green-950/20 px-5 py-4">
+      <div className={`flex items-center gap-6 rounded-lg border ${bannerClass} px-5 py-4`}>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-1">
             Org conformance score
