@@ -888,26 +888,47 @@ router.post('/scans', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-// POST /pg/deviation-actions — seed a deviation action with an arbitrary defer_until date.
-// Admin-only endpoint used by E2E helpers to create OVERDUE state (defer_until in the past)
-// without triggering enforceValidDeferDeadline, which blocks past-dated deferrals in the
-// normal API path.
+// POST /pg/deviation-actions — test-only seeding endpoint: inserts a defer action with an
+// arbitrary (past-dated) defer_until so E2E helpers can create OVERDUE state without
+// triggering enforceValidDeferDeadline, which blocks past dates on the normal API path.
+//
+// Security hardening:
+//   - Refused entirely in production (NODE_ENV === 'production' → 404)
+//   - action_type restricted to 'defer' only — the only bypass this endpoint needs
+//   - actor/actor_role derived from the JWT, never body-supplied (prevents audit forgery)
+//   - Ownership check: deviation must belong to the requesting project
 // E2E: tests/e2e/scenarios/04-deviation-governance.spec.js — S-04.9 overdue deferrals seeding
 router.post('/deviation-actions', async (req, res, next) => {
+  // Refuse in production — this endpoint exists solely for E2E test seeding
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'not_found' })
+  }
   if (!req.user.is_admin) {
     return res.status(403).json({ error: 'forbidden', message: 'admin required' })
   }
   const pool = req.app.locals.pool
-  const { deviation_id, action_type, defer_until, actor, actor_role, reason } = req.body ?? {}
-  if (!deviation_id || !action_type || !actor || !actor_role || !reason) {
-    return res.status(400).json({ error: 'missing_fields', message: 'deviation_id, action_type, actor, actor_role, reason required' })
+  const { deviation_id, defer_until, reason } = req.body ?? {}
+  if (!deviation_id || !defer_until || !reason) {
+    return res.status(400).json({ error: 'missing_fields', message: 'deviation_id, defer_until, reason required' })
   }
+  // actor/actor_role always derived from the JWT — never accepted from the body
+  const actor      = req.user.sub
+  const actor_role = req.user.role ?? 'principal_architect'
   try {
+    // Ownership check: the deviation must belong to the requesting project
+    const { rows: devRows } = await pool.query(
+      'SELECT q_project_id FROM deviations WHERE deviation_id = $1',
+      [deviation_id],
+    )
+    if (!devRows[0]) return res.status(404).json({ error: 'deviation_not_found' })
+    if (devRows[0].q_project_id !== req.user.qProjectId) {
+      return res.status(403).json({ error: 'forbidden', message: 'deviation belongs to a different project' })
+    }
     const { rows } = await pool.query(
       `INSERT INTO deviation_actions (deviation_id, action_type, defer_until, actor, actor_role, reason)
-       VALUES ($1, $2, $3, $4, $5, $6)
+       VALUES ($1, 'defer', $2, $3, $4, $5)
        RETURNING *`,
-      [deviation_id, action_type, defer_until ?? null, actor, actor_role, reason],
+      [deviation_id, defer_until, actor, actor_role, reason],
     )
     res.status(201).json(rows[0])
   } catch (err) { next(err) }

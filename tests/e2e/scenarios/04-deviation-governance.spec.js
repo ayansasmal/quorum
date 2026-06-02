@@ -745,12 +745,10 @@ describe('S-04.9 — Overdue Deferrals Browser', { tag: '@ui' }, () => {
     // so the computed status resolves to OVERDUE (DEFERRED + defer_until < NOW()).
     // E2E: POST /pg/deviation-actions is admin-only and exists solely for this seeding path.
     const yesterday = new Date(Date.now() - 86_400_000).toISOString()
+    // actor/actor_role are derived from the admin JWT server-side — not accepted from body
     await api(tokens.admin, PROJECT).post('/pg/deviation-actions', {
       deviation_id: deviationId,
-      action_type:  'defer',
       defer_until:  yesterday,
-      actor:        'test-pe',
-      actor_role:   'principal_architect',
       reason:       'Deferred past deadline for S-04.9 E2E overdue test',
     })
   })
