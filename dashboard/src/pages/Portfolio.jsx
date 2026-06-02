@@ -35,6 +35,77 @@ export default function Portfolio() {
   const projects = data?.projects ?? []
   const rollup   = data?.rollup   ?? null
 
+  // ── Filter state ───────────────────────────────────────────
+  const [selectedGroup,      setSelectedGroup]      = useState('')
+  const [selectedDivision,   setSelectedDivision]   = useState('')
+  const [selectedDepartment, setSelectedDepartment] = useState('')
+  const [selectedStatus,     setSelectedStatus]     = useState('')
+  const [query,              setQuery]              = useState('')
+
+  // ── Cascade option lists (derived from flat projects array) ─
+  const groups = useMemo(
+    () => projects.filter(p => p.hierarchy_level === 'group'),
+    [projects],
+  )
+
+  const divisions = useMemo(
+    () => selectedGroup
+      ? projects.filter(p => p.hierarchy_parent === selectedGroup && p.hierarchy_level === 'division')
+      : [],
+    [projects, selectedGroup],
+  )
+
+  const departments = useMemo(
+    () => selectedDivision
+      ? projects.filter(p => p.hierarchy_parent === selectedDivision && p.hierarchy_level === 'department')
+      : [],
+    [projects, selectedDivision],
+  )
+
+  // Walk hierarchy_parent chain to check ancestry.
+  function isDescendant(project, ancestorGroupId) {
+    const map = new Map(projects.map(p => [p.group_id, p]))
+    let cur = map.get(project.hierarchy_parent)
+    while (cur) {
+      if (cur.group_id === ancestorGroupId) return true
+      cur = map.get(cur.hierarchy_parent)
+    }
+    return false
+  }
+
+  // ── Filtered + sorted rows ─────────────────────────────────
+  const filtered = useMemo(() => {
+    let rows = projects
+    if (selectedDepartment) {
+      rows = rows.filter(p => p.hierarchy_parent === selectedDepartment)
+    } else if (selectedDivision) {
+      rows = rows.filter(p => p.hierarchy_parent === selectedDivision || isDescendant(p, selectedDivision))
+    } else if (selectedGroup) {
+      rows = rows.filter(p => p.hierarchy_parent === selectedGroup || isDescendant(p, selectedGroup))
+    }
+    if (selectedStatus) rows = rows.filter(p => p.status === selectedStatus)
+    if (query) {
+      const q = query.toLowerCase()
+      rows = rows.filter(p =>
+        p.group_id.toLowerCase().includes(q) ||
+        (p.display_name ?? '').toLowerCase().includes(q),
+      )
+    }
+    // CERTIFIED rows sorted by score desc; UNCERTIFIED rows at bottom
+    return [...rows].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+  }, [projects, selectedGroup, selectedDivision, selectedDepartment, selectedStatus, query])
+
+  // Reset downstream filters when a parent filter changes
+  function handleGroupChange(val) {
+    setSelectedGroup(val)
+    setSelectedDivision('')
+    setSelectedDepartment('')
+  }
+  function handleDivisionChange(val) {
+    setSelectedDivision(val)
+    setSelectedDepartment('')
+  }
+
   if (isLoading) return <p className="text-sm text-gray-500 py-8 text-center">Loading portfolio…</p>
   if (error)     return <p className="text-sm text-red-400 py-8 text-center">{error.message}</p>
 
@@ -82,6 +153,70 @@ export default function Portfolio() {
           ))}
         </div>
       </div>
+
+      {/* ── Cascading filters ───────────────────────────────────── */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <select
+          value={selectedGroup}
+          onChange={e => handleGroupChange(e.target.value)}
+          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-sm text-gray-300"
+        >
+          <option value="">Group: All</option>
+          {groups.map(g => (
+            <option key={g.group_id} value={g.group_id}>{g.display_name ?? g.group_id}</option>
+          ))}
+        </select>
+
+        <select
+          value={selectedDivision}
+          onChange={e => handleDivisionChange(e.target.value)}
+          disabled={!selectedGroup}
+          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-sm text-gray-300 disabled:opacity-40"
+        >
+          <option value="">Division: {selectedGroup ? 'All' : '—'}</option>
+          {divisions.map(d => (
+            <option key={d.group_id} value={d.group_id}>{d.display_name ?? d.group_id}</option>
+          ))}
+        </select>
+
+        <select
+          value={selectedDepartment}
+          onChange={e => setSelectedDepartment(e.target.value)}
+          disabled={!selectedDivision}
+          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-sm text-gray-300 disabled:opacity-40"
+        >
+          <option value="">Department: {selectedDivision ? 'All' : '—'}</option>
+          {departments.map(d => (
+            <option key={d.group_id} value={d.group_id}>{d.display_name ?? d.group_id}</option>
+          ))}
+        </select>
+
+        <select
+          value={selectedStatus}
+          onChange={e => setSelectedStatus(e.target.value)}
+          className="rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-sm text-gray-300"
+        >
+          <option value="">Status: All</option>
+          <option value="CERTIFIED">CERTIFIED</option>
+          <option value="UNCERTIFIED">UNCERTIFIED</option>
+        </select>
+
+        <input
+          type="text"
+          placeholder="Search by name or group_id…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="flex-1 min-w-[180px] rounded-md bg-gray-800 border border-gray-700 px-3 py-1.5 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+
+      <p className="text-xs text-gray-600">
+        Showing {filtered.length} of {projects.length} projects
+        {selectedGroup && ` · group: ${selectedGroup}`}
+        {selectedDivision && ` · division: ${selectedDivision}`}
+        {selectedDepartment && ` · dept: ${selectedDepartment}`}
+        {selectedStatus && ` · ${selectedStatus}`}
+      </p>
 
     </div>
   )
