@@ -50,7 +50,7 @@ const PROJECT = 'quorum-test-project'
 const SKIP_MSG  = 'Browser tests run in Docker mode only (QUORUM_DASHBOARD_URL not set)'
 const shouldSkip = !process.env.QUORUM_DASHBOARD_URL
 
-describe('S-14 — Dashboard Visual', () => {
+describe('S-14 — Dashboard Visual', { tag: '@ui' }, () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S-14.1 — Knowledge Graph (/graph)
@@ -202,6 +202,24 @@ describe('S-14.2 — Config Editor', () => {
     // Save button must be disabled when validErr is set (canSave = !validErr).
     const saveBtn = page.locator('button:has-text("Save config")')
     await expect(saveBtn).toBeDisabled({ timeout: 3000 })
+  })
+
+  test('step 3 — saving a valid config shows the success banner', async ({ page }) => {
+    test.skip(shouldSkip, SKIP_MSG)
+    await injectSession(page, { sub: 'test-pe', project: PROJECT })
+    await page.goto(`${DASHBOARD_URL}/config`)
+    await page.waitForLoadState('networkidle')
+
+    // Wait for the editor to load — config is valid on load so canSave starts true
+    const editor = page.locator('textarea').first()
+    await expect(editor).toBeVisible({ timeout: 8000 })
+
+    const saveBtn = page.getByTestId('save-config-btn')
+    await expect(saveBtn).toBeEnabled({ timeout: 5000 })
+    await saveBtn.click()
+
+    await expect(page.getByTestId('save-success')).toBeVisible({ timeout: 8000 })
+    await expect(page.getByTestId('save-success')).toContainText('Config saved successfully.')
   })
 })
 
@@ -398,6 +416,51 @@ describe('S-14.5 — Project Selector', () => {
 
     // The active project in the header badge should still be quorum-test-project.
     await expect(page.locator(`text=${PROJECT}`).first()).toBeVisible({ timeout: 5000 })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-14.6 — Dark Mode Persistence
+//
+// Verifies that the theme toggle in the header flips the 'dark' class on <html>
+// and that localStorage persists the preference across a page navigation.
+// ThemeContext defaults to 'dark' when localStorage is empty (fresh Playwright context).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-14.6 — Dark Mode Persistence', () => {
+  test('step 1 — page loads in dark mode by default (ThemeContext default is "dark")', async ({ page }) => {
+    test.skip(shouldSkip, SKIP_MSG)
+    await injectSession(page, { sub: 'test-pe', project: PROJECT })
+    await page.goto(`${DASHBOARD_URL}/`)
+    await page.waitForLoadState('networkidle')
+
+    const htmlClass = await page.evaluate(() => document.documentElement.className)
+    expect(htmlClass).toContain('dark')
+  })
+
+  test('step 2 — clicking the toggle switches to light mode and persists across navigation', async ({ page }) => {
+    test.skip(shouldSkip, SKIP_MSG)
+    await injectSession(page, { sub: 'test-pe', project: PROJECT })
+    await page.goto(`${DASHBOARD_URL}/`)
+    await page.waitForLoadState('networkidle')
+
+    const toggle = page.getByTestId('theme-toggle')
+    await expect(toggle).toBeVisible({ timeout: 5000 })
+    await toggle.click()
+
+    // dark class removed, localStorage records the preference
+    const htmlClassAfter = await page.evaluate(() => document.documentElement.className)
+    expect(htmlClassAfter).not.toContain('dark')
+
+    const stored = await page.evaluate(() => localStorage.getItem('quorum-theme'))
+    expect(stored).toBe('light')
+
+    // Navigate — theme persists because ThemeContext re-reads localStorage on mount
+    await page.goto(`${DASHBOARD_URL}/knowledge`)
+    await page.waitForLoadState('networkidle')
+
+    const htmlClassAfterNav = await page.evaluate(() => document.documentElement.className)
+    expect(htmlClassAfterNav).not.toContain('dark')
   })
 })
 

@@ -37,3 +37,4 @@ crossplane/credentials/aws-creds-secret.yaml
 .quorum-session
 .quorum-reflected
 .quorum-offline.log
+.superpowers/

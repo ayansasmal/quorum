@@ -22,6 +22,21 @@ LOG_DIR="$PROJECT_ROOT/logs"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 COMMAND="${1:-help}"
 
+# ── Dev mode ──────────────────────────────────────────────────────────────────
+# Bind-mounts gateway/src and runs Vite dev server instead of built images.
+# Activated by either of:
+#   npm run docker:start --env=dev        (npm sets npm_config_env=dev)
+#   QUORUM_ENV=dev ./scripts/setup.sh docker
+#
+# When active, COMPOSE_FILE merges docker-compose.dev.yml on top of the base
+# so all docker compose calls in this script pick up the dev overlay automatically.
+if [[ "${npm_config_env:-}" == "dev" ]] || [[ "${QUORUM_ENV:-}" == "dev" ]]; then
+  export COMPOSE_FILE="docker-compose.yml:docker-compose.dev.yml"
+  export _QUORUM_DEV_MODE=1
+else
+  export _QUORUM_DEV_MODE=0
+fi
+
 mkdir -p "$LOG_DIR"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -122,6 +137,14 @@ cmd_docker() {
 
   header "Quorum — Docker Compose Setup"
   info "Log: $LOG_FILE"
+  if [[ "$_QUORUM_DEV_MODE" == "1" ]]; then
+    ok "Dev mode: bind-mounted source (docker-compose.dev.yml overlay active)"
+    ok "  Gateway:   node --watch on gateway/src/         →  http://localhost:3001"
+    ok "  Dashboard: nginx serving ./dashboard/dist        →  http://localhost:3002"
+    ok "  Rebuild dashboard: npm run build --workspace=dashboard"
+  else
+    info "Production mode: built images (pass --env=dev or set QUORUM_ENV=dev for live source)"
+  fi
 
   # Tag images with the current git commit hash for traceability.
   # APP_VERSION is read from root package.json — single source of truth for the release version.

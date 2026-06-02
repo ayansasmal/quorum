@@ -2,6 +2,8 @@
 
 *Generated: 2026-05-28 | Suite baseline: 452 passed, 0 failed, 1 skipped*
 *Updated: 2026-05-29 | Gateway unit tests: 704 | E2E: 550 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅; P4 all closed: GAP-018 ✅ GAP-019 ✅ GAP-020 ✅ GAP-021 ✅ GAP-022 ✅*
+*Updated: 2026-06-02 | E2E: 560 passed | P5 all closed: GAP-023 ✅ GAP-024 ✅ GAP-025 ✅ GAP-026 ✅ GAP-027 ✅ — browser tests added for config save success (S-14.2 step 3), knowledge history drawer (S-16.6), search UI (S-20.8), overdue deferrals (S-04.9), dark mode toggle (S-14.6); POST /pg/deviation-actions admin seeding endpoint added; full-page screenshots enabled (playwright.config.js)*
+*Updated: 2026-06-02 | P6 design decisions: GAP-030 ✅ accepted risk (1h JWT TTL, no refresh tokens, automatic PKCE re-auth); GAP-032 ✅ on-demand by design (leadership/process-triggered, quorum:scan skill is the interface); GAP-029 deferred (no comms notifications required at current stage). Remaining open P6: GAP-028 (portfolio UI), GAP-033 (config diff view). GAP-031 (history bulk export) deferred — per-key history available via API, bulk export not needed until external compliance tool integration is required*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -15,8 +17,8 @@
 | P2 | API contract coverage — untested integration paths | 6 → 0 (all closed) |
 | P3 | Governance workflow completeness | 5 → 0 (all closed) |
 | P4 | Operational / observability | 6 → 0 (all closed) |
-| P5 | UI/UX completeness | 7 |
-| P6 | Not yet built (v0.5+ or design decision required) | 6 |
+| P5 | UI/UX completeness | 7 → 0 (all closed) |
+| P6 | Not yet built (v0.5+ or design decision required) | 6 → 2 open (GAP-030 ✅; GAP-032 ✅; GAP-029/031 deferred) |
 | **Total** | | **38** |
 
 ### Test type key
@@ -1088,11 +1090,12 @@ test('S-09.8 admin can soft-archive a project (history preserved)', async () => 
 
 ---
 
-### GAP-023 — Config editor save flow not browser-tested
+### GAP-023 ✅ — Config editor save flow not browser-tested
 
 **Journeys:** J14
 **Risk:** P5
 **Test type:** E2E-UI (extend S-14.2)
+**Closed:** 2026-06-02 — added `data-testid="save-config-btn"` + `data-testid="save-success"` to `Config.jsx`; S-14.2 step 3 browser test passes.
 
 **Context:**
 S-14.2 tests schema validation (invalid JSON → error div) but never tests a successful
@@ -1121,11 +1124,12 @@ test('S-14.2.3 valid config save shows success feedback', async () => {
 
 ---
 
-### GAP-024 — Dashboard knowledge history panel missing
+### GAP-024 ✅ — Dashboard knowledge history panel missing
 
 **Journeys:** J16
 **Risk:** P5
-**Test type:** CODE-FIRST + E2E-UI
+**Test type:** E2E-UI (not CODE-FIRST — KnowledgeDetail already renders history via VersionTimeline)
+**Closed:** 2026-06-02 — `KnowledgeDetail.jsx` already had history wiring; added testids (`knowledge-detail-panel`, `version-timeline`) + `data-testid="version-row"` to `VersionTimeline.jsx`; S-16.6 browser test passes.
 
 **Context:**
 The Knowledge browser shows the current version. There is no history panel showing prior
@@ -1154,11 +1158,12 @@ test('S-16.6 history drawer shows full version chain', async () => {
 
 ---
 
-### GAP-025 — Dashboard search interaction not browser-tested
+### GAP-025 ✅ — Dashboard search interaction not browser-tested
 
 **Journeys:** J20
 **Risk:** P5
-**Test type:** E2E-UI
+**Test type:** E2E-UI + minor CODE-FIRST (added `source-global-badge` span to `Knowledge.jsx`)
+**Closed:** 2026-06-02 — added `data-testid="knowledge-search"` to search input; added `source-global-badge` for global results; S-20.8 browser test (3 steps) passes.
 
 **Context:**
 S-20 tests `GET /api/search` via direct API calls. The Knowledge browser has a search
@@ -1184,11 +1189,12 @@ test('S-20.8 knowledge browser search renders global results with source badge',
 
 ---
 
-### GAP-026 — Pending page overdue deferrals not browser-tested
+### GAP-026 ✅ — Pending page overdue deferrals not browser-tested
 
 **Journeys:** J04
 **Risk:** P5
-**Test type:** E2E-UI
+**Test type:** CODE-FIRST + E2E-UI (required new `POST /pg/deviation-actions` admin seeding endpoint)
+**Closed:** 2026-06-02 — added `data-testid="overdue-deferrals-section"` to `Pending.jsx`; added `POST /pg/deviation-actions` admin-only endpoint to `pg.js` for past-dated defer seeding; S-04.9 browser test (2 steps) passes.
 
 **Context:**
 `Pending.jsx` has an "Overdue deferrals" section (API-tested in S-04). If a React error
@@ -1214,11 +1220,12 @@ test('Pending page renders overdue deferrals section without error', async () =>
 
 ---
 
-### GAP-027 — Dark mode not browser-tested
+### GAP-027 ✅ — Dark mode not browser-tested
 
 **Journeys:** J14
 **Risk:** P5
-**Test type:** E2E-UI (low priority — visual regression)
+**Test type:** E2E-UI
+**Closed:** 2026-06-02 — added `data-testid="theme-toggle"` to `Header.jsx` button; S-14.6 browser test (2 steps: default dark, toggle + navigate + persist) passes.
 
 **Context:**
 `ThemeContext` toggles dark mode via `localStorage`. No browser test validates the toggle
@@ -1262,44 +1269,55 @@ Test: E2E-UI once page is built.
 
 ---
 
-### GAP-029 — Notification system for governance events
+### GAP-029 — Notification system for governance events (deferred — v0.5+)
 
 **Journeys:** J03, J04, J06 | **Risk:** P6 | **Effort:** L
+**Status:** deferred — no email/comms notifications required at current stage.
 
 No notification for: conflict detection alerting the conflicting author, deprecation
 request notifying the entry's original author, overdue deferral PA escalation, or any
-other async governance event. Planned for v0.5+.
+other async governance event. Governance surfaces are visible via the dashboard Pending
+page and MCP `pending()` tool. External notifications deferred to v0.5+.
 
 ---
 
-### GAP-030 — Token revocation / key rotation
+### GAP-030 ✅ — Token revocation / key rotation (accepted risk — closed)
 
 **Journeys:** J19 | **Risk:** P6 (architectural) | **Effort:** L
+**Closed:** 2026-06-02 — accepted risk by design.
 
-Stateless JWT has no per-token revocation. Compromise requires full key rotation
-(`keys.js`), invalidating all tokens simultaneously. A JTI blacklist in Redis would allow
-per-token revocation but requires stateful refresh tokens and a single-use enforcement
-mechanism. Design decision required before implementation.
+JWTs are 1h TTL with no refresh tokens (MCP OAuth 2.1 re-auths automatically on expiry;
+`POST /auth/refresh` is a sliding-window re-issue, not a separate long-lived token).
+Compromise window is bounded to 1h maximum. Per-token revocation (JTI blacklist) is
+not warranted at this availability and session-length profile. In-memory OAuth stores
+(pkceStore/codeStore) are a known single-instance limitation flagged in code comments
+for v0.x — acceptable given 99%+ availability target and automatic PKCE re-auth on
+gateway restart. No action required.
 
 ---
 
-### GAP-031 — Knowledge history bulk export
+### GAP-031 — Knowledge history bulk export (deferred — v0.5+)
 
 **Journeys:** J16 | **Risk:** P6 | **Effort:** M
+**Status:** deferred — not required at current stage.
 
 No bulk export of full version history for a domain or project. `audit-cli.js export`
-covers the audit chain; knowledge version history has no export path. Needed for external
-compliance audit tools.
+covers the audit chain; knowledge version history has no export path. Per-key history
+is available via `GET /pg/versions/:topic/:key/history`. Bulk export deferred until
+an external compliance tool integration requires it.
 
 ---
 
-### GAP-032 — Automated conformance scan scheduling
+### GAP-032 ✅ — Automated conformance scan scheduling (on-demand by design — closed)
 
 **Journeys:** J07, J04 | **Risk:** P6 | **Effort:** L
+**Closed:** 2026-06-02 — on-demand model confirmed by design decision.
 
-`quorum:scan` skill describes an orchestration loop. No gateway-side scheduler (EventBridge
-rule or cron job) automatically runs conformance scans. Without automation, `scan_count`
-only increments when a human manually triggers it, and `last_scan_at` goes stale.
+Conformance scans are intentionally human-triggered: leadership mandate, enterprise change
+gate, or quality process review. The existing `quorum:scan` MCP skill + `POST /pg/scans`
+endpoint is the correct interface. No gateway-side scheduler (EventBridge/cron) will be
+built. `last_scan_at` staleness warning (>14 days) remains valid as a signal that a scan
+is overdue, not as a trigger for automation.
 
 ---
 

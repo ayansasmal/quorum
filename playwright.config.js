@@ -55,8 +55,9 @@ export default defineConfig({
     // If your dashboard runs elsewhere, override this.
     ...devices['Desktop Chrome'],
 
-    // Attach a screenshot on failure — graph reporter surfaces these in logs[]
-    screenshot:   'only-on-failure',
+    // Full-page screenshot after every test (pass or fail) — fullPage scrolls the
+    // entire page so scrollable tables and panels aren't clipped to viewport height.
+    screenshot:   { mode: 'on', fullPage: true },
     trace:        'on-first-retry',
 
     // Per-test extra context (set project header, token, etc. in fixtures)
@@ -107,12 +108,21 @@ export default defineConfig({
   // See tests/e2e/helpers/teardown.js for rationale.
   globalTeardown: './tests/e2e/helpers/teardown.js',
 
-  // Projects (browser targets — most Quorum scenarios are API-only)
+  // Two projects so the HTML report groups API tests and browser tests separately.
+  // Browser tests are tagged @ui on their describe block; grep/grepInvert routes
+  // each test to the right project without changing test titles.
   projects: [
     {
       name: 'api',
       testMatch: '**/scenarios/**/*.spec.js',
       use: { browserName: 'chromium' },
+      grepInvert: /@ui/,
+    },
+    {
+      name: 'ui',
+      testMatch: '**/scenarios/**/*.spec.js',
+      use: { browserName: 'chromium' },
+      grep: /@ui/,
     },
   ],
 })

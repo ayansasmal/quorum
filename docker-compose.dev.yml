@@ -1,0 +1,34 @@
+# docker-compose.dev.yml — local development overlay
+#
+# Bind-mounts source so changes are reflected without rebuilding images.
+# Extends docker-compose.yml — do not use standalone.
+#
+# Usage:
+#   npm run docker:start --env=dev
+#   QUORUM_ENV=dev ./scripts/setup.sh docker
+#
+# Gateway:   node --watch restarts automatically on any .js change under gateway/src/
+# Dashboard: nginx serves ./dashboard/dist — rebuild with: npm run build --workspace=dashboard
+#            nginx picks up the new dist immediately (no container restart needed).
+#
+# Both services remain on their original ports (gateway :3001, dashboard :3002).
+
+name: quorum
+
+services:
+
+  gateway:
+    # Bind-mount source over the built image — node_modules stay from the image layer.
+    # node --watch (Node 24 built-in) restarts the process on any file change.
+    volumes:
+      - ./gateway/src:/app/gateway/src:delegated
+      - ./quorum.config.example.json:/app/quorum.config.example.json:ro
+    command: node --watch gateway/src/server.js
+    environment:
+      - NODE_ENV=development
+
+  quorum-dashboard:
+    # Use the existing nginx image — just replace /usr/share/nginx/html with the local dist.
+    # Build first: npm run build --workspace=dashboard
+    volumes:
+      - ./dashboard/dist:/usr/share/nginx/html:ro
