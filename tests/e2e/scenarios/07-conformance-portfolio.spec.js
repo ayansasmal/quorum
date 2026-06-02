@@ -314,7 +314,7 @@ describe('S-07.4 — Portfolio Role Gate', () => {
 // S-07.5 — Stats Page Load (browser)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.5 — Stats Page Load', () => {
+describe('S-07.5 — Stats Page Load', { tag: '@ui' }, () => {
   test('step 1 — stats page loads with 4 summary stat cards visible', async ({ page }) => {
     test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
     await injectSession(page)
@@ -348,7 +348,7 @@ describe('S-07.5 — Stats Page Load', () => {
 // S-07.6 — ConformanceCard Renders (browser)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.6 — ConformanceCard Renders', () => {
+describe('S-07.6 — ConformanceCard Renders', { tag: '@ui' }, () => {
   test('step 1 — ConformanceCard is present for project with linked global catalogs', async ({ page }) => {
     test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
     // Default session: quorum-test-project has globals: [quorum-test-catalog]
@@ -377,7 +377,7 @@ describe('S-07.6 — ConformanceCard Renders', () => {
 // S-07.7 — UNCERTIFIED State (isolated project) (browser)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.7 — UNCERTIFIED State', () => {
+describe('S-07.7 — UNCERTIFIED State', { tag: '@ui' }, () => {
   test('step 1 — isolated project with no globals shows UNCERTIFIED text', async ({ page }) => {
     test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
     // quorum-test-isolated-project has no globals in its .quorum fixture.
@@ -411,7 +411,7 @@ describe('S-07.7 — UNCERTIFIED State', () => {
 // S-07.8 — Conformance Score Badge Logic (browser)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-07.8 — Conformance Score Badge', () => {
+describe('S-07.8 — Conformance Score Badge', { tag: '@ui' }, () => {
   test('step 1 — UNCERTIFIED shows no % percentage text', async ({ page }) => {
     test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
     await injectSession(page, { project: 'quorum-test-isolated-project' })

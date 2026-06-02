@@ -455,7 +455,7 @@ describe('S-04.6 — Batch Recording', () => {
 // multiple deviations exist from prior runs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-04.7 — Deviations Governance Dashboard', () => {
+describe('S-04.7 — Deviations Governance Dashboard', { tag: '@ui' }, () => {
   // Shared seed state (populated in beforeAll, read by all inner describes)
   let s047Description
 
@@ -622,7 +622,7 @@ describe('S-04.7 — Deviations Governance Dashboard', () => {
 // computes denial_hint_count in the GET /api/knowledge response.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-04.8 — Knowledge Denial Hint Badge', () => {
+describe('S-04.8 — Knowledge Denial Hint Badge', { tag: '@ui' }, () => {
   let s048Key
 
   test.beforeAll(async () => {
@@ -704,5 +704,76 @@ describe('S-04.8 — Knowledge Denial Hint Badge', () => {
   })
 
 }) // S-04.8 — Knowledge Denial Hint Badge
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-04.9 — Overdue Deferrals on Pending Page (browser)
+//
+// Seeds: ACTIVE catalog entry → deviation → past-dated defer action via
+// POST /pg/deviation-actions (admin-only bypass — enforceValidDeferDeadline
+// blocks past dates through the normal API path).
+// Navigates to /pending and asserts the orange overdue-deferrals-section renders.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-04.9 — Overdue Deferrals Browser', { tag: '@ui' }, () => {
+  let s049Key
+  let s049Description
+
+  test.beforeAll(async () => {
+    if (!process.env.QUORUM_DASHBOARD_URL) return
+
+    s049Key         = uid('s049-ov')
+    s049Description = `E2E S-04.9 overdue deviation ${s049Key}`
+    const topic     = 'security'
+
+    await activeEntry({
+      topic,
+      key:     s049Key,
+      content: 'TLS 1.3 required on all internal service endpoints.',
+      project: CATALOG,
+      globalCatalog: true,
+    })
+
+    const { deviationId } = await deviation({
+      catalogId:   CATALOG,
+      topic,
+      key:         s049Key,
+      description: s049Description,
+      project:     PROJECT,
+    })
+
+    // Seed a past-dated defer action — bypasses enforceValidDeferDeadline
+    // so the computed status resolves to OVERDUE (DEFERRED + defer_until < NOW()).
+    // E2E: POST /pg/deviation-actions is admin-only and exists solely for this seeding path.
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString()
+    await api(tokens.admin, PROJECT).post('/pg/deviation-actions', {
+      deviation_id: deviationId,
+      action_type:  'defer',
+      defer_until:  yesterday,
+      actor:        'test-pe',
+      actor_role:   'principal_architect',
+      reason:       'Deferred past deadline for S-04.9 E2E overdue test',
+    })
+  })
+
+  test('step 1 — /pending shows overdue-deferrals-section when OVERDUE deviations exist', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require QUORUM_DASHBOARD_URL')
+    await injectSession(page, { sub: 'test-pe', project: PROJECT })
+    await page.goto(`${DASHBOARD_URL}/pending`)
+    await page.waitForLoadState('networkidle')
+
+    await expect(page.getByTestId('overdue-deferrals-section')).toBeVisible({ timeout: 8000 })
+  })
+
+  test('step 2 — overdue section contains the seeded deviation description', async ({ page }) => {
+    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require QUORUM_DASHBOARD_URL')
+    await injectSession(page, { sub: 'test-pe', project: PROJECT })
+    await page.goto(`${DASHBOARD_URL}/pending`)
+    await page.waitForLoadState('networkidle')
+
+    const section = page.getByTestId('overdue-deferrals-section')
+    await expect(section).toBeVisible({ timeout: 8000 })
+    await expect(section.getByText(s049Description)).toBeVisible({ timeout: 5000 })
+  })
+}) // S-04.9 — Overdue Deferrals Browser
 
 }) // S-04 — Deviation Governance

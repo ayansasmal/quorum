@@ -634,7 +634,7 @@ describe('S-02.7 — Coexist-Merge', () => {
 //   S-02.8.4 — approve removes card + transitions entry to ACTIVE
 //   S-02.8.5 — audit page shows 'review' tool entries after resolution
 
-describe('S-02.8 — Dashboard UI', () => {
+describe('S-02.8 — Dashboard UI', { tag: '@ui' }, () => {
   test.describe.configure({ mode: 'serial' })
 
   let s028Topic, s028Key
@@ -1065,7 +1065,7 @@ describe('S-02.11 — Supersede-Under-Review (ALTERNATE)', () => {
 // S-02.12 — Stale Warning Badge (UI)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S-02.12 — Stale Warning Badge', () => {
+describe('S-02.12 — Stale Warning Badge', { tag: '@ui' }, () => {
   // GAP-017: request_changes sets stale_warning on a pending decision.
   // The Pending page must show data-testid="stale-warning-badge" when the field is present.
   test.describe.configure({ mode: 'serial' })

@@ -7,7 +7,7 @@ export default function VersionTimeline({ versions = [] }) {
   return (
     <ol className="relative ml-2 border-l border-gray-300 dark:border-gray-700 space-y-4 py-1">
       {versions.map((v) => (
-        <li key={v.version} className="ml-4">
+        <li key={v.version} data-testid="version-row" className="ml-4">
           <span
             className={`absolute -left-1.5 mt-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-gray-900 ${
               v.status === 'ACTIVE'     ? 'bg-green-500' :

@@ -79,6 +79,7 @@ export default function Knowledge() {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
           <input
+            data-testid="knowledge-search"
             type="text"
             placeholder="Search by tag, key, or topic…"
             value={query}
@@ -227,6 +228,15 @@ export default function Knowledge() {
                           className="ml-2 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 cursor-help"
                         >
                           ✕{row.denial_hint_count}
+                        </span>
+                      )}
+                      {isSearching && row.source === 'global' && (
+                        <span
+                          data-testid="source-global-badge"
+                          title="From global catalog"
+                          className="ml-2 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20"
+                        >
+                          global
                         </span>
                       )}
                     </td>

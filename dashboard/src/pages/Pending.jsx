@@ -174,7 +174,7 @@ export default function Pending() {
 
       {/* ── Overdue deferrals ─────────────────────────────────────── */}
       {overdueDeviations.length > 0 && (
-        <section className="space-y-3">
+        <section data-testid="overdue-deferrals-section" className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-orange-600 dark:text-orange-400">
               ⚠ Overdue deferrals

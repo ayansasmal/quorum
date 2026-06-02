@@ -42,7 +42,7 @@ export default function KnowledgeDetail({ row, onClose }) {
   const status = detail?.status ?? row.status ?? 'ACTIVE'
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+    <div data-testid="knowledge-detail-panel" className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div
         className="relative w-full max-w-xl h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -70,7 +70,7 @@ export default function KnowledgeDetail({ row, onClose }) {
                 Edit
               </button>
             )}
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+            <button onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -108,7 +108,7 @@ export default function KnowledgeDetail({ row, onClose }) {
         </div>
 
         {/* Version history */}
-        <div className="px-5 py-4">
+        <div data-testid="version-timeline" className="px-5 py-4">
           <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-4">Version history</h3>
           <VersionTimeline versions={versions} />
         </div>
