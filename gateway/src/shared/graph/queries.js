@@ -1107,12 +1107,15 @@ export async function getConformanceScore(pg, qProjectId, catalogGroupIds = []) 
  *
  * @param {import('pg').Pool} pg
  * @param {Array<{
- *   groupId:         string,
- *   qProjectId:      string,
- *   catalogGroupIds: string[],
- *   criticality?:    number,
- *   displayName?:    string,
- *   hierarchyLevel?: string,
+ *   groupId:          string,
+ *   qProjectId:       string,
+ *   catalogGroupIds:  string[],
+ *   criticality?:     number,
+ *   displayName?:     string,
+ *   hierarchyLevel?:  string,
+ *   hierarchyParent?: string | null,
+ *   owner?:           string | null,
+ *   isGlobal?:        boolean,
  * }>} projectInfos
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
@@ -1120,14 +1123,18 @@ export async function getPortfolioScores(pg, projectInfos) {
   if (typeof pg.getPortfolioScores === 'function') return pg.getPortfolioScores(projectInfos)
 
   const results = await Promise.allSettled(
-    projectInfos.map(async ({ groupId, qProjectId, catalogGroupIds, criticality, displayName, hierarchyLevel }) => {
+    projectInfos.map(async ({ groupId, qProjectId, catalogGroupIds, criticality, displayName, hierarchyLevel,
+                              hierarchyParent, owner, isGlobal }) => {
       const score = await getConformanceScore(pg, qProjectId, catalogGroupIds ?? [])
       return {
         groupId,
         qProjectId,
-        displayName:    displayName    ?? groupId,
-        hierarchyLevel: hierarchyLevel ?? null,
-        criticality:    criticality    ?? 1,
+        displayName:     displayName     ?? groupId,
+        hierarchyLevel:  hierarchyLevel  ?? null,
+        hierarchyParent: hierarchyParent ?? null,
+        owner:           owner           ?? null,
+        isGlobal:        isGlobal        ?? false,
+        criticality:     criticality     ?? 1,
         ...score,
       }
     }),
@@ -1137,17 +1144,20 @@ export async function getPortfolioScores(pg, projectInfos) {
     if (r.status === 'fulfilled') return r.value
     const p = projectInfos[i]
     return {
-      groupId:        p.groupId,
-      qProjectId:     p.qProjectId,
-      displayName:    p.displayName    ?? p.groupId,
-      hierarchyLevel: p.hierarchyLevel ?? null,
-      criticality:    p.criticality    ?? 1,
-      score:          null,
-      status:         'UNCERTIFIED',
+      groupId:         p.groupId,
+      qProjectId:      p.qProjectId,
+      displayName:     p.displayName     ?? p.groupId,
+      hierarchyLevel:  p.hierarchyLevel  ?? null,
+      hierarchyParent: p.hierarchyParent ?? null,
+      owner:           p.owner           ?? null,
+      isGlobal:        p.isGlobal        ?? false,
+      criticality:     p.criticality     ?? 1,
+      score:           null,
+      status:          'UNCERTIFIED',
       applicable_entries: 0,
-      breakdown:      { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
-      scan_count:     0,
-      last_scan_at:   null,
+      breakdown:       { open: 0, accepted: 0, denied: 0, deferred: 0, overdue: 0, resolved: 0 },
+      scan_count:      0,
+      last_scan_at:    null,
     }
   })
 }

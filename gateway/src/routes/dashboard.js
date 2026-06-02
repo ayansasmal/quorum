@@ -2290,8 +2290,8 @@ router.get('/conformance', async (req, res, next) => {
  * Response shape:
  *   {
  *     projects: [{
- *       group_id, display_name, hierarchy_level, criticality,
- *       score, status, breakdown, scan_count, last_scan_at
+ *       group_id, display_name, hierarchy_level, hierarchy_parent, owner, is_global,
+ *       criticality, score, status, breakdown, scan_count, last_scan_at
  *     }],
  *     rollup: { score, status, certified_count, uncertified_count } | null,
  *   }
