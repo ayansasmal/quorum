@@ -41,6 +41,22 @@ export function useConformance() {
  *   rollup:   { score: number|null, status: string, certified_count: number, uncertified_count: number } | null,
  * }>}
  */
+/**
+ * Available global catalogs visible to this user's role.
+ * Org-scoped catalogs are visible to everyone; division/dept-scoped are filtered by hierarchy.
+ *
+ * @returns {import('@tanstack/react-query').UseQueryResult<{
+ *   catalogs: Array<{ group_id: string, display_name: string, global_scope: string, entry_count: number }>
+ * }>}
+ */
+export function useGlobals() {
+  return useQuery({
+    queryKey:  ['globals'],
+    queryFn:   () => apiFetch('/api/globals'),
+    staleTime: 120_000,
+  })
+}
+
 export function usePortfolio(opts = {}) {
   const params = new URLSearchParams()
   if (opts.node_id) params.set('node_id', opts.node_id)
