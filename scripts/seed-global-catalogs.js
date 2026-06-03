@@ -55,9 +55,30 @@ async function post(path, projectId, body) {
   return JSON.parse(text)
 }
 
-// ─── Catalog config builder ───────────────────────────────────────────────────
+// ─── Config builders ──────────────────────────────────────────────────────────
 
-function config(groupId, displayName, nodeId) {
+/** Org hierarchy node — no knowledge entries, exists to anchor the tree. */
+function nodeConfig(groupId, displayName, level, parentGroupId = null) {
+  return {
+    group_id: groupId,
+    owner:    OWNER,
+    members:  [{ name: OWNER, github_username: OWNER, role: 'principal_architect', team: 'platform' }],
+    roles:    { principal_architect: { base_confidence: 0.95 } },
+    hierarchy: {
+      level,
+      node_id:      groupId,
+      display_name: displayName,
+      criticality:  3,
+      ...(parentGroupId ? { parent: parentGroupId } : {}),
+    },
+    globals:    [],
+    domains:    {},
+    thresholds: { conflict_threshold: 0.85, authority_threshold: 0.20 },
+  }
+}
+
+/** Global knowledge catalog — has entries, linked to a hierarchy parent. */
+function config(groupId, displayName, nodeId, parentGroupId = null) {
   return {
     group_id:     groupId,
     owner:        OWNER,
@@ -68,6 +89,7 @@ function config(groupId, displayName, nodeId) {
       node_id:      nodeId,
       display_name: displayName,
       criticality:  5,
+      ...(parentGroupId ? { parent: parentGroupId } : {}),
     },
     members: [{
       name:            OWNER,
@@ -83,13 +105,29 @@ function config(groupId, displayName, nodeId) {
   }
 }
 
+// ─── Org hierarchy nodes ───────────────────────────────────────────────────────
+// ayan-org → group-a/b/c → div-a/b/c → dep-a/b/c → catalog services
+
+const HIERARCHY_NODES = [
+  nodeConfig('ayan-org', 'Ayan Org',     'org'),
+  nodeConfig('group-a',  'Group A',      'group',      'ayan-org'),
+  nodeConfig('group-b',  'Group B',      'group',      'ayan-org'),
+  nodeConfig('group-c',  'Group C',      'group',      'ayan-org'),
+  nodeConfig('div-a',    'Division A',   'division',   'group-a'),
+  nodeConfig('div-b',    'Division B',   'division',   'group-b'),
+  nodeConfig('div-c',    'Division C',   'division',   'group-c'),
+  nodeConfig('dep-a',    'Department A', 'department', 'div-a'),
+  nodeConfig('dep-b',    'Department B', 'department', 'div-b'),
+  nodeConfig('dep-c',    'Department C', 'department', 'div-c'),
+]
+
 // ─── Catalogs ─────────────────────────────────────────────────────────────────
 
 const CATALOGS = [
 
   // ── 1. Security ──────────────────────────────────────────────────────────────
   {
-    config: config('security-knowledge', 'Security Standards', 'standards/security'),
+    config: config('security-knowledge', 'Security Standards', 'standards/security', 'dep-a'),
     entries: [
       {
         topic: 'security', key: 'sql-injection-prevention',
@@ -156,7 +194,7 @@ const CATALOGS = [
 
   // ── 2. Best Practices ────────────────────────────────────────────────────────
   {
-    config: config('best-practices', 'Engineering Best Practices', 'standards/practices'),
+    config: config('best-practices', 'Engineering Best Practices', 'standards/practices', 'dep-a'),
     entries: [
       {
         topic: 'practices', key: 'conventional-commits',
@@ -223,7 +261,7 @@ const CATALOGS = [
 
   // ── 3. Frontend ──────────────────────────────────────────────────────────────
   {
-    config: config('frontend-standards', 'Frontend Standards (React / Next.js)', 'standards/frontend'),
+    config: config('frontend-standards', 'Frontend Standards (React / Next.js)', 'standards/frontend', 'dep-b'),
     entries: [
       {
         topic: 'frontend', key: 'component-naming',
@@ -290,7 +328,7 @@ const CATALOGS = [
 
   // ── 4. Backend ───────────────────────────────────────────────────────────────
   {
-    config: config('backend-standards', 'Backend Standards (Node.js)', 'standards/backend'),
+    config: config('backend-standards', 'Backend Standards (Node.js)', 'standards/backend', 'dep-b'),
     entries: [
       {
         topic: 'backend', key: 'async-error-handling',
@@ -357,7 +395,7 @@ const CATALOGS = [
 
   // ── 5. Infra ─────────────────────────────────────────────────────────────────
   {
-    config: config('infra-standards', 'Infrastructure Standards (CI/CD)', 'standards/infra'),
+    config: config('infra-standards', 'Infrastructure Standards (CI/CD)', 'standards/infra', 'dep-c'),
     entries: [
       {
         topic: 'infra', key: 'secrets-not-in-images',
@@ -460,17 +498,33 @@ async function seedEntries(catalog) {
 async function main() {
   console.log(`Gateway: ${GATEWAY}`)
   console.log(`Owner:   ${OWNER}`)
-  console.log(`Catalogs: ${CATALOGS.map(c => c.config.group_id).join(', ')}\n`)
 
   if (DRY_RUN) {
-    console.log('[dry-run] Catalogs that would be created:')
+    console.log('\n[dry-run] Hierarchy nodes:')
+    for (const n of HIERARCHY_NODES)
+      console.log(`  ${n.hierarchy.level.padEnd(10)} ${n.group_id}${n.hierarchy.parent ? ` → ${n.hierarchy.parent}` : ''}`)
+    console.log('\n[dry-run] Catalogs:')
     for (const cat of CATALOGS) {
-      console.log(`\n  ${cat.config.group_id} (${cat.entries.length} entries)`)
+      console.log(`\n  ${cat.config.group_id} (${cat.entries.length} entries, parent: ${cat.config.hierarchy.parent ?? 'none'})`)
       for (const e of cat.entries) console.log(`    • ${e.topic}:${e.key}`)
     }
     return
   }
 
+  // Step 1 — upload hierarchy nodes (org → group → division → department)
+  console.log('\n── Hierarchy nodes ────────────────────────────────────')
+  for (const node of HIERARCHY_NODES) {
+    process.stdout.write(`[${node.group_id}] uploading... `)
+    try {
+      const res = await post('/config/upload', node.group_id, node)
+      console.log(`${res.status ?? 'ok'} (${node.hierarchy.level})`)
+    } catch (err) {
+      console.error(`FAILED — ${err.message}`)
+    }
+  }
+
+  // Step 2 — upload catalog configs + seed entries
+  console.log('\n── Catalogs ───────────────────────────────────────────')
   let totalOk = 0, totalFail = 0
   for (const catalog of CATALOGS) {
     try {

@@ -43,6 +43,7 @@ export default function Portfolio() {
   const rollup   = data?.rollup   ?? null
 
   // ── Filter state ───────────────────────────────────────────
+  const [selectedOrg,        setSelectedOrg]        = useState('')
   const [selectedGroup,      setSelectedGroup]      = useState('')
   const [selectedDivision,   setSelectedDivision]   = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
@@ -50,9 +51,15 @@ export default function Portfolio() {
   const [query,              setQuery]              = useState('')
 
   // ── Cascade option lists ────────────────────────────────────
-  const groups = useMemo(
-    () => projects.filter(p => p.hierarchy_level === 'group'),
+  const orgs = useMemo(
+    () => projects.filter(p => p.hierarchy_level === 'org'),
     [projects],
+  )
+  const groups = useMemo(
+    () => selectedOrg
+      ? projects.filter(p => p.hierarchy_parent === selectedOrg && p.hierarchy_level === 'group')
+      : [],
+    [projects, selectedOrg],
   )
   const divisions = useMemo(
     () => selectedGroup
@@ -85,6 +92,8 @@ export default function Portfolio() {
       rows = rows.filter(p => p.hierarchy_parent === selectedDivision || isDescendant(p, selectedDivision))
     } else if (selectedGroup) {
       rows = rows.filter(p => p.hierarchy_parent === selectedGroup || isDescendant(p, selectedGroup))
+    } else if (selectedOrg) {
+      rows = rows.filter(p => p.hierarchy_parent === selectedOrg || isDescendant(p, selectedOrg))
     }
     if (selectedStatus) rows = rows.filter(p => p.status === selectedStatus)
     if (query) {
@@ -97,6 +106,12 @@ export default function Portfolio() {
     return [...rows].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   }, [projects, selectedGroup, selectedDivision, selectedDepartment, selectedStatus, query])
 
+  function handleOrgChange(val) {
+    setSelectedOrg(val)
+    setSelectedGroup('')
+    setSelectedDivision('')
+    setSelectedDepartment('')
+  }
   function handleGroupChange(val) {
     setSelectedGroup(val)
     setSelectedDivision('')
@@ -157,8 +172,15 @@ export default function Portfolio() {
 
       {/* ── Cascading filters ───────────────────────────────────── */}
       <div className="flex flex-wrap gap-2 items-center">
-        <select value={selectedGroup} onChange={e => handleGroupChange(e.target.value)} className={SELECT_CLS}>
-          <option value="">Group: All</option>
+        <select value={selectedOrg} onChange={e => handleOrgChange(e.target.value)} className={SELECT_CLS}>
+          <option value="">Org: All</option>
+          {orgs.map(o => (
+            <option key={o.group_id} value={o.group_id}>{o.display_name ?? o.group_id}</option>
+          ))}
+        </select>
+
+        <select value={selectedGroup} onChange={e => handleGroupChange(e.target.value)} disabled={!selectedOrg} className={SELECT_CLS}>
+          <option value="">Group: {selectedOrg ? 'All' : '—'}</option>
           {groups.map(g => (
             <option key={g.group_id} value={g.group_id}>{g.display_name ?? g.group_id}</option>
           ))}
@@ -200,6 +222,7 @@ export default function Portfolio() {
 
       <p className="text-xs text-gray-500 dark:text-gray-600">
         Showing {filtered.length} of {projects.length} projects
+        {selectedOrg && ` · org: ${selectedOrg}`}
         {selectedGroup && ` · group: ${selectedGroup}`}
         {selectedDivision && ` · division: ${selectedDivision}`}
         {selectedDepartment && ` · dept: ${selectedDepartment}`}
