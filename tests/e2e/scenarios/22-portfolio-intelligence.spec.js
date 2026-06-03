@@ -32,6 +32,7 @@ import { test, expect } from '@playwright/test'
 import axios             from 'axios'
 import { api }               from '../helpers/api.js'
 import { tokens }            from '../helpers/jwt.js'
+import { uid }               from '../helpers/seed.js'
 import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 
 const { describe, beforeAll } = test
@@ -308,5 +309,63 @@ describe('S-22.8 — Portfolio Status Filter', { tag: '@ui' }, () => {
     await page.getByTestId('portfolio-status-filter').selectOption('')
     const countAfter = await allRows.count()
     expect(countAfter).toBe(countBefore)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-22.9 — Archived Project Isolation + Cross-Project Portfolio Guard (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-22.9 — Archived Project Isolation and Cross-Project Portfolio Guard', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const ARCHIVED_PROJECT = `s229-archive-${Date.now()}`
+
+  beforeAll(async () => {
+    // Create a throwaway project so we can archive it and verify portfolio isolation
+    const uploadRes = await api(tokens.pe, 'quorum-test-project').post('/config/upload', {
+      group_id: ARCHIVED_PROJECT,
+      owner:    'test-pe',
+      project:  'S-22.9 Archive Isolation Test',
+      members: [{ name: 'Test PE', github_username: 'test-pe', role: 'principal_architect', base_confidence: 0.8, team: 'platform' }],
+    })
+    if (uploadRes.status !== 201 && uploadRes.status !== 200) {
+      throw new Error(`S-22.9 beforeAll: config upload failed ${uploadRes.status}`)
+    }
+    // Archive the project immediately
+    await api(tokens.admin, 'quorum-test-project').delete(`/admin/projects/${ARCHIVED_PROJECT}`, {
+      data: { reason: 'S-22.9 — archiving immediately to verify portfolio isolation after archive.' },
+    })
+  })
+
+  test('step 1 — archived project does not appear in GET /api/portfolio response', async () => {
+    const res = await api(tokens.pe, 'quorum-test-project').get('/api/portfolio')
+    expect(res.status).toBe(200)
+    const projectIds = (res.data.projects ?? []).map(p => p.group_id ?? p.project_id)
+    expect(projectIds).not.toContain(ARCHIVED_PROJECT)
+  })
+
+  test('step 2 — GET /api/conformance for archived project returns non-200 (no active project config)', async () => {
+    // After archive, the project config is invalidated — conformance for an archived project
+    // should not return a meaningful CERTIFIED/UNCERTIFIED score
+    const res = await api(tokens.pe, ARCHIVED_PROJECT).get('/api/conformance')
+    // Either 403 (access_denied after archive) or 404 — must not be 200 with a valid score
+    expect([403, 404]).toContain(res.status)
+  })
+
+  test('step 3 — test-engineer cannot access portfolio even from a project where they hold higher roles → 403', async () => {
+    // Portfolio access is gated on role in the requesting project — engineer in any project
+    // cannot see the portfolio.
+    const res = await api(tokens.engineer, 'quorum-test-project').get('/api/portfolio')
+    expect(res.status).toBe(403)
+  })
+
+  test('step 4 — GET /api/portfolio node_id filter for archived project group returns no matching projects', async () => {
+    // The archived project had hierarchy.parent = undefined (no parent set).
+    // Even if node_id matched an archived project's group_id, it should not appear.
+    const res = await api(tokens.pe, 'quorum-test-project').get(`/api/portfolio?node_id=${ARCHIVED_PROJECT}`)
+    expect(res.status).toBe(200)
+    const projects = res.data.projects ?? []
+    expect(projects.find(p => (p.group_id ?? p.project_id) === ARCHIVED_PROJECT)).toBeUndefined()
   })
 })

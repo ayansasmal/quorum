@@ -411,3 +411,91 @@ describe('S-06.6 — Three-way conflict produces independent pending decisions p
     expect(new Set(contents).size).toBe(3)  // all distinct
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-06.7 — Cross-Project Conflict Review Isolation (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-06.7 — Cross-Project Conflict Review Isolation', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let peerConflictId
+  let resolvedConflictId
+
+  beforeAll(async () => {
+    // Seed a conflict in peer-project (test-architect = PA, test-pe = engineer there)
+    const peerKey = uid('s067-peer-conflict')
+    const seedRes = await api(tokens.architect, PEER).post('/api/knowledge', {
+      topic:       TOPIC,
+      key:         peerKey,
+      content:     'Peer: use opaque tokens with introspection endpoint.',
+      entity_type: 'Decision',
+    })
+    if (seedRes.data.status !== 'ACTIVE') throw new Error(`S-06.7 beforeAll: architect write in peer must be ACTIVE, got ${seedRes.data.status}`)
+
+    await api(tokens.engineer, PEER).post('/api/knowledge', {
+      topic:       TOPIC,
+      key:         peerKey,
+      content:     'Peer: use short-lived JWTs (5 min) for all service calls.',
+      entity_type: 'Decision',
+    })
+    const peerPending = await api(tokens.engineer, PEER).post('/pg/pending', {
+      conflict_topic:   TOPIC,
+      conflict_key:     peerKey,
+      decision_type:    'conflict',
+      existing_content: 'Peer: use opaque tokens with introspection endpoint.',
+      incoming_content: 'Peer: use short-lived JWTs (5 min) for all service calls.',
+      conflict_reason:  'JWT approach removes the centralised revocation the opaque token strategy was designed for.',
+    })
+    if (peerPending.status !== 201) throw new Error(`S-06.7 beforeAll: peer pending insert failed ${peerPending.status}`)
+    peerConflictId = peerPending.data.conflict_id
+
+    // Seed and immediately resolve a conflict in test-project (for double-review test)
+    const resolvedKey = uid('s067-resolved')
+    await activeEntry({ topic: TOPIC, key: resolvedKey, content: 'Stateless JWT, 1h expiry.' })
+    const { conflictId } = await conflict({
+      topic:           TOPIC,
+      key:             resolvedKey,
+      content:         'Stateless JWT, 15 min expiry with refresh.',
+      existingContent: 'Stateless JWT, 1h expiry.',
+    })
+    resolvedConflictId = conflictId
+    await api(tokens.pe, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'approve',
+      note:   'Shorter expiry is better — approved.',
+    })
+  })
+
+  test('step 1 — test-pe (engineer in peer-project) cannot review a pending conflict in peer-project → 403', async () => {
+    const res = await api(tokens.pe, PEER).post(`/api/review/${peerConflictId}`, {
+      action: 'approve',
+      note:   'Engineer attempting conflict review in peer-project — should be forbidden.',
+    })
+    expect(res.status).toBe(403)
+  })
+
+  test('step 2 — test-pe (PA in test-project) cannot review peer-project conflict using test-project scope → 404', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${peerConflictId}`, {
+      action: 'reject',
+      note:   'PA from test-project using test-project header to review peer-project conflict — scope mismatch, must be 404.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 3 — reviewing an already-resolved conflict in a multi-user context returns 404', async () => {
+    const res = await api(tokens.pe2, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'reject',
+      note:   'Second PA attempting to re-review a conflict already resolved by the first PA.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 4 — peer-project conflict remains pending after all failed review attempts', async () => {
+    const res = await api(tokens.architect, PEER).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const found = res.data.find(r => r.conflict_id === peerConflictId)
+    expect(found).toBeDefined()
+    expect(found.resolution).toBeNull()
+  })
+})

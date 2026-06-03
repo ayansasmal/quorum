@@ -43,7 +43,7 @@ graph TD
 
 ---
 
-## Current State (v0.3)
+## Current State (v0.4)
 
 **Built and working:**
 - MCP server (`@as-quorum/mcp`) with 12 tools — maintained in its own repo (`quorum-mcp`), installed via `npm install -g @as-quorum/mcp`
@@ -51,7 +51,7 @@ graph TD
 - `X-Quorum-Project` header: per-request project context — identity (who you are) decoupled from project scope (what you access)
 - `GET /user/profile/:username`: profile endpoint (Redis → DDB) with role, projects, base_confidence
 - Governance ownership: `POST /config/transfer-ownership`, `POST /config/update-role`, `GET /admin/config`, `POST /admin/users`
-- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Knowledge Write (PE: create / promote / supersede), Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel
+- Dashboard: Stats, Graph, Pending Decisions, Knowledge Browser, Knowledge Write (PE: create / promote / supersede), Audit Timeline, Config Editor, System Status, Ownership Panel, Role Editor, Admin Panel, Deviations (v0.4), Portfolio (v0.4)
 - Project selector: search + pagination (10/page), full light/dark theme, cancel-back-to-project support
 - `GET /schema/config`: public JSON Schema endpoint for editor validation and IDE autocomplete
 - DynamoDB layer: `quorum-user-projects` table (membership index with GSI) — config cache retired to Redis
@@ -216,7 +216,16 @@ graph TD
 
 **P6 design decisions (2026-06-02):** GAP-030 ✅ closed as accepted risk — 1h JWT TTL with no refresh tokens; PKCE re-auth is automatic on expiry; compromise window bounded; JTI blacklist not warranted. GAP-032 ✅ closed as on-demand by design — conformance scans are human-triggered (leadership/change gate); `quorum:scan` MCP skill + `POST /pg/scans` is the correct interface; no scheduler will be built. GAP-029 deferred — no external notifications (email/Slack) required at current stage; governance surfaces visible via dashboard Pending page and `pending()` MCP tool. Remaining open P6 (v0.5+): GAP-028 portfolio full-page UI, GAP-033 config editor diff view. GAP-031 (knowledge history bulk export) deferred — per-key history available via GET /pg/versions/:t/:k/history; bulk not needed until external compliance tool integration required.
 
-**Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), portfolio UI (full page with sorting/filtering/drill-down)
+**Post-Wave-G additions (complete):**
+- Entity types `Standard` + `Guideline` added to `gateway/src/shared/graph/schema.js` and `quorum-mcp/src/graph/schema.js` (both repos synced); `Standard` is the preferred type for global catalog entries measured by conformance scoring; `Guideline` is advisory (softer than Constraint or Standard)
+- Hierarchy `org` tier added — valid levels now `org → group → division → department → service` (5 levels); `scripts/seed-global-catalogs.js` seeds hierarchy nodes + catalog projects for conformance testing
+- Dashboard Portfolio page (`dashboard/src/pages/Portfolio.jsx`): rollup banner (org score, certified/uncertified counts), 4-level cascading org filters, status filter, text search, project table (score bar, owner, last scan, GLOBAL badge). Route: `/portfolio`. GAP-028 ✅ closed.
+- S-22 E2E: 25 tests across 8 sub-scenarios (S-22.1–S-22.8) — role gate, response shape, UNCERTIFIED rollup, node_id filter, browser render/table/search/status-filter. Suite W=1352, OwnScore=3605.
+- Admin archive DDB flush: `DELETE /admin/projects/:groupId` now calls `syncProjectMembers(groupId, '', '', [])` so archived projects vanish from project selector immediately without waiting for DDB TTL
+- S-01 `afterAll` cleanup: archives timestamp-suffixed j01 configs after each run to prevent project selector accumulation for test-pe
+- Config page Global Catalogs card: linked catalog details and entry counts shown inline in Config.jsx
+
+**Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)
 
@@ -385,5 +394,6 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Contribution guidelines, PR process |
 | [ROADMAP.md](docs/ROADMAP.md) | v0.2 → v1.0 feature roadmap |
 | [skill/references/](skill/references/) | Tool schemas, conflict guide, knowledge guidelines, onboarding protocol |
+| [docs/e2e/journey-story-04-06-2026.md](docs/e2e/journey-story-04-06-2026.md) | Journey narratives for all 22 E2E journeys — product story, validated sub-scenarios, gap analysis (2026-06-04) — includes 10 new negative/cross-boundary sub-scenarios |
 | [docs/e2e/journey-story-28-05-2026.md](docs/e2e/journey-story-28-05-2026.md) | Journey narratives for all 21 E2E journeys — product story, validated sub-scenarios, gap analysis (2026-05-28) |
 | [docs/e2e/GAP-ANALYSIS.md](docs/e2e/GAP-ANALYSIS.md) | 38 prioritised coverage gaps (P0–P6) — each with context, test type, exact code change, and effort estimate |

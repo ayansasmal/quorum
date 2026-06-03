@@ -1,8 +1,8 @@
 # Quorum — Quality Assurance Framework & Risk-Weighted Test Plan
 
-**Version:** 2.2 — May 2026
-**Scope:** Quorum v0.4 · 21 journeys · 36 scenarios
-**Suite OwnScore:** 3530 pts | **10% gate:** 353 pts | **5% gate:** 177 pts
+**Version:** 2.3 — June 2026
+**Scope:** Quorum v0.4 · 22 journeys · 46 scenarios (10 new negative/cross-boundary sub-scenarios added 2026-06-04)
+**Suite OwnScore:** 3946 pts | **10% gate:** 395 pts | **5% gate:** 197 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
 > **For agentic workers (CI, coding agents, deployment pipelines):**
@@ -42,7 +42,7 @@ FOR EACH failing scenario:
     → deployment blocked immediately, no exceptions, no override
 
 ELSE:
-  failure_pct = Σ OwnScore(all unique failing scenarios) / 3530 × 100
+  failure_pct = Σ OwnScore(all unique failing scenarios) / 3946 × 100
 
   IF failure_pct > 10%  → HARD_BLOCK   (block deployment, no exceptions)
   IF failure_pct > 5%   → WARNING       (block merge; require PE manual review + approval)
@@ -75,15 +75,15 @@ Pillars with a ⛔ are zero-tolerance: any single failure triggers a hard block.
 
 | Pillar | OwnScore total | % of suite |
 |--------|---------------|-----------|
-| Governance Integrity | 1261 | 35.7% |
-| Security | 1158 | 32.8% |
-| Data Integrity | 178 | 5.0% |
-| Functional Correctness | 475 | 13.5% |
-| Federation | 130 | 3.7% |
-| Operational Reliability | 176 | 5.0% |
-| Observability | 102 | 2.9% |
-| Developer Experience | 50 | 1.4% |
-| **Total** | **3530** | **100%** |
+| Governance Integrity | 1315 | 33.3% |
+| Security & Access Control | 1445 | 36.6% |
+| Data Integrity | 178 | 4.5% |
+| Functional Correctness | 475 | 12.0% |
+| Federation | 130 | 3.3% |
+| Operational Reliability | 176 | 4.5% |
+| Observability & Intelligence | 177 | 4.5% |
+| Developer & Agent Experience | 50 | 1.3% |
+| **Total** | **3946** | **100%** |
 
 ---
 
@@ -240,10 +240,20 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
 | S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
 | S-22 | J22 | 25 | 2 | 50 | Observability | 1.0 | 1.5 | **75** | S-07 | **150** | 🟡 |
-| **Total** | | | | **1352** | | | | **3605** | | | |
+| S-02.13 | J02 | 5 | 3 | 15 | Security ⛔ | 2.5 | 2.0 | **75** | S-06.7, S-12.8 | **175** | ⛔ |
+| S-03.6 | J03 | 5 | 2 | 10 | Security ⛔ | 2.5 | 1.5 | **38** | — | **38** | ⛔ |
+| S-04.10 | J04 | 4 | 2 | 8 | Security ⛔ | 2.0 | 1.5 | **24** | — | **24** | ⛔ |
+| S-06.7 | J06 | 4 | 3 | 12 | Security ⛔ | 2.5 | 2.0 | **60** | — | **60** | ⛔ |
+| S-08.7 | J08 | 4 | 2 | 8 | Security ⛔ | 1.5 | 1.5 | **18** | — | **18** | ⛔ |
+| S-09.9 | J09 | 4 | 1 | 4 | Security ⛔ | 2.5 | 2.0 | **20** | — | **20** | ⛔ |
+| S-11.5 | J11 | 4 | 3 | 12 | Governance ⛔ | 2.0 | 1.5 | **36** | — | **36** | ⛔ |
+| S-12.8 | J12 | 4 | 2 | 8 | Security ⛔ | 2.5 | 2.0 | **40** | — | **40** | ⛔ |
+| S-17.6 | J17 | 3 | 2 | 6 | Governance ⛔ | 2.0 | 1.5 | **18** | — | **18** | ⛔ |
+| S-22.9 | J22 | 4 | 1 | 4 | Security ⛔ | 2.0 | 1.5 | **12** | — | **12** | ⛔ |
+| **Total** | | | | **1439** | | | | **3946** | | | |
 
-> **W column sum = 1352** (was 1302 before S-22 (+50); was 1231 before S-05.7/5.8/5.9 (+47); S-11 leaf 10→16 adds +24 for S-11.4 coexist_merge).
-> **OwnScore total = 3605.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1439** (+87 from 10 new negative/cross-boundary sub-scenarios added 2026-06-04).
+> **OwnScore total = 3946.** New scenarios are all ⛔ — wrong-order transitions and cross-project isolation failures are governance or security hard-blocks.
 
 ---
 
@@ -266,35 +276,46 @@ before marking the issue resolved.
 | 9 | **S-05.5** RBAC Deviation Action + Forget | **150** | ⛔ | Security | — |
 | 10 | **S-12** State Machine | **138** | ⛔ | Data Integrity | — |
 | 11 | **S-06** Multi-User Conflict | **135** | ⛔ | Governance | — |
-| 12 | **S-21** MCP Layer Gateway Contracts | **124** | 🟡 | Operational | — |
-| 13 | **S-05.2** RBAC Promote + Supersede | **120** | ⛔ | Security | — |
-| 14 | **S-05.3** RBAC Deprecate | **120** | ⛔ | Security | — |
-| 15 | **S-19** Authentication Lifecycle | **113** | ⛔ | Security | — |
-| 16 | **S-05.7** RBAC Cross-Project Role Context | **100** | ⛔ | Security | — |
-| 17 | **S-20** Cross-Catalog Search | **96** | 🟡 | Federation | — |
-| 18 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
-| 19 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
-| 20 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
-| 21 | **S-05.9** Role Update + Cache Invalidation | **75** | ⛔ | Security | — |
-| 22 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
-| 23 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
-| 24 | **S-13** Config Management | **45** | 🟡 | Operational | — |
-| 25 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
-| 26 | **S-05.8** RBAC Concurrent Race | **60** | ⛔ | Security | — |
-| 27 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
-| 28 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
-| 29 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
-| 30 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
-| 31 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
-| 32 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
-| 33 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
-| 34 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
-| 35 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
-| 36 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
+| 12 | **S-02.13** Wrong-Order Review + Cross-Project Isolation | **175** | ⛔ | Security | S-06.7, S-12.8 |
+| 13 | **S-21** MCP Layer Gateway Contracts | **124** | 🟡 | Operational | — |
+| 14 | **S-05.2** RBAC Promote + Supersede | **120** | ⛔ | Security | — |
+| 15 | **S-05.3** RBAC Deprecate | **120** | ⛔ | Security | — |
+| 16 | **S-19** Authentication Lifecycle | **113** | ⛔ | Security | — |
+| 17 | **S-05.7** RBAC Cross-Project Role Context | **100** | ⛔ | Security | — |
+| 18 | **S-20** Cross-Catalog Search | **96** | 🟡 | Federation | — |
+| 19 | **S-05.6** RBAC Portfolio + Admin | **90** | ⛔ | Security | — |
+| 20 | **S-03** Deprecation Workflow | **90** | 🟡 | Functional | — |
+| 21 | **S-07** Conformance Scoring & Portfolio | **75** | 🟡 | Observability | — |
+| 22 | **S-05.9** Role Update + Cache Invalidation | **75** | ⛔ | Security | — |
+| 23 | **S-08** Confidence Endorsement | **68** | 🟡 | Functional | — |
+| 24 | **S-06.7** Cross-Project Conflict Review Isolation | **60** | ⛔ | Security | — |
+| 25 | **S-05.8** RBAC Concurrent Race | **60** | ⛔ | Security | — |
+| 26 | **S-02.1** Write + Recall | **48** | 🟡 | Functional | — |
+| 27 | **S-13** Config Management | **45** | 🟡 | Operational | — |
+| 28 | **S-12.8** Promote PCC + Cross-Project DRAFT | **40** | ⛔ | Security | — |
+| 29 | **S-02.3** Supersede Path | **40** | ⛔ | Data Integrity | — |
+| 30 | **S-11.5** Re-Reviewing Resolved Conflict | **36** | ⛔ | Governance | — |
+| 31 | **S-01** Global Catalog Onboarding | **34** | 🟡 | Federation | — |
+| 32 | **S-02.6** Coexist-Split | **30** | 🟡 | Functional | — |
+| 33 | **S-14** Dashboard Visual | **30** | 🟡 | Dev Experience | — |
+| 34 | **S-16** Knowledge History | **27** | 🟡 | Observability | — |
+| 35 | **S-18** Governance Route | **27** | 🟡 | Operational | — |
+| 36 | **S-02.4** Reject Path | **24** | 🟡 | Functional | — |
+| 37 | **S-02.5** Escalation Path | **24** | 🟡 | Functional | — |
+| 38 | **S-02.7** Coexist-Merge | **24** | 🟡 | Functional | — |
+| 39 | **S-04.10** Re-Action Accepted Deviation | **24** | ⛔ | Security | — |
+| 40 | **S-09.9** Role Update Edge Cases | **20** | ⛔ | Security | — |
+| 41 | **S-02.8** Dashboard UI | **20** | 🟡 | Dev Experience | — |
+| 42 | **S-08.7** Wrong-Order Bump Attempts | **18** | ⛔ | Security | — |
+| 43 | **S-17.6** Enriching Resolved Conflicts | **18** | ⛔ | Governance | — |
+| 44 | **S-03.6** Wrong-Order Deprecation | **38** | ⛔ | Security | — |
+| 45 | **S-09** Platform Admin | **14** | 🟡 | Operational | — |
+| 46 | **S-22.9** Archived Project Portfolio Isolation | **12** | ⛔ | Security | — |
 
-> Ranks 5–33 in the ⛔ column are hard-blocked by pillar membership (Security / Data Integrity),
-> not by FailureCost. Rank 5 (S-04), rank 12 (S-21), rank 16 (S-20), and rank 18 (S-03) are
-> score-gated despite meaningful FailureCost because their primary pillar is not zero-tolerance.
+> Ranks in the ⛔ column are hard-blocked by pillar membership (Security / Governance / Data Integrity),
+> not by FailureCost. S-04, S-21, S-20, and S-03 are score-gated despite meaningful FailureCost
+> because their primary pillar is not zero-tolerance. New scenarios (ranks 12, 24, 28, 30, 39–46)
+> are all ⛔ — cross-project isolation and wrong-order transition failures are governance or security hard-blocks.
 
 ---
 
@@ -315,7 +336,7 @@ not the percentage of tests that failed — it is the category of what is broken
 ### 8.2 Score-gated (🟡 pillars)
 
 ```
-failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3530 × 100
+failure_pct = Σ OwnScore(unique failing scenarios in 🟡 pillars) / 3946 × 100
 
 failure_pct ≤ 5.0%  → SAFE     (auto-merge allowed)
 5.0% < failure_pct ≤ 10.0%  → WARNING   (block merge; require PE manual review + sign-off)
@@ -337,7 +358,7 @@ This is the spider chart value. A pillar at 100% means all its scenarios pass. A
 means all its scenarios fail. The spider chart shape tells you WHERE quality is weak even when
 no deployment is being blocked (useful for continuous quality tracking between releases).
 
-Example: if S-15 fails alone, Governance Integrity drops to `(1261 − 378) / 1261 = 70%`.
+Example: if S-15 fails alone, Governance Integrity drops to `(1315 − 378) / 1315 = 71%`.
 The agent knows to look at enforcement of Constitutional Rule 3 across all governance endpoints.
 
 ---

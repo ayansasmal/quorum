@@ -383,4 +383,82 @@ describe('S-11.4 — coexist_merge Two-PA Flow', () => {
 
 }) // S-11.4
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-11.5 — Re-Reviewing a Resolved Conflict (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-11.5 — Re-Reviewing a Resolved Conflict', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  let s1105Topic, s1105Key, s1105ConflictId
+
+  beforeAll(async () => {
+    s1105Topic = 'db'
+    s1105Key   = uid('s1105-resolved-conflict')
+
+    // PA writes ACTIVE entry
+    await api(tokens.pe, PROJECT).post('/api/knowledge', {
+      topic:       s1105Topic,
+      key:         s1105Key,
+      content:     'Use PostgreSQL with connection pooling (PgBouncer). Pool size: 10.',
+      entity_type: 'Decision',
+    })
+
+    // Engineer writes conflicting DRAFT
+    await api(tokens.engineer, PROJECT).post('/api/knowledge', {
+      topic:       s1105Topic,
+      key:         s1105Key,
+      content:     'Migrate to CockroachDB for distributed transactions.',
+      entity_type: 'Decision',
+    })
+
+    // Create pending_decision
+    const pendingRes = await api(tokens.engineer, PROJECT).post('/pg/pending', {
+      conflict_topic:   s1105Topic,
+      conflict_key:     s1105Key,
+      decision_type:    'conflict',
+      existing_content: 'Use PostgreSQL with connection pooling (PgBouncer). Pool size: 10.',
+      incoming_content: 'Migrate to CockroachDB for distributed transactions.',
+      conflict_reason:  'CockroachDB offers distributed transactions but would require significant migration effort.',
+    })
+    if (pendingRes.status !== 201) throw new Error(`S-11.5 beforeAll: pending insert failed ${pendingRes.status}`)
+    s1105ConflictId = pendingRes.data.conflict_id
+
+    // PA (test-pe) approves the conflict — resolving it
+    await api(tokens.pe, PROJECT).post(`/api/review/${s1105ConflictId}`, {
+      action: 'approve',
+      note:   'Approved — CockroachDB migration aligns with Q3 scaling roadmap.',
+    })
+  })
+
+  test('step 1 — re-reviewing an approved conflict by the same PA returns 404', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${s1105ConflictId}`, {
+      action: 'reject',
+      note:   'Attempting to reverse the previous approval — conflict is already resolved.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 2 — re-reviewing the same resolved conflict by a second PA also returns 404', async () => {
+    const res = await api(tokens.pe2, PROJECT).post(`/api/review/${s1105ConflictId}`, {
+      action: 'reject',
+      note:   'Second PA trying to re-open a resolved conflict — must not be allowed.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 3 — resolved conflict does not appear in /pg/pending', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const pending = Array.isArray(res.data) ? res.data : (res.data.decisions ?? [])
+    expect(pending.find(d => d.conflict_id === s1105ConflictId)).toBeUndefined()
+  })
+
+  test('step 4 — ACTIVE version remains after failed re-review attempts (no accidental rollback)', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/pg/versions/${s1105Topic}/${s1105Key}`)
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('ACTIVE')
+  })
+})
+
 }) // outer describe — required by graph reporter extractScenarioId()

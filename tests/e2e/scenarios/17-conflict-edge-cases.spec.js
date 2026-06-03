@@ -492,4 +492,73 @@ describe('S-17.5 — PENDING_CONFLICT_CHECK entry can be cleared to DRAFT', () =
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-17.6 — Enriching and Reviewing a Resolved Conflict (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-17.6 — Enriching and Reviewing Resolved Conflicts', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  let resolvedConflictId
+  let s176Topic, s176Key
+
+  beforeAll(async () => {
+    s176Topic = 'auth'
+    s176Key   = uid('s176-resolved-for-enrich')
+
+    await activeEntry({ topic: s176Topic, key: s176Key, content: 'Use OAuth2 with PKCE for all browser-based clients.' })
+    await api(tokens.engineer, PROJECT).post('/api/knowledge', {
+      topic:       s176Topic,
+      key:         s176Key,
+      content:     'Use Device Authorization flow for CLI/native clients.',
+      entity_type: 'Decision',
+    })
+    const pendingRes = await api(tokens.engineer, PROJECT).post('/pg/pending', {
+      conflict_topic:   s176Topic,
+      conflict_key:     s176Key,
+      decision_type:    'conflict',
+      existing_content: 'Use OAuth2 with PKCE for all browser-based clients.',
+      incoming_content: 'Use Device Authorization flow for CLI/native clients.',
+      conflict_reason:  'Device flow is for non-interactive clients — may complement rather than conflict with PKCE.',
+    })
+    if (pendingRes.status !== 201) throw new Error(`S-17.6 beforeAll: pending insert failed ${pendingRes.status}`)
+    resolvedConflictId = pendingRes.data.conflict_id
+
+    // Resolve the conflict before tests run
+    await api(tokens.pe, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'approve',
+      note:   'Both flows serve different client types — approve and document separately.',
+    })
+  })
+
+  test('step 1 — POST /governance/enrich with a resolved conflict_id returns 200 (enrichment call completes)', async () => {
+    // The enrich endpoint accepts any conflict_id; if the conflict is already resolved,
+    // it still returns analysis but the pending_decision row is gone.
+    // This verifies the endpoint does not crash on a resolved conflict_id.
+    const res = await api(tokens.pe, PROJECT).post('/governance/enrich', {
+      conflict_id:     resolvedConflictId,
+      existing:        'Use OAuth2 with PKCE for all browser-based clients.',
+      incoming:        'Use Device Authorization flow for CLI/native clients.',
+      conflict_reason: 'Different OAuth flows for different client types.',
+    })
+    // 200 or 404 are both acceptable — what must NOT happen is a 5xx
+    expect(res.status).not.toBeGreaterThanOrEqual(500)
+  })
+
+  test('step 2 — reviewing the resolved conflict again returns 404 (idempotency guard)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'reject',
+      note:   'Attempting to reverse a prior approval — should be blocked.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 3 — resolved conflict does not appear in /pg/pending after review', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const pending = Array.isArray(res.data) ? res.data : (res.data.decisions ?? [])
+    expect(pending.find(d => d.conflict_id === resolvedConflictId)).toBeUndefined()
+  })
+})
+
 }) // S-17 — Conflict Edge Cases

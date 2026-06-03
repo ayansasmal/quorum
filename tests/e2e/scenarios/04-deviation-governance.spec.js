@@ -774,4 +774,77 @@ describe('S-04.9 — Overdue Deferrals Browser', { tag: '@ui' }, () => {
   })
 }) // S-04.9 — Overdue Deferrals Browser
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-04.10 — Re-Actioning an Accepted Deviation + Cross-Project Guard (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-04.10 — Re-Actioning Accepted Deviation', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let s0410DeviationId
+  let s0410CatalogKey
+
+  beforeAll(async () => {
+    s0410CatalogKey = uid('s0410-standard')
+    // Seed a ACTIVE catalog entry and a deviation against it
+    await activeEntry({ topic: 'auth', key: s0410CatalogKey, content: 'All inter-service calls must use mTLS.', project: CATALOG, globalCatalog: true })
+    ;({ deviationId: s0410DeviationId } = await deviation({
+      catalogId:   CATALOG,
+      topic:       'auth',
+      key:         s0410CatalogKey,
+      description: `S-04.10 test deviation — service does not implement mTLS for legacy partner API: ${s0410CatalogKey}.`,
+    }))
+
+    // PA accepts the deviation
+    await api(tokens.pe, PROJECT).post(`/api/deviations/${s0410DeviationId}/action`, {
+      action: 'accept',
+      reason: 'Legacy partner integration — mTLS rollout blocked by partner SLA. Accepted until Q3 migration.',
+    })
+  })
+
+  test('step 1 — deviation is ACCEPTED after initial action', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/deviations')
+    expect(res.status).toBe(200)
+    const dev = res.data.find(d => d.deviation_id === s0410DeviationId)
+    expect(dev).toBeDefined()
+    expect(dev.status).toBe('ACCEPTED')
+  })
+
+  test('step 2 — re-actioning an already-ACCEPTED deviation returns non-200 (not OPEN)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/deviations/${s0410DeviationId}/action`, {
+      action: 'accept',
+      reason: 'Attempting to re-accept an already accepted deviation — should be rejected.',
+    })
+    expect(res.status).not.toBe(200)
+    expect(res.status).not.toBe(201)
+  })
+
+  test('step 3 — deviation status remains ACCEPTED after failed re-action', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/api/deviations')
+    const dev = res.data.find(d => d.deviation_id === s0410DeviationId)
+    expect(dev?.status).toBe('ACCEPTED')
+  })
+
+  test('step 4 — test-pe (engineer role in peer-project) cannot action a deviation in peer-project → 400 DEVIATION_ACTION_AUTHORITY', async () => {
+    // Seed a deviation in peer-project scope (test-pe is engineer there; engineer role cannot action deviations)
+    const peerKey = uid('s0410-peer-dev')
+    await activeEntry({ topic: 'auth', key: peerKey, content: 'Peer project: only ES256 JWT accepted.', project: CATALOG, globalCatalog: true })
+    const { deviationId: peerDevId } = await deviation({
+      catalogId:   CATALOG,
+      topic:       'auth',
+      key:         peerKey,
+      description: `S-04.10 peer deviation: ${peerKey}`,
+      project:     PEER,
+    })
+
+    const res = await api(tokens.pe, PEER).post(`/api/deviations/${peerDevId}/action`, {
+      action: 'accept',
+      reason: 'Engineer attempting deviation action in peer-project — authority guard should block this.',
+    })
+    expect(res.status).toBe(400)
+    expect(res.data.rule).toBe('DEVIATION_ACTION_AUTHORITY')
+  })
+})
+
 }) // S-04 — Deviation Governance

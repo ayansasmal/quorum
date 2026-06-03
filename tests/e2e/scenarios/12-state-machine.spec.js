@@ -563,4 +563,83 @@ describe('S-12.7 — Draft Listing Filters', () => {
 
 }) // S-12.7 — Draft Listing Filters
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-12.8 — Wrong-Order Transitions + Cross-Project DRAFT Isolation (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-12.8 — Wrong-Order Transitions and Cross-Project DRAFT Isolation', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let pccKey, pccTopic
+  let peerDraftKey
+
+  beforeAll(async () => {
+    // Key 1: DRAFT that we'll patch to PENDING_CONFLICT_CHECK, then try to promote
+    pccTopic = 'testing'
+    pccKey   = uid('s1208-pcc')
+    await activeEntry({ topic: pccTopic, key: pccKey, content: `Active baseline for S-12.8 PCC test: ${pccKey}.`, project: PROJECT })
+    await api(tokens.engineer, PROJECT).post('/api/knowledge', {
+      topic:       pccTopic,
+      key:         pccKey,
+      content:     `Conflicting write to trigger PENDING_CONFLICT_CHECK: ${pccKey}.`,
+      entity_type: 'Decision',
+    })
+    // Transition the DRAFT to PENDING_CONFLICT_CHECK via the admin path
+    await api(tokens.pe, PROJECT).patch(`/pg/versions/${pccTopic}/${pccKey}`, {
+      status: 'PENDING_CONFLICT_CHECK',
+    })
+
+    // Key 2: DRAFT in peer-project that test-pe (PA in test-project) should not be able to promote
+    peerDraftKey = uid('s1208-peer-draft')
+    await api(tokens.architect, PEER).post('/api/knowledge', {
+      topic:       'testing',
+      key:         peerDraftKey,
+      content:     `Peer ACTIVE baseline for S-12.8 cross-project test: ${peerDraftKey}.`,
+      entity_type: 'Decision',
+    })
+    await api(tokens.engineer, PEER).post('/api/knowledge', {
+      topic:       'testing',
+      key:         peerDraftKey,
+      content:     `Peer DRAFT for cross-project promote test: ${peerDraftKey}.`,
+      entity_type: 'Decision',
+    })
+  })
+
+  test('step 1 — promoting a PENDING_CONFLICT_CHECK entry returns 404 no_draft (wrong state for promote)', async () => {
+    // Promote only looks for DRAFT status — PENDING_CONFLICT_CHECK is not eligible
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/${pccTopic}/${pccKey}/promote`, {
+      note: 'Attempting to promote an entry that is in PENDING_CONFLICT_CHECK state.',
+    })
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('no_draft')
+  })
+
+  test('step 2 — test-pe (PA in test-project) cannot promote a DRAFT from peer-project using test-project header → 404', async () => {
+    // DRAFT exists in peer-project; test-project scope must not find it
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/testing/${peerDraftKey}/promote`, {
+      note: 'Cross-project promote attempt — DRAFT lives in peer-project, header says test-project.',
+    })
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('no_draft')
+  })
+
+  test('step 3 — test-pe (engineer in peer-project) cannot promote the peer-project DRAFT → 403', async () => {
+    // test-pe is engineer in peer-project — promote is PA-only
+    const res = await api(tokens.pe, PEER).post(`/api/knowledge/testing/${peerDraftKey}/promote`, {
+      note: 'Engineer attempting DRAFT promotion in peer-project — must be forbidden.',
+    })
+    expect(res.status).toBe(403)
+  })
+
+  test('step 4 — test-architect (PA in peer-project) can promote the peer-project DRAFT → 200', async () => {
+    // Positive guard: the correct PA in the correct project can still promote
+    const res = await api(tokens.architect, PEER).post(`/api/knowledge/testing/${peerDraftKey}/promote`, {
+      note: 'Legitimate PA promotion in the correct project scope — should succeed.',
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.status).toBe('ACTIVE')
+  })
+})
+
 }) // S-12 — Knowledge State Machine

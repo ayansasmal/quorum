@@ -389,4 +389,84 @@ describe('S-03.5 — Deprecation Request: Reject', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-03.6 — Wrong-Order Deprecation Attempts (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-03.6 — Wrong-Order Deprecation Attempts', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let alreadyDeprecatedKey
+  let draftOnlyKey
+  let peerKey
+
+  beforeAll(async () => {
+    // Key 1: ACTIVE → immediately deprecated (to test re-deprecation)
+    alreadyDeprecatedKey = uid('s0306-already-deprecated')
+    await activeEntry({ topic: 'infra', key: alreadyDeprecatedKey, content: 'Deploy via Ansible — deprecated in favour of Terraform.' })
+    await api(tokens.pe, PROJECT).post(`/api/knowledge/infra/${alreadyDeprecatedKey}/deprecate`, {
+      reason: 'Superseded by Terraform IaC pipeline — Ansible no longer used.',
+    })
+
+    // Key 2: DRAFT only — no ACTIVE version (engineer write, never promoted)
+    draftOnlyKey = uid('s0306-draft-only')
+    await api(tokens.engineer, PROJECT).post('/api/knowledge', {
+      topic:       'infra',
+      key:         draftOnlyKey,
+      content:     'Proposed: migrate to Pulumi.',
+      entity_type: 'Decision',
+    })
+
+    // Key 3: ACTIVE entry in peer-project (for cross-project test)
+    peerKey = uid('s0306-peer-active')
+    await api(tokens.architect, PEER).post('/api/knowledge', {
+      topic:       'infra',
+      key:         peerKey,
+      content:     'Peer project infra standard: use K8s Helm charts.',
+      entity_type: 'Decision',
+    })
+  })
+
+  test('step 1 — deprecating an already-DEPRECATED entry returns 404 (no ACTIVE version)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/infra/${alreadyDeprecatedKey}/deprecate`, {
+      reason: 'Attempting to re-deprecate an already deprecated entry — should be 404.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 2 — deprecating a key that only has a DRAFT returns 404 (no ACTIVE version to deprecate)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/infra/${draftOnlyKey}/deprecate`, {
+      reason: 'Attempting to deprecate a DRAFT-only entry — must fail since there is no ACTIVE version.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 3 — test-pe (engineer in peer-project) cannot deprecate in peer-project → 403', async () => {
+    // test-pe has engineer role in peer-project — deprecation is PA-only
+    const res = await api(tokens.pe, PEER).post(`/api/knowledge/infra/${peerKey}/deprecate`, {
+      reason: 'Engineer attempting deprecation in a project where they lack PA authority.',
+    })
+    expect(res.status).toBe(403)
+  })
+
+  test('step 4 — test-pe (PA in test-project) cannot deprecate a peer-project entry using test-project header → 404', async () => {
+    // The entry lives in peer-project; scoping the request to test-project must return 404
+    const res = await api(tokens.pe, PROJECT).post(`/api/knowledge/infra/${peerKey}/deprecate`, {
+      reason: 'PA in test-project attempting cross-project deprecation — entry not found in test-project scope.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 5 — DRAFT-only and peer-project entries remain intact after all failed deprecation attempts', async () => {
+    const draftHistory = await api(tokens.pe, PROJECT).get(`/pg/versions/infra/${draftOnlyKey}/history`)
+    expect(draftHistory.status).toBe(200)
+    expect(draftHistory.data.every(v => v.status !== 'DEPRECATED')).toBe(true)
+
+    const peerHistory = await api(tokens.architect, PEER).get(`/pg/versions/infra/${peerKey}/history`)
+    expect(peerHistory.status).toBe(200)
+    expect(peerHistory.data.every(v => v.status !== 'DEPRECATED')).toBe(true)
+  })
+})
+
 }) // S-03 — Deprecation Workflow

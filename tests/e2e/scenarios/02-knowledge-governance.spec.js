@@ -1120,3 +1120,104 @@ describe('S-02.12 — Stale Warning Badge', { tag: '@ui' }, () => {
     await expect(badge).toContainText('Stale warning')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S-02.13 — Wrong-Order Review Attempts (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-02.13 — Wrong-Order Review Attempts', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let resolvedConflictId
+  let peerConflictId
+  let peerKey
+
+  beforeAll(async () => {
+    // Seed a conflict in quorum-test-project and immediately resolve it
+    const topic  = 'auth'
+    const key    = uid('s0213-resolved')
+    await activeEntry({ topic, key, content: 'Use OAuth2 for service-to-service auth.' })
+    const { conflictId } = await conflict({
+      topic,
+      key,
+      content:         'Use mTLS for service-to-service auth.',
+      existingContent: 'Use OAuth2 for service-to-service auth.',
+    })
+    resolvedConflictId = conflictId
+    await api(tokens.pe, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'reject',
+      note:   'mTLS adds significant operational overhead — sticking with OAuth2 for now.',
+    })
+
+    // Seed an unresolved conflict in quorum-test-peer-project
+    // test-architect is PA in peer-project; test-pe is engineer there
+    peerKey = uid('s0213-peer')
+    const seedRes = await api(tokens.architect, PEER).post('/api/knowledge', {
+      topic:       'auth',
+      key:         peerKey,
+      content:     'Peer project: use OAuth2 only.',
+      entity_type: 'Decision',
+    })
+    // test-architect is PA in peer-project — write lands as ACTIVE
+    if (seedRes.data.status !== 'ACTIVE') throw new Error(`S-02.13 beforeAll: expected ACTIVE, got ${seedRes.data.status}`)
+    const draftRes = await api(tokens.engineer, PEER).post('/api/knowledge', {
+      topic:       'auth',
+      key:         peerKey,
+      content:     'Peer project: allow API keys for internal tooling.',
+      entity_type: 'Decision',
+    })
+    if (draftRes.data.status !== 'DRAFT') throw new Error(`S-02.13 beforeAll: expected DRAFT, got ${draftRes.data.status}`)
+    const pendingRes = await api(tokens.engineer, PEER).post('/pg/pending', {
+      conflict_topic:   'auth',
+      conflict_key:     peerKey,
+      decision_type:    'conflict',
+      existing_content: 'Peer project: use OAuth2 only.',
+      incoming_content: 'Peer project: allow API keys for internal tooling.',
+      conflict_reason:  'API keys may weaken the uniform OAuth2 auth policy.',
+    })
+    if (pendingRes.status !== 201) throw new Error(`S-02.13 beforeAll: pending insert failed ${pendingRes.status}`)
+    peerConflictId = pendingRes.data.conflict_id
+  })
+
+  test('step 1 — reviewing an already-resolved conflict returns 404', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${resolvedConflictId}`, {
+      action: 'approve',
+      note:   'Attempting to re-review an already-resolved conflict — should fail.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 2 — resolved conflict no longer appears in /pg/pending', async () => {
+    const res = await api(tokens.pe, PROJECT).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const ids = (Array.isArray(res.data) ? res.data : []).map(r => r.conflict_id)
+    expect(ids).not.toContain(resolvedConflictId)
+  })
+
+  test('step 3 — test-pe (engineer role in peer-project) cannot review peer-project conflict → 403', async () => {
+    const res = await api(tokens.pe, PEER).post(`/api/review/${peerConflictId}`, {
+      action: 'approve',
+      note:   'Attempting conflict review as engineer in peer-project — should be forbidden.',
+    })
+    expect(res.status).toBe(403)
+  })
+
+  test('step 4 — test-pe (PA in test-project) cannot review peer-project conflict using test-project header → 404', async () => {
+    // The conflict_id belongs to peer-project; scoping the request to test-project must return 404
+    // (the conflict does not exist within test-project's scope)
+    const res = await api(tokens.pe, PROJECT).post(`/api/review/${peerConflictId}`, {
+      action: 'approve',
+      note:   'Cross-project conflict review attempt — conflict lives in peer-project, not test-project.',
+    })
+    expect(res.status).toBe(404)
+  })
+
+  test('step 5 — peer-project conflict remains pending and unmodified after all failed attempts', async () => {
+    const res = await api(tokens.architect, PEER).get('/pg/pending')
+    expect(res.status).toBe(200)
+    const found = res.data.find(r => r.conflict_id === peerConflictId)
+    expect(found).toBeDefined()
+    expect(found.resolution).toBeNull()
+  })
+})

@@ -327,4 +327,61 @@ describe('S-08.6 — Endorsement History', () => {
   })
 }) // S-08.6 — Endorsement History
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S-08.7 — Wrong-Order Bump Attempts (NEGATIVE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('S-08.7 — Wrong-Order Bump Attempts', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  const PEER = 'quorum-test-peer-project'
+  let deprecatedKey
+  let peerKey
+
+  beforeAll(async () => {
+    // Seed an entry in test-project, then deprecate it
+    deprecatedKey = uid('s087-deprecated')
+    await activeEntry({ topic: 'auth', key: deprecatedKey, content: `S-08.7 entry to deprecate: ${deprecatedKey}.` })
+    await api(tokens.pe, PROJECT).post(`/api/knowledge/auth/${deprecatedKey}/deprecate`, {
+      reason: 'S-08.7 — deprecating to test bump-of-deprecated guard.',
+    })
+
+    // Seed an entry in peer-project (only exists in peer scope)
+    peerKey = uid('s087-peer')
+    await api(tokens.architect, PEER).post('/api/knowledge', {
+      topic:       'auth',
+      key:         peerKey,
+      content:     `S-08.7 peer-only entry: ${peerKey}.`,
+      entity_type: 'Decision',
+    })
+  })
+
+  test('step 1 — bumping a DEPRECATED entry returns 404 (getVersionForBump queries ACTIVE only)', async () => {
+    const res = await api(tokens.pe, PROJECT).post(`/api/bump/auth/${deprecatedKey}`, {})
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('not_found')
+  })
+
+  test('step 2 — GET /api/endorsements for a DEPRECATED key returns 404', async () => {
+    const res = await api(tokens.pe, PROJECT).get(`/api/endorsements/auth/${deprecatedKey}`)
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('not_found')
+  })
+
+  test('step 3 — bumping a peer-project entry using test-project header returns 404 (cross-project isolation)', async () => {
+    // The entry exists in peer-project; the test-project scope must not find it
+    const res = await api(tokens.pe, PROJECT).post(`/api/bump/auth/${peerKey}`, {})
+    expect(res.status).toBe(404)
+    expect(res.data.error).toBe('not_found')
+  })
+
+  test('step 4 — test-pe (engineer in peer-project) can bump the peer-project entry using peer-project scope', async () => {
+    // Engineers can bump — role-weighted delta applies
+    const res = await api(tokens.pe, PEER).post(`/api/bump/auth/${peerKey}`, {})
+    expect(res.status).toBe(200)
+    expect(res.data.topic).toBe('auth')
+    expect(res.data.key).toBe(peerKey)
+  })
+})
+
 }) // S-08 — Confidence Endorsement
