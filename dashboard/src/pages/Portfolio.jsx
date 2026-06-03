@@ -218,6 +218,94 @@ export default function Portfolio() {
         {selectedStatus && ` · ${selectedStatus}`}
       </p>
 
+      {/* ── Project table ───────────────────────────────────────── */}
+      <div className="rounded-lg border border-gray-800 bg-gray-900 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="border-b border-gray-800 bg-gray-950">
+            <tr>
+              {['Project', 'Owner', 'Last scan', 'Score', 'Status'].map(h => (
+                <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/60">
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-600">
+                  No projects match the current filters.
+                </td>
+              </tr>
+            ) : filtered.map(p => (
+              <tr key={p.group_id} className="hover:bg-gray-800/30">
+                {/* Project */}
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-100 font-mono text-xs">{p.display_name ?? p.group_id}</span>
+                    {p.is_global && (
+                      <span className="text-[9px] font-semibold border border-indigo-700 bg-indigo-900/30 text-indigo-400 rounded px-1 py-0.5">GLOBAL</span>
+                    )}
+                  </div>
+                  {p.display_name && (
+                    <div className="text-[10px] text-gray-600 font-mono mt-0.5">{p.group_id}</div>
+                  )}
+                </td>
+
+                {/* Owner */}
+                <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                  {p.owner ?? <span className="text-gray-700">—</span>}
+                </td>
+
+                {/* Last scan */}
+                <td className="px-4 py-3 text-xs whitespace-nowrap">
+                  {p.last_scan_at ? (
+                    <span title={p.last_scan_at} className="text-gray-400 cursor-help">
+                      {relativeDate(p.last_scan_at)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-700">Never</span>
+                  )}
+                </td>
+
+                {/* Score bar */}
+                <td className="px-4 py-3 min-w-[140px]">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-gray-800 rounded-full">
+                      {p.score !== null && p.score !== undefined && (
+                        <div
+                          className={`h-full rounded-full ${barColor(p.score)}`}
+                          style={{ width: `${p.score}%` }}
+                        />
+                      )}
+                    </div>
+                    <span className={`text-xs font-bold min-w-[24px] text-right ${scoreColor(p.score)}`}>
+                      {p.score ?? '—'}
+                    </span>
+                  </div>
+                </td>
+
+                {/* Status */}
+                <td className="px-4 py-3">
+                  {p.status === 'CERTIFIED' ? (
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full border px-2 py-0.5
+                      ${p.score >= 80 ? 'border-green-800 bg-green-950/40 text-green-400'
+                        : p.score >= 50 ? 'border-amber-800 bg-amber-950/40 text-amber-400'
+                        : 'border-red-800 bg-red-950/40 text-red-400'}`}>
+                      ● CERTIFIED
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full border border-gray-700 bg-gray-800/40 text-gray-500 px-2 py-0.5">
+                      ○ UNCERTIFIED
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
     </div>
   )
 }
