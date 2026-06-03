@@ -13,7 +13,7 @@
  */
 
 /** @type {readonly string[]} */
-export const VALID_ENTITY_TYPES = ['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement']
+export const VALID_ENTITY_TYPES = ['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement', 'Standard', 'Guideline']
 
 const SLUG_RE = /^[a-z0-9-]+$/
 

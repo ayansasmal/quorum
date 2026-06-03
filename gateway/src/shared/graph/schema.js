@@ -26,6 +26,14 @@ export const QuorumEntityTypes = {
     description: 'A business or product requirement — why a feature exists, who it serves, and when it applies. Use for product decisions, compliance constraints, and regulatory rules.',
     properties: ['acceptance_criteria', 'priority', 'source', 'business_owner', 'domain'],
   },
+  Standard: {
+    description: 'An org-wide baseline measured by conformance scoring. Deviations require formal PA approval. Use for catalog entries that all projects are expected to conform to.',
+    properties: ['scope', 'rationale', 'exception_process', 'domain'],
+  },
+  Guideline: {
+    description: 'A recommended engineering practice where exceptions are allowed with justification. Softer than Constraint or Standard — advisory rather than mandatory.',
+    properties: ['rationale', 'when_to_deviate', 'domain'],
+  },
 }
 
 /** @type {Record<string, string>} */

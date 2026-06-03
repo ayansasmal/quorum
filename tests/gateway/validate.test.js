@@ -190,6 +190,14 @@ describe('validateKnowledgeInput: entity_type', () => {
   it('accepts Requirement', () => {
     expect(() => validateKnowledgeInput({ ...MINIMAL, entity_type: 'Requirement' })).not.toThrow()
   })
+
+  it('accepts Standard', () => {
+    expect(() => validateKnowledgeInput({ ...MINIMAL, entity_type: 'Standard' })).not.toThrow()
+  })
+
+  it('accepts Guideline', () => {
+    expect(() => validateKnowledgeInput({ ...MINIMAL, entity_type: 'Guideline' })).not.toThrow()
+  })
 })
 
 // ── tags validation ───────────────────────────────────────────────────────────
