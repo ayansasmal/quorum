@@ -182,6 +182,74 @@ else
   ok "DynamoDB table created: $USER_PROJECTS_TABLE (GSI: ProjectMembersIndex)"
 fi
 
+# ── Seed DDB memberships from uploaded configs ────────────────────────────────
+# config_upload (gateway path) does S3 + DDB in one call.
+# init-localstack.sh bypasses the gateway (direct awslocal s3 cp), so it must
+# seed DDB membership entries itself — otherwise OAuth returns no_projects.
+echo ""
+info "Seeding DDB memberships from configs..."
+if ! command -v python3 &>/dev/null; then
+  warn "python3 not found — skipping DDB membership seeding. OAuth login will fail."
+  warn "Install python3 and re-run this script, or run POST /sync/configs manually."
+else
+  SEEDED=0
+  for config_file in "$CONFIGS_DIR"/*.quorum.json; do
+    [[ -f "$config_file" ]] || continue
+    python3 - "$config_file" "$USER_PROJECTS_TABLE" "$REGION" <<'PYEOF'
+import json, sys, subprocess
+from datetime import datetime, timezone
+
+config_file, table, region = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(config_file) as f:
+        config = json.load(f)
+except Exception as e:
+    print(f'  ✗ failed to parse {config_file}: {e}', file=sys.stderr)
+    sys.exit(0)
+
+project_id   = config.get('group_id', '')
+project_name = config.get('project', project_id)
+owner        = config.get('owner', '')
+roles_map    = config.get('roles', {})
+updated_at   = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+for m in config.get('members', []):
+    username = m.get('github_username', '')
+    if not username:
+        continue
+    role      = m.get('role', 'engineer') or 'engineer'
+    team      = m.get('team', '') or ''
+    base_conf = m.get('base_confidence') or roles_map.get(role, {}).get('base_confidence', 0.7)
+    is_owner  = (username == owner)
+
+    item = {
+        'github_username': {'S': username},
+        'project_id':      {'S': project_id},
+        'project_name':    {'S': project_name},
+        'project_slug':    {'S': project_id},
+        'role':            {'S': role},
+        'base_confidence': {'N': str(base_conf)},
+        'is_owner':        {'BOOL': is_owner},
+        'updated_at':      {'S': updated_at},
+    }
+    if team:
+        item['team'] = {'S': team}
+
+    result = subprocess.run(
+        ['awslocal', 'dynamodb', 'put-item',
+         '--table-name', table, '--region', region,
+         '--item', json.dumps(item)],
+        capture_output=True
+    )
+    mark = '✓' if result.returncode == 0 else '✗'
+    print(f'  {mark} {username} → {project_id} ({role})')
+PYEOF
+    SEEDED=$((SEEDED + 1))
+  done
+  [[ $SEEDED -eq 0 ]] && warn "No configs found — DDB membership table is empty" \
+    || ok "DDB memberships seeded from $SEEDED config file(s)"
+fi
+
 # ── Show available configs ────────────────────────────────────────────────────
 echo ""
 info "Available configs in s3://$BUCKET/:"
