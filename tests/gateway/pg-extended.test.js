@@ -45,6 +45,7 @@ vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
   getDraftVersions:        vi.fn(),
   getPendingDecisionById:  vi.fn(),
   countPendingForKey:      vi.fn(),
+  incrementDomainStat:     vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../gateway/src/shared/audit/secondary.js', () => ({

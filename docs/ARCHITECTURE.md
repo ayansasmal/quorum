@@ -215,7 +215,7 @@ Federation lets any project be elevated to a **global catalog** (`is_global: tru
 
 ### Organisational Hierarchy
 
-Hierarchy is config-driven — no hierarchy logic is hardcoded. The platform config (`configs/.quorum`) defines the valid level names; each project's config declares its position:
+Hierarchy is config-driven — no hierarchy logic is hardcoded. Each project's config declares its position in the tree. Valid levels (top → bottom): `org → group → division → department → service`.
 
 ```json
 {
@@ -230,7 +230,9 @@ Hierarchy is config-driven — no hierarchy logic is hardcoded. The platform con
 }
 ```
 
-`criticality` (1–5) weights the project in rollup calculations. A payments service at criticality 4 contributes more to a department's portfolio score than an internal tooling service at criticality 1.
+`criticality` (1–5, max 5) weights the project in rollup calculations. A payments service at criticality 4 contributes more to a department's portfolio score than an internal tooling service at criticality 1.
+
+**Hierarchy nodes** — org/group/division/department entries that exist purely as structural containers (no knowledge of their own) are uploaded with `is_global: false` and an empty `members` array. They appear in the Portfolio page's cascading filters but not in knowledge queries. See `scripts/seed-global-catalogs.js` for the pattern.
 
 ### Deviation Data Model
 
@@ -306,8 +308,9 @@ The Dashboard (`dashboard/`) is a React + Vite SPA on port 3002, served via Ngin
 | Pending Decisions | DRAFT entries awaiting review, unresolved conflicts, deprecation requests, and overdue deferrals (v0.4) |
 | Knowledge Browser | Paginated list filterable by topic, domain, status, author. For global catalog projects: `denial_hint_count` badge per entry (v0.4). Knowledge Write (PE: create / promote / supersede) |
 | Deviations | (v0.4) Deviation table with filter rail, inline accept/deny/defer action panel, denial hint. Architect+ role required for governance actions. |
+| Portfolio | (v0.4) Exec-gated org rollup banner (score, certified/uncertified counts) + 4-level cascading filters (org → group → division → department) + search + status filter + project table (score bar, owner, last scan). Route: `/portfolio`. Role gate: `principal_architect`, `director`, `vp_engineering`, `group_executive`, or `is_admin`. |
 | Audit Timeline | Append-only feed from PostgreSQL — every `remember`, `forget`, `review`, and conflict resolution with SHA256 chain link |
-| Config Editor | Edit `quorum.config.json` for the current project. Validates against schema before PUT |
+| Config Editor | Edit `quorum.config.json` for the current project. Validates against schema before PUT. **Global Catalogs card** shows linked catalog details and entry counts inline. |
 | System Status | Live `/health` probe — PostgreSQL, Graphiti, FalkorDB, S3 component breakdown |
 
 ### Session Management
@@ -445,15 +448,25 @@ Pattern
 
 Constraint
   Properties: type (NFR/compliance/technical), source, impact, domain
-  Use for: non-functional requirements, compliance rules, limits
+  Use for: non-functional requirements, compliance rules, hard limits
 
 Runbook
   Properties: steps, triggers, rollback, domain
   Use for: operational procedures, incident playbooks, how-tos
 
 Requirement
-  Properties: acceptance_criteria, priority, source, domain
+  Properties: acceptance_criteria, priority, source, business_owner, domain
   Use for: business rules, feature requirements, acceptance criteria
+
+Standard (v0.4)
+  Properties: scope, rationale, exception_process, domain
+  Use for: org-wide baselines measured by conformance scoring; deviations require
+           formal PA approval. Preferred entity type for global catalog entries.
+
+Guideline (v0.4)
+  Properties: rationale, when_to_deviate, domain
+  Use for: recommended practices where exceptions are allowed with justification.
+           Advisory rather than mandatory — softer than Constraint or Standard.
 ```
 
 Edge types:

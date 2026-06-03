@@ -450,6 +450,42 @@ Replaces "write JSON, upload to S3 manually, wait for poll cycle, hope it worked
 
 ---
 
+### 9. Portfolio (v0.4 — GAP-028)
+
+Exec-gated org-wide intelligence page. Role gate: `principal_architect`, `director`, `vp_engineering`, `group_executive`, or `is_admin`. Engineers and architects receive 403 from `GET /api/portfolio`.
+
+**What it shows:**
+
+- **Rollup banner** — org conformance score (0–100 or `—`), `CERTIFIED`/`UNCERTIFIED` status label, certified count, uncertified count, total project count
+- **Cascading org filters** — 4 hierarchical dropdowns (org → group → division → department); each tier only enables when its parent is selected; resetting a parent clears all downstream selections
+- **Status filter** — CERTIFIED / UNCERTIFIED / All
+- **Text search** — filters by `group_id` or `display_name`
+- **Project count indicator** — "Showing N of M projects · org: X · ..."
+- **Project table** — one row per project: name + GLOBAL badge, `group_id` (subtitle), owner, last scan (relative date / Never), score bar (colour-coded), status badge
+
+**Score colour thresholds** (consistent with ConformanceCard):
+- Green: ≥80
+- Amber: 50–79
+- Red: <50
+- Grey (`—`): UNCERTIFIED / null
+
+**data-testid attributes** (used by S-22 browser tests):
+| Attribute | Element |
+|-----------|---------|
+| `portfolio-rollup` | Rollup banner wrapper |
+| `portfolio-score-badge` | Score number |
+| `portfolio-certified-count` | Certified count |
+| `portfolio-uncertified-count` | Uncertified count |
+| `portfolio-search` | Search input |
+| `portfolio-status-filter` | Status `<select>` |
+| `portfolio-table` | Project table wrapper |
+| `portfolio-row` | Each `<tr>` in table |
+| `portfolio-empty` | Empty state cell |
+
+**Admin archive DDB flush (v0.4 fix):** `DELETE /admin/projects/:groupId` now calls `syncProjectMembers(groupId, '', '', [])` after archiving — archived projects vanish from the project selector immediately rather than waiting for DDB TTL expiry.
+
+---
+
 ### 7. System Status
 
 Operational health at a glance. Surfaces the gaps identified in `ANALYSIS.md`.
@@ -718,6 +754,7 @@ dashboard/
     │   ├── search.js
     │   ├── config.js
     │   ├── deviations.js        ← useDeviations(filters) + useDeviationAction() (v0.4)
+    │   ├── conformance.js       ← useConformance() + usePortfolio(opts) (v0.4)
     │   └── health.js
     │
     ├── components/
@@ -785,6 +822,7 @@ dashboard/
         ├── Stats.jsx
         ├── Config.jsx
         ├── Deviations.jsx           ← v0.4 — deviation table + action panel
+        ├── Portfolio.jsx            ← v0.4 — org rollup + cascading filters + project table (GAP-028)
         └── Status.jsx
 ```
 
@@ -813,18 +851,18 @@ The `Knowledge.jsx` page exposes a "+ Add entry" button (PE only) and a `⋯` ro
 | Audit system | ████████████░░ | █████████████░ | Audit timeline + chain status visible |
 | Confidence / decay | ██████░░░░░░░░ | ██████████░░░░ | Decaying Knowledge panel + bump mechanic |
 
-**v0.4 capability additions (after Waves E–F):**
+**v0.4 capability additions (after Waves E–F + GAP-028):**
 
 | Capability bar | Before v0.4 | After v0.4 | What moves it |
 |---------------|-------------|------------|---------------|
 | Conformance visibility | ░░░░░░░░░░░░░░ | ████████████░░ | ConformanceCard in Stats + Deviations page |
 | PE deviation governance | ░░░░░░░░░░░░░░ | ████████████░░ | Deviations page action panel |
-| Portfolio intelligence | ░░░░░░░░░░░░░░ | ████████░░░░░░ | `GET /api/portfolio` (API only; full portfolio UI deferred) |
+| Portfolio intelligence | ░░░░░░░░░░░░░░ | ██████████████ | `Portfolio.jsx` — rollup banner, cascading org filters, project table (GAP-028 ✅) |
 | Overdue accountability | ░░░░░░░░░░░░░░ | ████████████░░ | Overdue deferrals section in Pending page |
 
 **Remaining gaps after v0.4 (ignoring external integrations):**
 - Notification system: browser polling covers open-tab scenario — full push (webhook/Slack) is a future enhancement
-- Portfolio page: `GET /api/portfolio` ships in v0.4 — full UI (sorting, filtering, CSV export, drill-down) deferred to v0.5
+- Config diff view: GAP-033 (P6) — show what changed when saving config (deferred)
 - Constitutional CI: GAP-02 (minor)
 
 ---

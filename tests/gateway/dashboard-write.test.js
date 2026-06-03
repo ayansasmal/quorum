@@ -41,6 +41,7 @@ vi.mock('../../gateway/src/shared/graph/queries.js', () => ({
   getBumpLog:             vi.fn(),
   recordBump:             vi.fn(),
   updateConfidence:       vi.fn(),
+  incrementDomainStat:    vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../gateway/src/shared/audit/secondary.js', () => ({

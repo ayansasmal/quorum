@@ -15,6 +15,8 @@ Visual interface for engineering teams to:
 - View the **knowledge graph** (Cytoscape.js)
 - Review and resolve **pending decisions** (conflict queue)
 - Browse **knowledge versions** with status and confidence
+- Manage **deviations** from global catalog standards (accept / deny / defer)
+- Track **portfolio conformance** across the org hierarchy (exec-gated)
 - Inspect the **audit timeline** (tamper-evident chain)
 - Edit **project config** with JSON Schema validation
 - Monitor **system status** (Graphiti, PostgreSQL, gateway)
@@ -28,13 +30,16 @@ src/
   App.jsx                 — Router setup, auth guard
   main.jsx                — Vite entry point
   pages/
-    Stats.jsx             — Overview stats + metrics
+    Stats.jsx             — Overview stats + metrics + ConformanceCard (v0.4)
     Graph.jsx             — Knowledge graph (Cytoscape.js)
-    Pending.jsx           — Pending decisions queue
-    Knowledge.jsx         — Knowledge browser (version list)
+    Pending.jsx           — Pending decisions queue + overdue deferrals (v0.4)
+    Knowledge.jsx         — Knowledge browser (version list) + denial_hint_count badge (v0.4)
+    Deviations.jsx        — Deviation table + inline accept/deny/defer action panel (v0.4)
+    Portfolio.jsx         — Org rollup banner + 4-level cascading filters + project table (v0.4)
     Audit.jsx             — Audit timeline
-    Config.jsx            — Project config editor (JSON Schema validated)
+    Config.jsx            — Project config editor + Global Catalogs card (v0.4)
     Status.jsx            — System health status
+    Admin.jsx             — Platform admin panel
     Login.jsx             — GitHub OAuth entry point
     ProjectSelector.jsx   — Project search + switch
   components/

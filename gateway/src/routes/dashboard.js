@@ -35,6 +35,7 @@ import {
   insertDeviationAction,
   getConformanceScore,
   getPortfolioScores,
+  incrementDomainStat,
 } from '../shared/graph/queries.js'
 import { DEFAULT_ROLE_SCORES } from '../shared/governance/authority.js'
 import { searchNodes, searchFacts, normalizeGroupId } from '../shared/graph/client.js'
@@ -1035,6 +1036,28 @@ router.post('/review/:conflictId', async (req, res, next) => {
           note, resolvedBy: reviewer, mergedContent: merged_content,
         })
         await client.query('COMMIT')
+
+        // Increment stats on successful commit
+        if (mergedVersion && mergedVersion.status === 'ACTIVE') {
+          incrementDomainStat(pool, {
+            qProjectId,
+            author: reviewer,
+            domain: conflictTopic,
+            field: 'approved_count',
+          }).catch((err) => {
+            console.error(`Failed to increment approved_count for ${reviewer}/${conflictTopic}: ${err.message}`)
+          })
+        }
+        if (currentActive) {
+          incrementDomainStat(pool, {
+            qProjectId,
+            author: currentActive.author,
+            domain: conflictTopic,
+            field: 'superseded_count',
+          }).catch((err) => {
+            console.error(`Failed to increment superseded_count for ${currentActive.author}/${conflictTopic}: ${err.message}`)
+          })
+        }
       } catch (txErr) {
         await client.query('ROLLBACK')
         throw txErr
@@ -1111,6 +1134,30 @@ router.post('/review/:conflictId', async (req, res, next) => {
       })
 
       await client.query('COMMIT')
+
+      // Increment stats on successful commit
+      if (action === 'approve') {
+        if (draftVersion) {
+          incrementDomainStat(pool, {
+            qProjectId,
+            author: draftVersion.author,
+            domain: conflictTopic,
+            field: 'approved_count',
+          }).catch((err) => {
+            console.error(`Failed to increment approved_count for ${draftVersion.author}/${conflictTopic}: ${err.message}`)
+          })
+        }
+        if (currentActive) {
+          incrementDomainStat(pool, {
+            qProjectId,
+            author: currentActive.author,
+            domain: conflictTopic,
+            field: 'superseded_count',
+          }).catch((err) => {
+            console.error(`Failed to increment superseded_count for ${currentActive.author}/${conflictTopic}: ${err.message}`)
+          })
+        }
+      }
     } catch (txErr) {
       await client.query('ROLLBACK')
       throw txErr

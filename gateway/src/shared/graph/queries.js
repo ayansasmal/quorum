@@ -745,7 +745,7 @@ export async function getBumpLog(pg, { qKeyId, author, limit = 1 } = {}) {
 // ── Domain track record (author_domain_stats) ────────────────────────────────
 
 /**
- * @typedef {'approved_count' | 'recalled_count' | 'superseded_count'} DomainStatField
+ * @typedef {'approved_count' | 'recalled_count' | 'superseded_count' | 'write_count'} DomainStatField
  */
 
 /**
@@ -778,12 +778,12 @@ export async function incrementDomainStat(pg, { qProjectId, author, domain, fiel
  * Fetch domain track record stats for a given author and domain.
  * @param {import('pg').Pool} pg
  * @param {{ qProjectId: string, author: string, domain: string }} options
- * @returns {Promise<{ approved_count: number, recalled_count: number, superseded_count: number } | null>}
+ * @returns {Promise<{ approved_count: number, recalled_count: number, superseded_count: number, write_count: number } | null>}
  */
 export async function getDomainStats(pg, { qProjectId, author, domain }) {
   if (typeof pg.getDomainStats === 'function') return pg.getDomainStats({ qProjectId, author, domain })
   const { rows } = await pg.query(
-    `SELECT approved_count, recalled_count, superseded_count
+    `SELECT approved_count, recalled_count, superseded_count, write_count
      FROM author_domain_stats
      WHERE author = $1 AND q_project_id = $2 AND domain = $3`,
     [author, qProjectId, domain],

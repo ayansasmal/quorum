@@ -52,6 +52,7 @@ ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_global    BOOLEAN NOT NULL DE
 ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS is_archived  BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS archived_at  TIMESTAMPTZ;
 ALTER TABLE q_projects ADD COLUMN IF NOT EXISTS archived_by  TEXT;
+ALTER TABLE author_domain_stats ADD COLUMN IF NOT EXISTS write_count INTEGER NOT NULL DEFAULT 0;
 -- Partial index for GET /api/globals discovery — only indexes global catalog rows.
 -- Must be declared after ADD COLUMN IF NOT EXISTS so it works on existing schemas.
 CREATE INDEX IF NOT EXISTS idx_qp_is_global   ON q_projects (is_global)   WHERE is_global = TRUE;
@@ -258,6 +259,7 @@ CREATE TABLE IF NOT EXISTS author_domain_stats (
   approved_count   INTEGER NOT NULL DEFAULT 0,
   recalled_count   INTEGER NOT NULL DEFAULT 0,
   superseded_count INTEGER NOT NULL DEFAULT 0,
+  write_count      INTEGER NOT NULL DEFAULT 0,
   last_updated     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (author, q_project_id, domain)
 );

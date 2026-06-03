@@ -65,6 +65,7 @@ import {
   getDraftVersions,
   getPendingDecisionById,
   countPendingForKey,
+  incrementDomainStat,
 } from '../shared/graph/queries.js'
 import {
   writeAuditEntry,
@@ -262,6 +263,16 @@ router.get('/versions/:topic/:key', async (req, res, next) => {
   try {
     const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
     const version = await getCurrentVersion(pool, qKeyId)
+    if (version && version.status === 'ACTIVE') {
+      incrementDomainStat(pool, {
+        qProjectId: req.user.qProjectId,
+        author: version.author,
+        domain: topic,
+        field: 'recalled_count',
+      }).catch((err) => {
+        console.error(`Failed to increment recalled_count for ${version.author}/${topic}: ${err.message}`)
+      })
+    }
     res.json(version)
   } catch (err) {
     next(err)
@@ -439,6 +450,28 @@ router.post('/versions/supersede', async (req, res, next) => {
 
     await client.query('COMMIT')
 
+    // Increment stats after successful commit
+    if (inserted && inserted.status === 'ACTIVE') {
+      incrementDomainStat(pool, {
+        qProjectId,
+        author: inserted.author,
+        domain: topic,
+        field: 'approved_count',
+      }).catch((err) => {
+        console.error(`Failed to increment approved_count for ${inserted.author}/${topic}: ${err.message}`)
+      })
+    }
+    if (transitioned) {
+      incrementDomainStat(pool, {
+        qProjectId,
+        author: transitioned.author,
+        domain: topic,
+        field: 'superseded_count',
+      }).catch((err) => {
+        console.error(`Failed to increment superseded_count for ${transitioned.author}/${topic}: ${err.message}`)
+      })
+    }
+
     res.json({
       inserted: true,
       new_version: inserted,
@@ -555,6 +588,26 @@ router.post('/versions', async (req, res, next) => {
     }
 
     const inserted = await insertVersion(pool, record)
+    if (inserted) {
+      incrementDomainStat(pool, {
+        qProjectId,
+        author: inserted.author,
+        domain: topic,
+        field: 'write_count',
+      }).catch((err) => {
+        console.error(`Failed to increment write_count for ${inserted.author}/${topic}: ${err.message}`)
+      })
+      if (inserted.status === 'ACTIVE') {
+        incrementDomainStat(pool, {
+          qProjectId,
+          author: inserted.author,
+          domain: topic,
+          field: 'approved_count',
+        }).catch((err) => {
+          console.error(`Failed to increment approved_count for ${inserted.author}/${topic}: ${err.message}`)
+        })
+      }
+    }
     res.status(201).json(inserted)
   } catch (err) { next(err) }
 })
@@ -593,6 +646,27 @@ router.patch('/versions/:topic/:key/:version', async (req, res, next) => {
     const qKeyId = await resolveKey(pool, req.user.qProjectId, topic, key)
     const versionId = `${qKeyId}_v${parseInt(version, 10)}`
     const updated = await transitionVersionStatus(pool, versionId, newStatus, forwardLink ?? null)
+    if (updated) {
+      if (newStatus === 'ACTIVE') {
+        incrementDomainStat(pool, {
+          qProjectId: req.user.qProjectId,
+          author: updated.author,
+          domain: topic,
+          field: 'approved_count',
+        }).catch((err) => {
+          console.error(`Failed to increment approved_count for ${updated.author}/${topic}: ${err.message}`)
+        })
+      } else if (newStatus === 'SUPERSEDED') {
+        incrementDomainStat(pool, {
+          qProjectId: req.user.qProjectId,
+          author: updated.author,
+          domain: topic,
+          field: 'superseded_count',
+        }).catch((err) => {
+          console.error(`Failed to increment superseded_count for ${updated.author}/${topic}: ${err.message}`)
+        })
+      }
+    }
     res.json(updated)
   } catch (err) {
     next(err)
