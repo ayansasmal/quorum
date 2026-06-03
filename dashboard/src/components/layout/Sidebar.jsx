@@ -8,7 +8,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   BarChart2, GitBranch, Clock, BookOpen,
-  List, Settings, Activity, LogOut, Shield, AlertTriangle,
+  List, Settings, Activity, LogOut, Shield, AlertTriangle, TrendingUp,
 } from 'lucide-react'
 import { cn }       from '../../lib/utils.js'
 import { useAuth }  from '../../context/AuthContext.jsx'
@@ -19,6 +19,7 @@ const NAV = [
   { to: '/graph',     icon: GitBranch, label: 'Graph',     guestOk: true  },
   { to: '/pending',    icon: List,          label: 'Pending',    badge: true    },
   { to: '/deviations', icon: AlertTriangle, label: 'Deviations'                 },
+  { to: '/portfolio',  icon: TrendingUp,   label: 'Portfolio'                  },
   { to: '/knowledge', icon: BookOpen,  label: 'Knowledge', guestOk: true  },
   { to: '/audit',     icon: Clock,     label: 'Audit'                     },
   { to: '/config',    icon: Settings,  label: 'Config'                    },

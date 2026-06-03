@@ -8,6 +8,7 @@ const PAGE_TITLES = {
   '/graph':     'Knowledge Graph',
   '/pending':    'Pending Decisions',
   '/deviations': 'Deviations',
+  '/portfolio':  'Portfolio Intelligence',
   '/knowledge': 'Knowledge Browser',
   '/audit':     'Audit Timeline',
   '/config':    'Config Editor',
