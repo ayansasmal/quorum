@@ -139,13 +139,13 @@ export default function Portfolio() {
     <div className="space-y-5 max-w-6xl">
 
       {/* ── Rollup banner ─────────────────────────────────────── */}
-      <div className={`flex items-center gap-6 rounded-lg border ${bannerClass} px-5 py-4`}>
+      <div data-testid="portfolio-rollup" className={`flex items-center gap-6 rounded-lg border ${bannerClass} px-5 py-4`}>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-1">
             Org conformance score
           </p>
           <div className="flex items-baseline gap-2">
-            <span className={`text-3xl font-black ${rollupColor}`}>
+            <span data-testid="portfolio-score-badge" className={`text-3xl font-black ${rollupColor}`}>
               {rollup?.score ?? '—'}
             </span>
             <span className={`text-xs font-semibold ${rollupColor}`}>
@@ -158,12 +158,12 @@ export default function Portfolio() {
 
         <div className="flex gap-6 text-center">
           {[
-            { label: 'Certified',   value: rollup?.certified_count   ?? 0, color: 'text-green-600 dark:text-green-400' },
-            { label: 'Uncertified', value: rollup?.uncertified_count ?? 0, color: 'text-gray-500 dark:text-gray-400'  },
-            { label: 'Total',       value: projects.length,                color: 'text-gray-800 dark:text-gray-200'  },
-          ].map(({ label, value, color }) => (
+            { label: 'Certified',   testId: 'portfolio-certified-count',   value: rollup?.certified_count   ?? 0, color: 'text-green-600 dark:text-green-400' },
+            { label: 'Uncertified', testId: 'portfolio-uncertified-count', value: rollup?.uncertified_count ?? 0, color: 'text-gray-500 dark:text-gray-400'  },
+            { label: 'Total',       testId: null,                          value: projects.length,                color: 'text-gray-800 dark:text-gray-200'  },
+          ].map(({ label, value, color, testId }) => (
             <div key={label}>
-              <div className={`text-xl font-bold ${color}`}>{value}</div>
+              <div className={`text-xl font-bold ${color}`} {...(testId ? { 'data-testid': testId } : {})}>{value}</div>
               <div className="text-[9px] uppercase tracking-widest text-gray-400 dark:text-gray-500">{label}</div>
             </div>
           ))}
@@ -200,13 +200,14 @@ export default function Portfolio() {
           ))}
         </select>
 
-        <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className={SELECT_CLS}>
+        <select data-testid="portfolio-status-filter" value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className={SELECT_CLS}>
           <option value="">Status: All</option>
           <option value="CERTIFIED">CERTIFIED</option>
           <option value="UNCERTIFIED">UNCERTIFIED</option>
         </select>
 
         <input
+          data-testid="portfolio-search"
           type="text"
           placeholder="Search by name or group_id…"
           value={query}
@@ -230,7 +231,7 @@ export default function Portfolio() {
       </p>
 
       {/* ── Project table ───────────────────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden dark:border-gray-800 dark:bg-gray-900">
+      <div data-testid="portfolio-table" className="rounded-lg border border-gray-200 bg-white overflow-hidden dark:border-gray-800 dark:bg-gray-900">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
             <tr>
@@ -244,12 +245,12 @@ export default function Portfolio() {
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
+                <td data-testid="portfolio-empty" colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
                   No projects match the current filters.
                 </td>
               </tr>
             ) : filtered.map(p => (
-              <tr key={p.group_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+              <tr data-testid="portfolio-row" key={p.group_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
                 {/* Project */}
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">

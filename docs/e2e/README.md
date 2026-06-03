@@ -33,8 +33,9 @@ Each journey is its own file. Read the journey before implementing its spec file
 | J19 — Authentication Lifecycle | S-19 | 113 | 113 | ⛔ | [J19](journeys/J19-auth-lifecycle.md) |
 | J20 — Cross-Catalog Search | S-20 | 96 | 96 | 🟡 | [J20](journeys/J20-cross-catalog-search.md) |
 | J21 — MCP Layer Gateway Contracts | S-21 | 90 | 124 | 🟡 | [J21](journeys/J21-mcp-layer-contracts.md) |
+| J22 — Portfolio Intelligence UI | S-22 | 75 | 150 | 🟡 | [J22](journeys/J22-portfolio-intelligence.md) |
 
-**Suite OwnScore: 3530 | 10% gate: 353 pts | Max single FailureCost: 970 (S-05.1) | Hard block: any ⛔ failure**
+**Suite OwnScore: 3605 | 10% gate: 361 pts | Max single FailureCost: 970 (S-05.1) | Hard block: any ⛔ failure**
 
 > J02 has 8 sub-scenarios spanning four different pillars (Governance ⛔, Data Integrity ⛔,
 > Functional 🟡, Developer Experience 🟡). See [TEST-PLAN.md](TEST-PLAN.md)

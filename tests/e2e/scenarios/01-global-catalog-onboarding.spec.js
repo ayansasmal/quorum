@@ -261,4 +261,17 @@ describe('S-01 — Global Catalog Onboarding', () => {
     expect(projectEntries.some(e => e.key === tokenKey)).toBe(false)
   })
 
+  afterAll(async () => {
+    // Archive the timestamp-suffixed configs created by this spec so they do not
+    // accumulate in DDB across runs and bloat the project selector for test users.
+    const adminHeader = { Authorization: `Bearer ${tokens.admin}`, 'Content-Type': 'application/json' }
+    for (const id of [CATALOG, PROJECT]) {
+      await http.delete(`/admin/projects/${id}`, {
+        data:           { reason: 'E2E test cleanup — j01 timestamp config removed after S-01 suite' },
+        headers:        adminHeader,
+        validateStatus: () => true,
+      })
+    }
+  })
+
 })

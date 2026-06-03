@@ -18,6 +18,7 @@
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
 import { loadAdminConfig, saveAdminConfig, invalidateProject } from '../config-cache.js'
+import { syncProjectMembers } from '../ddb.js'
 import { writeGovernanceAudit } from '../shared/audit/governance.js'
 import { enforceReasonRequired } from '../shared/governance/constitutional.js'
 
@@ -169,6 +170,9 @@ router.delete('/projects/:groupId', verifyJwt, requireAdmin, async (req, res, ne
 
     // Invalidate config cache so subsequent requests see the archived state
     await invalidateProject(groupId)
+
+    // Flush DDB membership rows so the project disappears from every user's project selector
+    await syncProjectMembers(groupId, '', '', [])
 
     await writeGovernanceAudit(pool, {
       actor:      req.user.sub,

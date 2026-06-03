@@ -4,6 +4,7 @@
 *Updated: 2026-05-29 | Gateway unit tests: 704 | E2E: 550 passed | GAP-005 deferred; GAP-006 ✅; GAP-007 ✅; GAP-008 ✅ (PUT /config/:projectId + S-13.6); P2 gaps all closed: GAP-009 ✅ GAP-010 ✅ GAP-011 ✅ GAP-012 ✅ GAP-013 ✅; P3 gaps all closed: GAP-014 ✅ GAP-015 ✅ GAP-016 ✅ GAP-017 ✅; P4 all closed: GAP-018 ✅ GAP-019 ✅ GAP-020 ✅ GAP-021 ✅ GAP-022 ✅*
 *Updated: 2026-06-02 | E2E: 560 passed | P5 all closed: GAP-023 ✅ GAP-024 ✅ GAP-025 ✅ GAP-026 ✅ GAP-027 ✅ — browser tests added for config save success (S-14.2 step 3), knowledge history drawer (S-16.6), search UI (S-20.8), overdue deferrals (S-04.9), dark mode toggle (S-14.6); POST /pg/deviation-actions admin seeding endpoint added; full-page screenshots enabled (playwright.config.js)*
 *Updated: 2026-06-02 | P6 design decisions: GAP-030 ✅ accepted risk (1h JWT TTL, no refresh tokens, automatic PKCE re-auth); GAP-032 ✅ on-demand by design (leadership/process-triggered, quorum:scan skill is the interface); GAP-029 deferred (no comms notifications required at current stage). Remaining open P6: GAP-028 (portfolio UI), GAP-033 (config diff view). GAP-031 (history bulk export) deferred — per-key history available via API, bulk export not needed until external compliance tool integration is required*
+*Updated: 2026-06-03 | GAP-028 ✅ closed — Portfolio.jsx fully implemented + S-22 browser E2E coverage (8 sub-scenarios, OwnScore 66). Remaining open P6: GAP-033 (config diff view).*
 *Source: journey-story-28-05-2026.md — all 21 journeys, J01–J21*
 
 ---
@@ -18,7 +19,7 @@
 | P3 | Governance workflow completeness | 5 → 0 (all closed) |
 | P4 | Operational / observability | 6 → 0 (all closed) |
 | P5 | UI/UX completeness | 7 → 0 (all closed) |
-| P6 | Not yet built (v0.5+ or design decision required) | 6 → 2 open (GAP-030 ✅; GAP-032 ✅; GAP-029/031 deferred) |
+| P6 | Not yet built (v0.5+ or design decision required) | 6 → 1 open (GAP-028 ✅; GAP-030 ✅; GAP-032 ✅; GAP-029/031 deferred) |
 | **Total** | | **38** |
 
 ### Test type key
@@ -1259,13 +1260,14 @@ test('S-14.6 dark mode toggle applies dark class to html element', async () => {
 
 ---
 
-### GAP-028 — Portfolio full-page UI
+### GAP-028 ✅ — Portfolio full-page UI (closed — S-22)
 
-**Journeys:** J07 | **Risk:** P6 | **Effort:** L
+**Journeys:** J07, J22 | **Risk:** P6 | **Effort:** L | **Closed:** 2026-06-03
 
-`GET /api/portfolio` is tested (S-07.4). Dashboard has no Portfolio page with
-sorting, filtering, project drill-down, or UNCERTIFIED breakdown. Planned for v0.5+.
-Test: E2E-UI once page is built.
+`Portfolio.jsx` fully implemented (hierarchy filters, search, status filter, score table,
+rollup banner). `data-testid` attributes added to all interactive elements. S-22 adds
+4 API sub-scenarios (role gate, shape, UNCERTIFIED rollup, node_id filter) and 4 browser
+sub-scenarios (render, table rows, search, status filter). OwnScore: 66, FailureCost: 141.
 
 ---
 

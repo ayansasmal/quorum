@@ -239,10 +239,11 @@ Gate tier: ⛔ = zero-tolerance hard block | 🟡 = score-gated.
 | S-19 | J19 | 15 | 3 | 45 | Security ⛔ | 2.5 | 1.0 | **113** | — | **113** | ⛔ |
 | S-20 | J20 | 16 | 4 | 64 | Federation | 1.0 | 1.5 | **96** | — | **96** | 🟡 |
 | S-21 | J21 | 20 | 3 | 60 | Operational | 1.5 | 1.0 | **90** | S-01 | **124** | 🟡 |
-| **Total** | | | | **1302** | | | | **3530** | | | |
+| S-22 | J22 | 25 | 2 | 50 | Observability | 1.0 | 1.5 | **75** | S-07 | **150** | 🟡 |
+| **Total** | | | | **1352** | | | | **3605** | | | |
 
-> **W column sum = 1302** (was 1231 before S-05.7/5.8/5.9 (+47); S-11 leaf 10→16 adds +24 for S-11.4 coexist_merge).
-> **OwnScore total = 3530.** The C × D multipliers reflect severity and detection lag on top of frequency.
+> **W column sum = 1352** (was 1302 before S-22 (+50); was 1231 before S-05.7/5.8/5.9 (+47); S-11 leaf 10→16 adds +24 for S-11.4 coexist_merge).
+> **OwnScore total = 3605.** The C × D multipliers reflect severity and detection lag on top of frequency.
 
 ---
 
