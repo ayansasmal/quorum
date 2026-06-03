@@ -64,7 +64,7 @@ function config(groupId, displayName, nodeId) {
     is_global:    true,
     global_scope: 'org',
     hierarchy: {
-      level:        'group',
+      level:        'service',
       node_id:      nodeId,
       display_name: displayName,
       criticality:  5,
