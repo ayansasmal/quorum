@@ -67,12 +67,13 @@ function config(groupId, displayName, nodeId) {
       level:        'group',
       node_id:      nodeId,
       display_name: displayName,
-      criticality:  10,
+      criticality:  5,
     },
     members: [{
       name:            OWNER,
       github_username: OWNER,
       role:            'principal_architect',
+      team:            'platform',
     }],
     roles: {
       principal_architect: { base_confidence: 0.95 },
