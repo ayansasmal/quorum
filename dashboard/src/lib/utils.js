@@ -35,14 +35,16 @@ export function confidenceBg(value) {
   return 'bg-red-500'
 }
 
-/** Entity type → Tailwind colour. Matches tailwind.config.js custom colours. */
+/** Entity type → Tailwind colour. Light-mode-first + dark: overrides. */
 export const ENTITY_COLORS = {
-  Decision:    'text-blue-400    bg-blue-900/30   border-blue-700',
-  Pattern:     'text-green-400   bg-green-900/30  border-green-700',
-  Constraint:  'text-amber-400   bg-amber-900/30  border-amber-700',
-  Runbook:     'text-purple-400  bg-purple-900/30 border-purple-700',
-  Requirement: 'text-teal-400    bg-teal-900/30   border-teal-700',
-  unknown:     'text-gray-500    bg-gray-800/30   border-gray-700',
+  Decision:    'text-blue-700   bg-blue-50    border-blue-300   dark:text-blue-400   dark:bg-blue-900/30   dark:border-blue-700',
+  Pattern:     'text-green-700  bg-green-50   border-green-300  dark:text-green-400  dark:bg-green-900/30  dark:border-green-700',
+  Constraint:  'text-amber-800  bg-amber-50   border-amber-300  dark:text-amber-400  dark:bg-amber-900/30  dark:border-amber-700',
+  Runbook:     'text-purple-700 bg-purple-50  border-purple-300 dark:text-purple-400 dark:bg-purple-900/30 dark:border-purple-700',
+  Requirement: 'text-teal-700   bg-teal-50    border-teal-300   dark:text-teal-400   dark:bg-teal-900/30   dark:border-teal-700',
+  Standard:    'text-indigo-700 bg-indigo-50  border-indigo-300 dark:text-indigo-400 dark:bg-indigo-900/30 dark:border-indigo-700',
+  Guideline:   'text-cyan-700   bg-cyan-50    border-cyan-300   dark:text-cyan-400   dark:bg-cyan-900/30   dark:border-cyan-700',
+  unknown:     'text-gray-600   bg-gray-100   border-gray-300   dark:text-gray-500   dark:bg-gray-800/30   dark:border-gray-700',
 }
 
 /** Entity type badge colour. */
