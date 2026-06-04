@@ -4,7 +4,7 @@
 > Stories describe what Quorum *demonstrably does* — validated by passing tests.
 > Gaps call out what is not yet verified end-to-end (coverage missing, manual-only, or planned).
 >
-> **~600 tests. 22 journeys. 0 failures.**
+> **~600 E2E tests + 54 MCP integration tests. 22 journeys. 0 failures.**
 >
 > **What's new since 28 May 2026:**
 > - Journey 22 (Portfolio Intelligence) added — was missing from the May story
@@ -12,6 +12,8 @@
 >   These cover **wrong-order state transitions** (e.g. re-reviewing an already-resolved conflict)
 >   and **cross-project isolation** (e.g. using the wrong `X-Quorum-Project` header to access another project's resources)
 > - OwnScore: 3605 → **3946**; 10 % gate: 353 → **395**; 5 % gate: 177 → **197**
+> - **MCP integration suite (54/54) now fully automated** — all 6 MCP journeys (J-MCP-01 through J-MCP-06) pass against the live gateway stack via `InMemoryTransport`; the MCP stdio protocol is no longer manual-only.
+>   See companion doc: [`quorum-mcp/docs/journey-story-04-06-2026-mcp.md`](../../../quorum-mcp/docs/journey-story-04-06-2026-mcp.md)
 >
 > Status legend:
 > - ✅ Verified end-to-end (API test, green in suite)
@@ -731,7 +733,7 @@ A single search query hits both the project's own knowledge and all linked globa
 
 | Gap | Notes |
 |-----|-------|
-| ❌ MCP `remember()` end-to-end via MCP client | All S-21 tests are HTTP; the actual `stdio` MCP protocol is MT-01–MT-06 |
+| ✅ MCP `remember()` end-to-end via MCP client | All 6 MCP journeys now automated (54/54) via `InMemoryTransport` — see `quorum-mcp/docs/journey-story-04-06-2026-mcp.md` |
 
 ---
 
@@ -778,7 +780,7 @@ The Portfolio dashboard shows a rollup banner (org-wide conformance score, certi
 |---------|----------------|----------|
 | GitHub OAuth browser login | `routes/auth.js` browser flow | 🔶 MT-11 only |
 | PKCE OAuth 2.1 MCP flow | `routes/mcp-oauth.js` | 🔶 MT-12 only |
-| MCP stdio protocol (`remember`, `recall`, `reflect`, etc.) | `quorum-mcp` | 🔶 MT-01–MT-06 only |
+| MCP stdio protocol (`remember`, `recall`, `reflect`, etc.) | `quorum-mcp` | ✅ Automated — 54/54 integration tests (M-01–M-06) via `InMemoryTransport` against live gateway |
 | Graphiti semantic vector search | `routes/graphiti.js` proxy | Unit test + 🔶 MT-13 |
 | Confidence decay script | `scripts/decay.js` | Unit tested (decay.test.js); no E2E |
 | Audit chain verification CLI | `scripts/audit-cli.js verify` | ❌ None (API endpoint tested in S-10.11) |
@@ -874,7 +876,10 @@ All 10 new sub-scenarios are in the ⛔ (zero-tolerance) gate tier. A failure in
 
 ---
 
-*Generated: 04 June 2026 — reflects suite state at ~600 passed, 0 failed, 1 skipped.*
-*Suite run command: `npm run test:e2e`*
+*Generated: 04 June 2026 — updated 05 June 2026 to reflect MCP integration test completion.*
+*E2E suite: ~600 passed, 0 failed, 1 skipped (`npm run test:e2e`)*
+*MCP integration suite: 54/54 passed (`npm run test:integration` in `quorum-mcp/`)*
+*Combined gateway unit (704) + quorum-mcp unit (629) + E2E (~600) + MCP integration (54) = ~1,987 total passing tests.*
 *Log location: `logs/test-e2e-YYYYMMDD-HHMMSS.log`*
 *Previous version: [journey-story-28-05-2026.md](journey-story-28-05-2026.md)*
+*MCP integration stories: [quorum-mcp/docs/journey-story-04-06-2026-mcp.md](../../../quorum-mcp/docs/journey-story-04-06-2026-mcp.md)*

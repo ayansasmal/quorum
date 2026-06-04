@@ -55,7 +55,8 @@
     "test:e2e:docker:run": "sh scripts/e2e-docker.sh run",
     "test:e2e:docker:down": "sh scripts/e2e-docker.sh down",
     "test:e2e:docker:clean": "sh scripts/e2e-docker.sh clean",
-    "test:e2e:docker:logs": "docker compose -f docker-compose.e2e.yml logs -f test-runner"
+    "test:e2e:docker:logs": "docker compose -f docker-compose.e2e.yml logs -f test-runner",
+    "test:e2e:mcp": "docker compose -f docker-compose.e2e.yml run --rm mcp-test-runner"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",

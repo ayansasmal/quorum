@@ -270,3 +270,36 @@ services:
         condition: service_healthy
       dashboard:
         condition: service_healthy
+
+  # ── MCP integration test runner ─────────────────────────────────────────────
+  #
+  # Runs quorum-mcp/tests/integration/**/*.test.js via Vitest against the live
+  # gateway. The qc/ parent workspace is bind-mounted at /workspace so the
+  # relative import chain in tokens.js resolves correctly:
+  #   quorum-mcp/tests/integration/helpers/tokens.js
+  #     → ../../../../quorum/tests/e2e/helpers/jwt.js
+  #     → /workspace/quorum/tests/e2e/helpers/jwt.js  ✓
+  # jwt.js then reads test-private-key.pem from its fixtures/ sibling dir ✓
+  #
+  # Start via:  docker compose -f docker-compose.e2e.yml run --rm mcp-test-runner
+  # Or:         npm run test:e2e:mcp (from quorum/)
+  mcp-test-runner:
+    build:
+      context: ../quorum-mcp
+      dockerfile: Dockerfile.mcp-test
+    networks: [e2e]
+    working_dir: /workspace/quorum-mcp
+    environment:
+      # Gateway URL via Docker internal DNS
+      - QUORUM_GATEWAY_URL=http://gateway:3001
+      - NODE_ENV=test
+    volumes:
+      # Bind-mount the qc/ parent so both quorum/ and quorum-mcp/ are available.
+      # quorum-mcp source → /workspace/quorum-mcp
+      # quorum test helpers → /workspace/quorum/tests/e2e/helpers
+      - ..:/workspace
+      # Anonymous volume: Alpine-compiled node_modules shadow the macOS ones.
+      - /workspace/quorum-mcp/node_modules
+    depends_on:
+      gateway:
+        condition: service_healthy
