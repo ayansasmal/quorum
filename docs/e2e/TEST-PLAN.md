@@ -5,6 +5,8 @@
 **Suite OwnScore:** 3946 pts | **10% gate:** 395 pts | **5% gate:** 197 pts
 **Hard block:** any failure in Governance Integrity, Security, or Data Integrity pillar
 
+> **MCP integration layer:** The MCP protocol path (JSON-RPC → tool handler → real gateway) has its own test plan at [`quorum-mcp/docs/MCP-TEST-PLAN.md`](../../../quorum-mcp/docs/MCP-TEST-PLAN.md) — 6 journeys (M-01–M-06), 54 leaves, OwnScore 655, same OwnScore/FailureCost model.
+
 > **For agentic workers (CI, coding agents, deployment pipelines):**
 > Read §2 (Quick Reference) first. §8 gives the agent JSON format. §7 gives the fix priority
 > ranking — sort by `fix_priority_score` descending and work top to bottom.

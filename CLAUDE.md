@@ -385,6 +385,7 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component design, Graphiti integration, versioning model, governance flows, entity schema |
 | [TESTING.md](docs/TESTING.md) | Constitutional coverage, unit test strategy, mocking, CI enforcement |
 | [docs/e2e/TEST-PLAN.md](docs/e2e/TEST-PLAN.md) | E2E risk-weighted test plan — OwnScore/FailureCost model, dependency graph, fix priority |
+| [quorum-mcp/docs/MCP-TEST-PLAN.md](../quorum-mcp/docs/MCP-TEST-PLAN.md) | MCP integration test plan — 6 journeys (M-01–M-06), 54 leaves, OwnScore 655; tests MCP JSON-RPC → tool handler → real gateway |
 | [docs/e2e/README.md](docs/e2e/README.md) | E2E journey index, scenario IDs, running tests, graph reporter |
 | [docs/e2e/MANUAL-TESTS.md](docs/e2e/MANUAL-TESTS.md) | Manual test scenarios not automatable via HTTP (LLM quality, MCP client, OAuth browser) |
 | [docs/e2e/TOKENS.md](docs/e2e/TOKENS.md) | JWT developer tooling — minting test tokens, token contents, CLI examples |
