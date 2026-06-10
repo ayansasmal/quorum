@@ -15,7 +15,9 @@ complete environment: network, EKS cluster, managed data services, IAM/IRSA, sec
 and the Quorum application workloads themselves.
 
 This extends the existing LocalStack-targeted Crossplane setup in [`crossplane/`](../../../crossplane/)
-to a real-AWS production footprint, and replaces the OpenAI dependency with AWS Bedrock.
+to a real-AWS production footprint. The LLM/embedding provider stays **OpenAI** (Graphiti has no AWS
+Bedrock client — see §7); the OpenAI API key is provisioned through Secrets Manager + ESO rather than
+committed anywhere.
 
 ### Non-goals
 
@@ -31,12 +33,12 @@ to a real-AWS production footprint, and replaces the OpenAI dependency with AWS 
 
 | # | Decision | Choice |
 |---|----------|--------|
-| 1 | **Scope** Crossplane owns | Everything: VPC, EKS, IRSA, ALB, Bedrock, Route53/ACM, Secrets Manager |
+| 1 | **Scope** Crossplane owns | Everything: VPC, EKS, IRSA, ALB, Route53/ACM, Secrets Manager |
 | 2 | **Control plane location** | Local (Docker Desktop / kind), permanent — provisions into real AWS |
 | 3 | **IaC structure** | Compositions + XRDs, one `Claim` per environment |
 | 4 | **Composition decomposition** | Flat-composition-first (one Composition, fenced sections); lift to nested XRDs later |
 | 5 | **App delivery onto EKS** | Crossplane `provider-helm` + `provider-kubernetes`. Gateway and dashboard are **independent Releases** (independent update/rollback); graphiti/falkordb/jobs bundled as one backing release |
-| 6 | **LLM / embeddings** | AWS Bedrock now. LLM default `amazon.nova-micro-v1:0` (cheapest; a Claim knob). Embeddings `amazon.titan-embed-text-v2` (1024-dim) |
+| 6 | **LLM / embeddings** | **OpenAI** (Graphiti has no Bedrock client). Key via Secrets Manager + ESO. Models stay current: `gpt-*` for extraction, `text-embedding-3-small` (1536-dim) — no re-embed |
 
 ### Established conventions adopted from the reference project
 
@@ -74,8 +76,8 @@ to a real-AWS production footprint, and replaces the OpenAI dependency with AWS 
 │        ├─ RDS PostgreSQL 16        (private subnets)        │
 │        ├─ ElastiCache Redis 7      (private subnets)        │
 │        ├─ S3 (quorum-configs)      DynamoDB ×2              │
-│        ├─ IAM/IRSA roles · Secrets Manager · ACM · Route53 │
-│        └─ Bedrock (InvokeModel via IRSA)                    │
+│        └─ IAM/IRSA roles · Secrets Manager · ACM · Route53 │
+│           (OpenAI API key held in Secrets Manager)          │
 │                                                             │
 │  EKS workloads (Helm via provider-helm):                    │
 │    aws-load-balancer-controller · external-secrets (ESO)    │
@@ -124,10 +126,12 @@ spec:
     redis:
       nodeType: cache.r7g.large
       replicas: 2
-    bedrock:
-      llmModelId: amazon.nova-micro-v1:0   # cheapest; bump to nova-lite/haiku if extraction is poor
-      embedModelId: amazon.titan-embed-text-v2
-      embedDim: 1024
+    llm:
+      provider: openai                     # Graphiti has no Bedrock client (§7)
+      model: gpt-4o-mini                   # extraction/governance model (Claim knob)
+      embedModel: text-embedding-3-small
+      embedDim: 1536                        # unchanged → no FalkorDB re-embed
+      # OPENAI_API_KEY is NOT here — sourced from Secrets Manager via ESO (§6.5)
     app:
       gateway:
         imageTag: "0.4.12"           # bump to deploy gateway alone
@@ -204,16 +208,19 @@ production values:
 ### 6.4 IAM / IRSA
 Per-workload roles trust-bound to the EKS OIDC provider + service account:
 - **gateway** — S3 RW (configs bucket), DynamoDB RW (both tables), SecretsManager read
-  (`quorum/<env>/*`), `bedrock:InvokeModel` (governance LLM calls).
-- **graphiti** — `bedrock:InvokeModel` (entity extraction + embeddings).
+  (`quorum/<env>/*`). No LLM IAM needed — OpenAI is called with an API key (§6.5), not IRSA.
+- **graphiti** — no AWS IAM role required; it talks only to FalkorDB and OpenAI (key from the
+  ESO-projected secret).
 - **aws-load-balancer-controller** — the standard ALB controller policy.
 - **external-secrets (ESO)** — SecretsManager read on `quorum/<env>/*`.
 
 ### 6.5 Secrets
 Secrets Manager secret `quorum/<env>/gateway` holding: `QUORUM_JWT_PRIVATE_KEY`,
-`QUORUM_JWT_PUBLIC_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD`. Values are
-seeded out-of-band (not in git). RDS consumes the password; ESO projects the rest into the EKS
-`quorum` namespace as a Kubernetes secret consumed by the gateway pod via `envFrom`.
+`QUORUM_JWT_PUBLIC_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD`,
+`OPENAI_API_KEY`. Values are seeded out-of-band (not in git). RDS consumes the password; ESO projects
+the rest into the EKS `quorum` namespace as a Kubernetes secret. The gateway consumes it via `envFrom`;
+`OPENAI_API_KEY` is also referenced by the graphiti pod (both consume the same ESO-projected secret) so
+the key is never committed and never lands in the local control plane's etcd.
 
 ### 6.6 DNS / TLS
 - **ACM** certificate for `domainName`, DNS-validated (validation records in the hosted zone).
@@ -229,7 +236,7 @@ Cluster add-ons (rarely change):
 2. `external-secrets` operator + a `ClusterSecretStore` pointing at Secrets Manager.
 
 Quorum app releases (all use `values-aws.yaml` base + IRSA SA annotations, ingress on ALB + ACM cert,
-Bedrock env (§7), and connection wiring from §6.8):
+OpenAI env (§7), and connection wiring from §6.8):
 
 | Release | Contents | Change frequency | Independent rollback |
 |---------|----------|------------------|----------------------|
@@ -261,35 +268,32 @@ This avoids the anti-pattern of staging real production secrets in a laptop-resi
 
 ---
 
-## 7. Bedrock migration
+## 7. LLM / embeddings — OpenAI (no Bedrock)
 
-Replaces `OPENAI_API_KEY` for both consumers:
-- **Gateway** governance endpoints (conflict detection, enrichment, extract) → Bedrock LLM.
-- **Graphiti** sidecar → Bedrock LLM (entity extraction) + Bedrock embedder.
+**Why not Bedrock:** verified against Graphiti's current clients (`graphiti_core`) — the supported
+LLM/embedder backends are OpenAI, Azure OpenAI, Anthropic (direct Anthropic API), Google Gemini, Groq,
+and OpenAI-generic (Ollama/local). **There is no AWS Bedrock client.** Anthropic support is the direct
+API, not Bedrock. Rather than fork Graphiti or split providers, both consumers stay on OpenAI:
+- **Gateway** governance endpoints (conflict detection, enrichment, extract) → OpenAI.
+- **Graphiti** sidecar → OpenAI LLM (entity extraction) + OpenAI embedder.
 
-Configuration (no API keys; IRSA grants `bedrock:InvokeModel`):
+Configuration (unchanged provider; key delivered via Secrets Manager → ESO, never committed):
 
 ```env
-# replaces OPENAI_API_KEY / LLM_MODEL_NAME / EMBEDDER_MODEL_NAME
-AWS_REGION=ap-southeast-2
-LLM_PROVIDER=bedrock
-LLM_MODEL_NAME=amazon.nova-micro-v1:0
-EMBEDDER_PROVIDER=bedrock
-EMBEDDER_MODEL_NAME=amazon.titan-embed-text-v2
+OPENAI_API_KEY=<from quorum/<env>/gateway secret via ESO>
+LLM_MODEL_NAME=gpt-4o-mini
+EMBEDDER_MODEL_NAME=text-embedding-3-small   # 1536-dim — no FalkorDB re-embed
 ```
 
-### Risks / validation tasks
-- **Graphiti Bedrock support — must verify.** Confirm the Graphiti image's LLM/embedder client
-  supports a Bedrock backend and the exact env/config it expects. If not natively supported, this
-  blocks the Bedrock-for-Graphiti path and we either patch the sidecar config or fall back to
-  OpenAI-via-Secrets-Manager for Graphiti only. **Verify before committing the Composition.**
-- **Embedding dimension change.** Current `text-embedding-3-small` = 1536-dim; `titan-embed-text-v2`
-  = 1024-dim. FalkorDB embeddings must be regenerated. Low risk per Quorum's durability model (the
-  graph is a disposable search layer; durable content lives in PostgreSQL `knowledge_versions.summary`),
-  but it is an explicit re-embed step on cutover.
-- **Tiny-model extraction quality.** `nova-micro` is the cheapest model; entity extraction is the one
-  task where a very small model can wobble. The model is a Claim knob — smoke-test extraction after
-  first deploy and bump to `amazon.nova-lite-v1:0` or `anthropic.claude-3-5-haiku` if quality is poor.
+### Notes
+- **No embedding-dimension change.** Staying on `text-embedding-3-small` (1536-dim) means existing
+  FalkorDB embeddings remain valid — no re-embed step on cutover.
+- **No LLM IAM.** OpenAI is reached over HTTPS with the API key; no `bedrock:InvokeModel`, no per-pod
+  IRSA role for LLM access (§6.4).
+- **Key hygiene is the only cost.** The single new secret value (`OPENAI_API_KEY`) lives in Secrets
+  Manager and is projected by ESO into EKS — it never touches git or the local control plane's etcd.
+- **Bedrock remains a future option** if/when Graphiti ships a Bedrock client or if Graphiti is
+  swapped out; it would reintroduce the IRSA-for-LLM path and an embed-dimension migration.
 
 ---
 
@@ -336,15 +340,13 @@ observability section; can be deferred to a follow-up if first-deploy scope need
 
 ## 11. Open items to resolve during implementation
 
-1. **Verify Graphiti Bedrock support** (§7) — gating, do first.
-2. Confirm Bedrock model availability + access enabled in `ap-southeast-2` for the chosen model IDs.
-3. Choose composition function versions (`function-patch-and-transform`, `function-auto-ready`) and
+1. Choose composition function versions (`function-patch-and-transform`, `function-auto-ready`) and
    pin provider package versions.
-4. Decide NAT strategy (single NAT vs per-AZ) per environment cost/HA target.
-5. KMS key strategy (one CMK per environment vs per-service).
-6. Where production secret values are seeded from (manual `aws secretsmanager put-secret-value` vs an
-   existing secret store) — out of git either way.
-7. **Chart refactor for independent releases** (§6.7) — restructure `helm/quorum/` into an umbrella
+2. Decide NAT strategy (single NAT vs per-AZ) per environment cost/HA target.
+3. KMS key strategy (one CMK per environment vs per-service).
+4. Where production secret values are seeded from (manual `aws secretsmanager put-secret-value` vs an
+   existing secret store) — `OPENAI_API_KEY` included; out of git either way.
+5. **Chart refactor for independent releases** (§6.7) — restructure `helm/quorum/` into an umbrella
    chart with `gateway`, `dashboard`, and `backing` subcharts so each maps to its own `provider-helm`
    `Release` with independent `helm history`/`helm rollback`, while sharing common values (ingress
    host, ACM cert ARN, IRSA SA annotations). Decide subcharts-vs-component-toggles during implementation.
@@ -356,7 +358,8 @@ observability section; can be deferred to a follow-up if first-deploy scope need
 - `kubectl apply -f claims/<env>.yaml` converges to a Ready composite with all AWS resources present.
 - The Quorum gateway is reachable over HTTPS at `domainName`, `/health` returns healthy with
   PostgreSQL, Graphiti, Redis all connected.
-- Gateway and Graphiti perform LLM/embedding operations via Bedrock with **no OpenAI key present**.
+- Gateway and Graphiti perform LLM/embedding operations via OpenAI, with `OPENAI_API_KEY` delivered
+  only through ESO/Secrets Manager — never committed and never in the local control plane's etcd.
 - No long-lived production secrets stored in the local control plane (secrets via ESO/Secrets Manager).
 - **Gateway and dashboard are independently deployable and rollback-able** — bumping one's image tag
   upgrades only its `provider-helm` `Release` (own `helm history`), leaving the other release, the
