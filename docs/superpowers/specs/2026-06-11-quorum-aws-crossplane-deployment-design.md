@@ -12,11 +12,13 @@ spot reclaim can never destroy governed knowledge.
 
 ## 1. Goal
 
-Deploy the full Quorum stack to AWS using **Crossplane as the only IaC tool**, driven by a single
+Deploy the full Quorum stack to AWS using **Crossplane as the only AWS IaC tool**, driven by a single
 declarative resource. One `kubectl apply` of a **namespaced `QuorumEnvironment` composite resource (XR)**
-converges the complete environment: network, a spot EC2 host, **managed RDS PostgreSQL**, IAM (instance
-profile), S3, DynamoDB, Secrets Manager, KMS, CloudWatch — and bootstraps the Quorum **docker-compose**
-stack onto the instance, pulling its images from **GHCR** and terminating **TLS** on-box.
+converges the AWS environment: network, a spot EC2 host, **managed RDS PostgreSQL**, IAM (instance profile),
+S3, DynamoDB, Secrets Manager, KMS, CloudWatch — and bootstraps the Quorum **docker-compose** stack onto
+the instance, pulling its images from **GHCR**. A real domain points directly to the EIP, and on-box Caddy
+obtains and renews a publicly trusted ACME certificate. The DNS A record is either composed in Route 53
+when enabled or managed through the domain's existing external DNS provider after the EIP is allocated.
 
 This extends the existing LocalStack-targeted Crossplane setup in [`crossplane/`](../../../crossplane/)
 to a real-AWS footprint. It follows the reference project's **single-spot-EC2 + Docker** topology
@@ -31,7 +33,8 @@ An external review (codex) caught eight issues in the original draft. The correc
 - targets **Crossplane v2.3** (namespaced XRs; Claims are removed in v2) — §5;
 - moves **PostgreSQL to managed RDS** so the durable source of truth survives spot reclaim/teardown — §6.4;
 - makes the **EC2 instance stateless/disposable** — only Redis + FalkorDB (both rebuildable) live on it — §6.2;
-- **terminates TLS on-box** (Caddy) and wires the real OAuth callback/dashboard URLs — §6.6;
+- **terminates publicly trusted TLS on-box** (Caddy + ACME) and wires the real OAuth
+  callback/dashboard URLs — §6.6;
 - removes the **deploy-ordering cycle** by managing bootstrap artifacts as composed S3 objects — §9;
 - replaces the **non-existent `gateway migrate`** with applying the real `init-db.sql` to RDS — §6.7;
 - schedules the **operational jobs** (decay / archive / recheck) via systemd timers — §6.9;
@@ -47,8 +50,9 @@ An external review (codex) caught eight issues in the original draft. The correc
   **PostgreSQL is managed (RDS)** because it is the durable source of truth.
 - **Multi-region / HA.** Single instance, single-AZ RDS, single region (`ap-southeast-2`). (Two subnets
   in two AZs exist only because an RDS DB subnet group requires them — §6.1.)
-- **Custom domain / Route53 / ACM.** TLS is on-box (Caddy internal CA) on the auto-generated public DNS;
-  a real domain + Let's Encrypt is a noted upgrade (decision 9).
+- **Route 53 / ACM as mandatory dependencies.** A real domain is required, but its registrar and
+  authoritative DNS provider may be outside AWS. Route 53 is optional; ACM is unnecessary because Caddy
+  terminates TLS directly on the EC2 host.
 - **Migrating the existing LocalStack dev path.** Kept as-is under the `aws-local` ProviderConfig.
 
 ---
@@ -58,14 +62,14 @@ An external review (codex) caught eight issues in the original draft. The correc
 | # | Decision | Choice |
 |---|----------|--------|
 | 1 | **Compute platform** | **Single spot EC2 + Docker Compose** (reference pattern). No EKS. The instance is **stateless** — it can be replaced without data loss |
-| 2 | **Scope** Crossplane owns | VPC (2 subnets/2 AZs), EC2 (spot) + EIP, **RDS PostgreSQL**, IAM instance profile, S3 ×2, DynamoDB ×1, Secrets Manager, KMS, CloudWatch. **No ECR** |
+| 2 | **Scope** Crossplane owns | VPC (2 subnets/2 AZs), EC2 (spot) + EIP, **RDS PostgreSQL**, IAM instance profile, S3 ×2, DynamoDB ×1, Secrets Manager, KMS, CloudWatch, and optionally a Route 53 A record. **No ECR, ALB, or ACM** |
 | 3 | **Stateful data services** | **PostgreSQL → managed RDS** (durable source of truth). **Redis + FalkorDB → Docker** on the instance (disposable; Redis is a cache, FalkorDB rebuilds from `knowledge_versions.summary`). S3 + DynamoDB are real AWS services |
 | 4 | **Control plane location** | Local (Docker Desktop / kind), permanent — provisions into real AWS |
 | 5 | **IaC structure** | **Crossplane v2.3**: one cluster-scoped XRD + one **namespaced `QuorumEnvironment` XR** (no Claim). Flat-composition-first (one Composition, fenced sections). Outputs surfaced via a **composed Secret** (XR-level connection details are removed in v2) |
 | 6 | **App delivery** | `userData` bootstrap → pulls `start` script + `docker-compose.aws.yml` from S3 → fetch secrets → `docker login ghcr.io` → `docker compose pull` → `docker compose up`. Per-service update/rollback by pushing a new GHCR tag + `docker compose pull <svc>` + `up -d <svc>` |
 | 7 | **Environment** | **One** environment named `prod`, its own AWS sub-account. Demo/test footprint |
-| 8 | **Exposure** | Public, via the instance **Elastic IP + auto-generated public DNS**. URL not shared publicly — demo/test only |
-| 9 | **DNS / TLS** | **TLS on first cut** — on-box **Caddy** terminates HTTPS using its **internal CA** (self-signed; browser warning, no domain needed) on the auto-generated DNS. Real domain + Let's Encrypt (needs Route53/ACM) is the documented upgrade |
+| 8 | **Exposure** | Public, via a real domain whose **A record points directly to the Elastic IP**. URL not broadly advertised — demo/test only |
+| 9 | **DNS / TLS** | **Publicly trusted TLS on first cut** — on-box **Caddy** obtains and renews an ACME certificate (Let's Encrypt by default) and redirects HTTP to HTTPS. DNS may remain with the domain registrar or any external provider. **Route 53 is optional**; if used, budget `$0.50/hosted-zone/month` plus `$0.40/million` standard queries. **No ALB or ACM** |
 | 10 | **Container images** | Built **locally** (arm64 — see §6.7), `docker push`ed to **GHCR** (`ghcr.io/ayansasmal/quorum-*`). Instance pulls with a GitHub PAT held in Secrets Manager. **No ECR** |
 | 11 | **DB schema / migrations** | The **real `init-db.sql`** (already the dev source of schema) is shipped to S3 and applied to RDS by `start.sh` via `psql` on boot. It is **idempotent** (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`), so re-running is safe. A migration tool (e.g. node-pg-migrate) is a noted future upgrade |
 | 12 | **Cost posture** | Cheapest viable: one **spot** instance in a **public subnet (no NAT)**, graviton burstable; single-AZ `db.t4g.micro` RDS. Slower is acceptable |
@@ -115,10 +119,10 @@ flowchart TB
         SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · GHCR PAT · OPENAI_API_KEY · PG password"]
         subgraph VPC["VPC — public subnet (EC2) + DB subnet group (2 AZs)"]
             direction TB
-            EIP["Elastic IP + auto public DNS"]
+            EIP["Elastic IP"]
             subgraph EC2["Spot EC2 (t4g) — STATELESS — instance profile role"]
                 direction TB
-                CADDY["Caddy :443 (TLS, internal CA)"]
+                CADDY["Caddy :80/:443<br/>ACME certificate + HTTPS redirect"]
                 COMPOSE["docker compose:<br/>gateway · dashboard · graphiti<br/>falkordb · redis · job-timers"]
                 EBS["EBS gp3 root (disposable)<br/>(falkordb · redis volumes)"]
             end
@@ -126,6 +130,7 @@ flowchart TB
         end
     end
 
+    DNS["Public DNS provider (Route 53 optional)<br/>quorum.example.com A → EIP"] --> EIP
     EIP --> CADDY
     CADDY --> COMPOSE
     GHCR -.->|"docker pull (PAT from Secrets Mgr)"| COMPOSE
@@ -167,7 +172,7 @@ spec:
   # ── parameters ──────────────────────────────────────────────────────────────
   environment: prod                  # single environment for this demo footprint
   region: ap-southeast-2
-  # No domainName/hostedZoneId — exposure is the instance's auto-generated public DNS (§6.6)
+  domainName: quorum.example.com      # required; public A record points to the EIP (§6.6)
   network:
     vpcCidr: 10.20.0.0/16            # public subnet (EC2) + 2-AZ DB subnet group (RDS)
   compute:
@@ -190,7 +195,11 @@ spec:
     embedDim: 1536                   # unchanged → no FalkorDB re-embed
     # OPENAI_API_KEY is NOT here — held in Secrets Manager, fetched at boot (§6.5)
   tls:
-    mode: internal                   # Caddy internal CA (self-signed). 'letsencrypt' needs a domain
+    mode: acme                       # Caddy automatic HTTPS; publicly trusted certificate
+    acmeEmail: operator@example.com  # expiry/error notices from the ACME CA
+  dns:
+    manageRoute53: false             # default: manage the A record with any external DNS provider
+    hostedZoneId: ""                 # required only when manageRoute53=true
   images:
     registry: ghcr.io/ayansasmal     # GHCR — images pushed here from the dev machine (§6.7)
     applySchema: true                # start.sh applies init-db.sql to RDS before the gateway serves (§6.7)
@@ -200,8 +209,9 @@ spec:
 ```
 
 The Composition writes a **composed Secret** `quorum-prod-connection` in `quorum-system` carrying the
-resolved EIP, public DNS, instance id, and RDS endpoint (v2 has no XR-level `writeConnectionSecretToRef`,
-so the Composition builds this Secret explicitly — §5). `kubectl apply -f environments/prod.yaml`
+resolved EIP, configured domain name, instance id, and RDS endpoint (v2 has no XR-level
+`writeConnectionSecretToRef`, so the Composition builds this Secret explicitly — §5).
+`kubectl apply -f environments/prod.yaml`
 converges the whole environment. Sizing above is the deliberately-cheap demo posture (decision 12).
 
 ---
@@ -228,7 +238,7 @@ crossplane/
   environments/
     prod.yaml                # the namespaced QuorumEnvironment XR (one sub-account)
   providers/
-    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, rds, secretsmanager, kms, cloudwatch)
+    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, rds, secretsmanager, kms, cloudwatch; route53 optional)
     functions.yaml           # function-patch-and-transform, function-auto-ready
     providerconfig-aws-prod.yaml   # reused identity from the reference project (prod sub-account)
     providerconfig-aws-local.yaml  # existing LocalStack path, retained
@@ -236,7 +246,7 @@ crossplane/
     ec2-userdata.sh          # tiny: install docker+compose+jq+postgresql-client, fetch start.sh from S3
     start.sh                 # full: fetch secrets→.env, ghcr login, apply init-db.sql to RDS, compose up
     docker-compose.aws.yml   # the AWS compose file (gateway/dashboard/graphiti/falkordb/redis/caddy/jobs)
-    Caddyfile                # TLS termination (internal CA) → gateway:3001 / dashboard
+    Caddyfile                # public ACME TLS termination → gateway:3001 / dashboard
     init-db.sql              # COPIED from quorum/scripts/init-db.sql (single source of schema)
   # existing bucket/ dynamodb/ rds/ redis/ remain as the aws-local dev reference
 scripts/
@@ -315,19 +325,27 @@ secret never touches git and never lands in the local control plane's etcd. **No
 
 ### 6.6 Access, DNS & TLS
 - **SSM Session Manager** for shell access (`aws ssm start-session`) — no inbound SSH, no bastion.
-- **Exposure** is the instance's **auto-generated public DNS** / Elastic IP (decision 8), surfaced via the
-  output Secret.
-- **TLS on-box (Caddy).** A `caddy:2-alpine` sidecar terminates **HTTPS on :443** and reverse-proxies the
-  gateway (`:3001`) and dashboard. For the first cut, `tls internal` uses Caddy's **internal CA**
-  (self-signed) on the auto-DNS — a browser trust warning, but the **OAuth JWT redirect is encrypted in
-  transit**, closing the account-takeover gap the review flagged. `Caddyfile` ships in the deploy bucket.
-- **OAuth wiring.** The EIP is stable, so the public DNS is stable. After first deploy the operator (a) sets
-  the GitHub OAuth App's **Authorization callback URL** to `https://<public-dns>/oauth/callback`, and (b)
-  the boot writes `GITHUB_CALLBACK_URL=https://<public-dns>/oauth/callback` and
-  `DASHBOARD_URL=https://<public-dns>` into `.env` (derived from the output Secret) — these previously
-  defaulted to `localhost` and would have broken sign-in.
-- **Upgrade path:** real domain + Route53 + ACM/Let's Encrypt → set `tls.mode: letsencrypt` and a
-  `domainName` (decision 9).
+- **Exposure** is `https://<domainName>` (decision 8). The domain's public **A record points directly to
+  the Elastic IP**. The EIP and configured domain are surfaced via the output Secret.
+- **DNS provider is independent.** The A record may stay with the registrar or any authoritative DNS
+  provider. Route 53 is an optional convenience, not a platform dependency. If selected, current AWS
+  pricing is `$0.50` per hosted zone per month for the first 25 zones and `$0.40` per million standard
+  queries; demo traffic makes query cost negligible. Domain registration is separate and varies by TLD.
+  See [Amazon Route 53 pricing](https://aws.amazon.com/route53/pricing/).
+- **TLS on-box (Caddy).** A `caddy:2-alpine` sidecar terminates **HTTPS on :443**, redirects port 80 to
+  HTTPS, and reverse-proxies the gateway (`:3001`) and dashboard. Caddy automatically obtains and renews
+  a publicly trusted certificate from an ACME CA (Let's Encrypt by default). The domain's A record must
+  resolve to the EIP before certificate issuance succeeds, ports 80/443 must be reachable, and Caddy's
+  `/data` volume must be writable and persistent across container restarts. Caddy retries issuance with
+  backoff while an external DNS change propagates. A replacement spot instance may reacquire the
+  certificate because the EIP and domain remain stable. `Caddyfile` ships in the deploy bucket. See
+  [Caddy Automatic HTTPS](https://caddyserver.com/docs/automatic-https).
+- **OAuth wiring.** The operator registers the GitHub OAuth App's **Authorization callback URL** as
+  `https://<domainName>/oauth/callback`. The boot writes
+  `GITHUB_CALLBACK_URL=https://<domainName>/oauth/callback`,
+  `DASHBOARD_URL=https://<domainName>`, and `QUORUM_GATEWAY_URL=https://<domainName>` into `.env`.
+- **No ACM or load balancer.** ACM-managed certificates are not used because TLS terminates directly on
+  EC2. An ALB + ACM remains a later option only if load balancing or managed edge termination is needed.
 
 ### 6.7 App delivery & bootstrap
 
@@ -446,15 +464,18 @@ flowchart TD
     C --> D["4 · Build + push arm64 images to GHCR<br/>(ghcr.io/ayansasmal/quorum-{gateway,dashboard,graphiti})"]
     D --> E["5 · Seed Secrets Manager (JWT · OAuth · GHCR PAT · OPENAI_API_KEY · PG password)"]
     E --> F["6 · Apply XRD + Composition + XR (environments/prod.yaml)"]
-    F --> G["7 · Crossplane converges, in dependency order:<br/>network → KMS/secrets → S3 + bucket-objects → RDS + DynamoDB → IAM → EC2"]
-    G --> H["8 · EC2 userData boots → start.sh → psql init-db.sql → compose up + timers (§6.7)"]
-    H --> I["9 · Verify: curl https://&lt;public-dns&gt;/health (PostgreSQL@RDS · Graphiti · Redis connected)"]
+    F --> G["7 · Crossplane converges, in dependency order:<br/>network → KMS/secrets → S3 + bucket-objects → RDS + DynamoDB → IAM → EC2/EIP"]
+    G --> H["8 · Create/verify domainName A → EIP<br/>(automatic when manageRoute53=true; external otherwise)"]
+    H --> I["9 · EC2 userData boots → start.sh → psql init-db.sql → compose up + timers (§6.7)<br/>Caddy retries ACME until DNS resolves"]
+    I --> J["10 · Verify: curl https://&lt;domainName&gt;/health (PostgreSQL@RDS · Graphiti · Redis connected)"]
 ```
 
 A checksums file (mirroring `.crossplane-checksums` in the reference) guards against unintended manifest
 drift. Because the bootstrap artifacts are composed S3 objects, the GHCR images (step 4) and the seeded
-secrets (step 5) are the only true prerequisites before the single `apply` in step 6; Crossplane readiness
-gates enforce the rest.
+secrets (step 5) are the only true prerequisites before the single `apply` in step 6. With
+`manageRoute53=true`, Crossplane also composes the A record. With external DNS, the deploy script pauses
+after EIP allocation and prints the exact A record to create; Caddy continues retrying ACME issuance until
+the record propagates.
 
 > **Fallback if inlining `init-db.sql` as a composed object is impractical** (size/templating): a two-phase
 > apply — first converge the bucket, then `aws s3 cp` the artifacts, then apply the EC2-bearing
@@ -506,14 +527,15 @@ vanishes immediately.
    `aws secretsmanager put-secret-value`, sourcing `OPENAI_API_KEY` from the existing `.env`) — out of git.
 5. **Composed S3 objects vs two-phase upload** (§9) — confirm `init-db.sql` is small enough to manage as a
    composed object, else adopt the two-phase fallback.
-6. **Caddy internal CA acceptance** — the self-signed cert raises a browser warning; confirm acceptable
-   for the private demo, or bring the real-domain + Let's Encrypt upgrade forward.
+6. **Domain and DNS provider** — select `domainName`, create its A record to the EIP, and decide whether
+   the existing registrar/DNS provider manages it or Crossplane optionally creates a Route 53 hosted-zone
+   record. Route 53 is not required for certificate issuance.
 7. **Migration tooling** — `init-db.sql` idempotency is sufficient now; decide when to adopt a real
    migration tool (e.g. node-pg-migrate) for ordered, versioned changes.
 8. **Later upgrades — adopt when the budget justifies it:** Multi-AZ RDS + ElastiCache for HA, Amazon
-   Neptune for the graph (decision 18), real domain + Route53 + ACM/HTTPS, and EKS/provider-helm if
-   multi-node HA/autoscaling is ever needed. Each is an additive change to the same Composition + XR — the
-   demo footprint graduates in place rather than being rebuilt.
+   Neptune for the graph (decision 18), ALB + ACM if managed edge TLS/load balancing becomes useful, and
+   EKS/provider-helm if multi-node HA/autoscaling is ever needed. Each is an additive change to the same
+   Composition + XR — the demo footprint graduates in place rather than being rebuilt.
 
 ---
 
@@ -524,9 +546,11 @@ vanishes immediately.
   Secrets Manager, KMS, CloudWatch). No Claim, no ECR.
 - The EC2 instance boots, runs `start.sh`, logs in to GHCR with the PAT from Secrets Manager, **applies
   `init-db.sql` to RDS**, and `docker compose up` brings the full stack (incl. Caddy TLS) online.
-- `curl https://<public-dns>/health` returns healthy with **PostgreSQL (on RDS)**, Graphiti, and Redis all
-  connected — over **TLS**.
-- GitHub OAuth sign-in completes against `GITHUB_CALLBACK_URL=https://<public-dns>/oauth/callback`.
+- The configured domain resolves to the EIP, Caddy obtains a **publicly trusted ACME certificate**, and
+  `curl https://<domainName>/health` returns healthy with **PostgreSQL (on RDS)**, Graphiti, and Redis all
+  connected.
+- GitHub OAuth sign-in completes against `GITHUB_CALLBACK_URL=https://<domainName>/oauth/callback`
+  without a browser certificate warning.
 - Gateway and Graphiti perform LLM/embedding operations via OpenAI, with `OPENAI_API_KEY` fetched only from
   Secrets Manager into the instance `.env` — never committed, never in the local control plane.
 - The app authenticates to S3/DynamoDB/Secrets via the **instance profile** (no static keys on the box).
@@ -538,4 +562,3 @@ vanishes immediately.
   recreates only that container; rollback by re-pinning the prior tag.
 - **Teardown** removes the footprint and captures the durable data in a **final RDS snapshot**, per the
   retention matrix (§11).
-```
