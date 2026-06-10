@@ -35,7 +35,7 @@ to a real-AWS production footprint, and replaces the OpenAI dependency with AWS 
 | 2 | **Control plane location** | Local (Docker Desktop / kind), permanent — provisions into real AWS |
 | 3 | **IaC structure** | Compositions + XRDs, one `Claim` per environment |
 | 4 | **Composition decomposition** | Flat-composition-first (one Composition, fenced sections); lift to nested XRDs later |
-| 5 | **App delivery onto EKS** | Crossplane `provider-helm` + `provider-kubernetes` (single declarative flow) |
+| 5 | **App delivery onto EKS** | Crossplane `provider-helm` + `provider-kubernetes`. Gateway and dashboard are **independent Releases** (independent update/rollback); graphiti/falkordb/jobs bundled as one backing release |
 | 6 | **LLM / embeddings** | AWS Bedrock now. LLM default `amazon.nova-micro-v1:0` (cheapest; a Claim knob). Embeddings `amazon.titan-embed-text-v2` (1024-dim) |
 
 ### Established conventions adopted from the reference project
@@ -129,8 +129,13 @@ spec:
       embedModelId: amazon.titan-embed-text-v2
       embedDim: 1024
     app:
-      chartVersion: "0.4.x"
-      gatewayReplicas: 3
+      gateway:
+        imageTag: "0.4.12"           # bump to deploy gateway alone
+        replicas: 3
+      dashboard:
+        imageTag: "0.4.12"           # bump to deploy dashboard alone
+      backing:
+        chartVersion: "0.4.x"        # graphiti + falkordb + jobs (bundled)
   compositionRef:
     name: xquorumenvironment
   writeConnectionSecretToRef:
@@ -216,12 +221,31 @@ seeded out-of-band (not in git). RDS consumes the password; ESO projects the res
   hostname flows back via the ingress status (external-dns is an optional later add).
 
 ### 6.7 App delivery
-`provider-helm` `Release` resources (ordered after EKS + data readiness):
+`provider-helm` `Release` resources (ordered after EKS + data readiness). **Cluster add-ons** first,
+then the Quorum app split into independently-deployable releases:
+
+Cluster add-ons (rarely change):
 1. `aws-load-balancer-controller` (IRSA-annotated SA).
 2. `external-secrets` operator + a `ClusterSecretStore` pointing at Secrets Manager.
-3. **Quorum chart** ([`helm/quorum/`](../../../helm/quorum/)) with `values-aws.yaml`: IRSA SA
-   annotations on gateway/graphiti, ingress on ALB + ACM cert, Bedrock env (§7), and connection
-   wiring from §6.8.
+
+Quorum app releases (all use `values-aws.yaml` base + IRSA SA annotations, ingress on ALB + ACM cert,
+Bedrock env (§7), and connection wiring from §6.8):
+
+| Release | Contents | Change frequency | Independent rollback |
+|---------|----------|------------------|----------------------|
+| `quorum-gateway` | gateway Deployment, HPA, gateway ingress, gateway IRSA SA | high | ✅ own revision history |
+| `quorum-dashboard` | dashboard (nginx SPA) Deployment, dashboard ingress | high | ✅ own revision history |
+| `quorum-backing` | graphiti, falkordb, jobs (decay/archive/recheck), shared config | low | bundled (per decision) |
+
+Deploying a gateway change = bump `quorum-gateway`'s image tag → only that Release upgrades, with its
+own `helm history` / `helm rollback`. The dashboard and backing releases are never opened, and the
+Composition's data/infra resources are untouched. Same for a dashboard-only change. The data services
+(RDS, ElastiCache, S3, DynamoDB) are Composition-managed resources, **not** Helm — they are never
+involved in an app deploy.
+
+> **Chart implication:** `helm/quorum/` is refactored into an umbrella chart with `gateway`,
+> `dashboard`, and `backing` subcharts (or component-enable toggles) so each can be released
+> independently while sharing common values (ingress host, ACM cert ARN, IRSA annotations). See §11.
 
 ### 6.8 Connection-detail propagation (design point)
 Crossplane writes RDS/Redis endpoints as connection secrets into the **local** control plane, but the
@@ -320,6 +344,10 @@ observability section; can be deferred to a follow-up if first-deploy scope need
 5. KMS key strategy (one CMK per environment vs per-service).
 6. Where production secret values are seeded from (manual `aws secretsmanager put-secret-value` vs an
    existing secret store) — out of git either way.
+7. **Chart refactor for independent releases** (§6.7) — restructure `helm/quorum/` into an umbrella
+   chart with `gateway`, `dashboard`, and `backing` subcharts so each maps to its own `provider-helm`
+   `Release` with independent `helm history`/`helm rollback`, while sharing common values (ingress
+   host, ACM cert ARN, IRSA SA annotations). Decide subcharts-vs-component-toggles during implementation.
 
 ---
 
@@ -330,6 +358,9 @@ observability section; can be deferred to a follow-up if first-deploy scope need
   PostgreSQL, Graphiti, Redis all connected.
 - Gateway and Graphiti perform LLM/embedding operations via Bedrock with **no OpenAI key present**.
 - No long-lived production secrets stored in the local control plane (secrets via ESO/Secrets Manager).
+- **Gateway and dashboard are independently deployable and rollback-able** — bumping one's image tag
+  upgrades only its `provider-helm` `Release` (own `helm history`), leaving the other release, the
+  `quorum-backing` release, and all Composition-managed infra untouched.
 - Tearing down the claim removes the AWS footprint cleanly (respecting `deletionProtection` on RDS as
   an intentional guard).
 ```
