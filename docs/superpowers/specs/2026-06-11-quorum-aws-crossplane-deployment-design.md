@@ -59,31 +59,45 @@ committed anywhere.
 
 ## 3. Topology
 
-```
-┌─ LOCAL (Docker Desktop / kind) ─ permanent control plane ──┐
-│  Crossplane core                                           │
-│  AWS providers (ec2/eks/iam/rds/elasticache/s3/dynamodb/   │
-│                 secretsmanager/route53/acm/cloudwatch)     │
-│  provider-helm  ·  provider-kubernetes                     │
-│  composition functions (patch-and-transform, auto-ready)   │
-│  ProviderConfig: aws-prod (creds secret) · aws-local       │
-└───────────────────────────┬────────────────────────────────┘
-                            │ AWS API calls (region ap-southeast-2)
-                            ▼
-┌─ AWS ───────────────────────────────────────────────────────┐
-│  VPC (3 AZ): public + private subnets, IGW, NAT, routes     │
-│   └─ EKS cluster + managed node group + OIDC (IRSA)         │
-│        ├─ RDS PostgreSQL 16        (private subnets)        │
-│        ├─ ElastiCache Redis 7      (private subnets)        │
-│        ├─ S3 (quorum-configs)      DynamoDB ×2              │
-│        └─ IAM/IRSA roles · Secrets Manager · ACM · Route53 │
-│           (OpenAI API key held in Secrets Manager)          │
-│                                                             │
-│  EKS workloads (Helm via provider-helm):                    │
-│    aws-load-balancer-controller · external-secrets (ESO)    │
-│    quorum chart: gateway · dashboard · graphiti · falkordb  │
-│                  · jobs (decay/archive/recheck)             │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph LOCAL["LOCAL — Docker Desktop / kind (permanent control plane)"]
+        direction TB
+        XP["Crossplane core"]
+        PROV["AWS providers<br/>ec2 · eks · iam · rds · elasticache · s3<br/>dynamodb · secretsmanager · route53 · acm · cloudwatch"]
+        DELIV["provider-helm · provider-kubernetes"]
+        FN["Composition functions<br/>patch-and-transform · auto-ready"]
+        PC["ProviderConfig: aws-prod (creds secret) · aws-local"]
+    end
+
+    LOCAL -->|"AWS API calls — region ap-southeast-2"| AWS
+
+    subgraph AWS["AWS — ap-southeast-2"]
+        direction TB
+        subgraph VPC["VPC (3 AZ) — public + private subnets, IGW, NAT, routes"]
+            direction TB
+            EKS["EKS cluster + managed node group + OIDC (IRSA)"]
+            subgraph DATA["Managed data services — private subnets"]
+                direction LR
+                RDS["RDS PostgreSQL 16"]
+                REDIS["ElastiCache Redis 7"]
+                S3["S3 quorum-configs"]
+                DDB["DynamoDB x2"]
+            end
+            IAM["IAM/IRSA roles · Secrets Manager · ACM · Route53<br/>(OpenAI API key held in Secrets Manager)"]
+            subgraph WL["EKS workloads — Helm via provider-helm"]
+                direction TB
+                ADDON["aws-load-balancer-controller · external-secrets (ESO)"]
+                GW["quorum-gateway"]
+                DASH["quorum-dashboard"]
+                BACK["quorum-backing<br/>graphiti · falkordb · jobs (decay/archive/recheck)"]
+            end
+        end
+    end
+
+    EKS --> DATA
+    EKS --> WL
+    IAM -.->|"IRSA + ESO"| WL
 ```
 
 **Why the control plane stays local:** matches the operator's prior working pattern (local k8s +
@@ -266,6 +280,33 @@ app needs them in **EKS**. Resolution:
 
 This avoids the anti-pattern of staging real production secrets in a laptop-resident cluster.
 
+```mermaid
+flowchart LR
+    subgraph LCL["Local control plane"]
+        direction TB
+        MR["Crossplane MRs<br/>(RDS · ElastiCache)"]
+        CS["Connection secrets<br/>endpoints in etcd"]
+        PK["provider-kubernetes<br/>ProviderConfig → EKS"]
+        MR --> CS --> PK
+    end
+
+    SM["AWS Secrets Manager<br/>quorum/&lt;env&gt;/gateway"]
+
+    subgraph EKS["EKS — quorum namespace"]
+        direction TB
+        EP["Projected endpoint config<br/>(RDS/Redis hosts)"]
+        ESO["External Secrets Operator"]
+        KS["K8s Secret<br/>JWT · OAuth · POSTGRES_PASSWORD · OPENAI_API_KEY"]
+        POD["gateway / graphiti pods"]
+        ESO --> KS
+        EP --> POD
+        KS -->|"envFrom"| POD
+    end
+
+    PK -->|"project endpoints"| EP
+    SM -->|"pull (no secrets in local etcd)"| ESO
+```
+
 ---
 
 ## 7. LLM / embeddings — OpenAI (no Bedrock)
@@ -311,17 +352,16 @@ ArgoCD; ArgoCD syncs the chart) once app-lifecycle needs outgrow a single releas
 
 Extends the reference's script-driven orchestration:
 
-```
-deploy-aws.sh aws <env>:
-  1. Ensure local cluster + Crossplane core healthy.
-  2. Apply providers + functions; wait Healthy.
-  3. Apply ProviderConfig aws-prod (creds secret must exist in crossplane-system).
-  4. Apply XRD (apis/environment/definition.yaml) + Composition (composition.yaml).
-  5. Apply claim (claims/<env>.yaml).
-  6. Wait for the composite Ready: network → eks → data → iam → secrets.
-  7. provider-kubernetes ProviderConfig binds to EKS (from EKS connection secret).
-  8. provider-helm rolls out ALB controller, ESO, then the Quorum chart.
-  9. ACM validates; Route53 record → ALB; verify HTTPS /health.
+```mermaid
+flowchart TD
+    A["1 · Ensure local cluster + Crossplane core healthy"] --> B["2 · Apply providers + functions — wait Healthy"]
+    B --> C["3 · Apply ProviderConfig aws-prod<br/>(creds secret must exist in crossplane-system)"]
+    C --> D["4 · Apply XRD (definition.yaml) + Composition (composition.yaml)"]
+    D --> E["5 · Apply claim (claims/&lt;env&gt;.yaml)"]
+    E --> F["6 · Wait composite Ready:<br/>network → eks → data → iam → secrets"]
+    F --> G["7 · provider-kubernetes binds to EKS<br/>(from EKS connection secret)"]
+    G --> H["8 · provider-helm rolls out:<br/>ALB controller → ESO → quorum-gateway / dashboard / backing"]
+    H --> I["9 · ACM validates · Route53 → ALB · verify HTTPS /health"]
 ```
 
 A checksums file (mirroring `.crossplane-checksums` in the reference) guards against unintended
