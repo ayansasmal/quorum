@@ -3,19 +3,20 @@
 **Status:** Approved design (pre-implementation)
 **Date:** 2026-06-11
 **Author:** ayansasmal
-**Scope:** Provision and run the entire Quorum platform on AWS from a single Crossplane control plane,
-on a **single spot EC2 instance running Docker Compose** — the cost-optimised demo pattern proven by
-the reference project.
+**Scope:** Provision and run the entire Quorum platform on AWS from a single Crossplane control plane.
+A **stateless spot EC2 instance running Docker Compose** carries the application containers; **PostgreSQL
+— the durable source of truth — runs on managed RDS**. The cost-optimised demo pattern, hardened so a
+spot reclaim can never destroy governed knowledge.
 
 ---
 
 ## 1. Goal
 
 Deploy the full Quorum stack to AWS using **Crossplane as the only IaC tool**, driven by a single
-declarative `Claim`. One `kubectl apply` of a `QuorumEnvironment` claim converges the complete
-environment: network, a spot EC2 host, IAM (instance profile), S3, DynamoDB, Secrets Manager,
-KMS, CloudWatch — and bootstraps the Quorum **docker-compose** stack onto the instance, pulling its
-images from **GHCR**.
+declarative resource. One `kubectl apply` of a **namespaced `QuorumEnvironment` composite resource (XR)**
+converges the complete environment: network, a spot EC2 host, **managed RDS PostgreSQL**, IAM (instance
+profile), S3, DynamoDB, Secrets Manager, KMS, CloudWatch — and bootstraps the Quorum **docker-compose**
+stack onto the instance, pulling its images from **GHCR** and terminating **TLS** on-box.
 
 This extends the existing LocalStack-targeted Crossplane setup in [`crossplane/`](../../../crossplane/)
 to a real-AWS footprint. It follows the reference project's **single-spot-EC2 + Docker** topology
@@ -23,14 +24,31 @@ to a real-AWS footprint. It follows the reference project's **single-spot-EC2 + 
 ~$130–160+/mo of overkill for a demo. The LLM/embedding provider stays **OpenAI** (Graphiti has no AWS
 Bedrock client — see §7); the OpenAI key is held in Secrets Manager and fetched at boot, never committed.
 
+### What changed after the first review (2026-06-11)
+
+An external review (codex) caught eight issues in the original draft. The corrected design:
+
+- targets **Crossplane v2.3** (namespaced XRs; Claims are removed in v2) — §5;
+- moves **PostgreSQL to managed RDS** so the durable source of truth survives spot reclaim/teardown — §6.4;
+- makes the **EC2 instance stateless/disposable** — only Redis + FalkorDB (both rebuildable) live on it — §6.2;
+- **terminates TLS on-box** (Caddy) and wires the real OAuth callback/dashboard URLs — §6.6;
+- removes the **deploy-ordering cycle** by managing bootstrap artifacts as composed S3 objects — §9;
+- replaces the **non-existent `gateway migrate`** with applying the real `init-db.sql` to RDS — §6.7;
+- schedules the **operational jobs** (decay / archive / recheck) via systemd timers — §6.9;
+- drops the **retired second DynamoDB table** (`quorum-configs`) — §6.4;
+- adds an explicit **teardown & retention matrix** — §11.
+
 ### Non-goals
 
 - **EKS / Kubernetes.** Deliberately rejected for cost (see §8). The app runs as Docker containers on
   one EC2 host, exactly like the reference.
-- **Managed RDS / ElastiCache.** Postgres, Redis, and FalkorDB run as containers on the instance
-  (self-hosted, decision 3). Managed services are a later upgrade.
-- **Multi-region / HA / multi-AZ.** Single instance, single AZ, single region (`ap-southeast-2`).
-- **Custom domain / Route53 / ACM.** Exposure is the instance's auto-generated public DNS (decision 9).
+- **Managed Redis (ElastiCache) / managed graph (Neptune).** Redis and FalkorDB run as containers on the
+  instance — both are disposable (Redis is a cache; FalkorDB embeddings rebuild from PostgreSQL). Only
+  **PostgreSQL is managed (RDS)** because it is the durable source of truth.
+- **Multi-region / HA.** Single instance, single-AZ RDS, single region (`ap-southeast-2`). (Two subnets
+  in two AZs exist only because an RDS DB subnet group requires them — §6.1.)
+- **Custom domain / Route53 / ACM.** TLS is on-box (Caddy internal CA) on the auto-generated public DNS;
+  a real domain + Let's Encrypt is a noted upgrade (decision 9).
 - **Migrating the existing LocalStack dev path.** Kept as-is under the `aws-local` ProviderConfig.
 
 ---
@@ -39,30 +57,32 @@ Bedrock client — see §7); the OpenAI key is held in Secrets Manager and fetch
 
 | # | Decision | Choice |
 |---|----------|--------|
-| 1 | **Compute platform** | **Single spot EC2 + Docker Compose** (reference pattern). No EKS |
-| 2 | **Scope** Crossplane owns | VPC, EC2 (spot) + EIP, IAM instance profile, S3, DynamoDB ×2, Secrets Manager, KMS, CloudWatch. **No ECR** |
-| 3 | **Stateful data services** | **Self-hosted** as containers on the instance (Postgres + Redis + FalkorDB). Only S3 + DynamoDB are real AWS services |
+| 1 | **Compute platform** | **Single spot EC2 + Docker Compose** (reference pattern). No EKS. The instance is **stateless** — it can be replaced without data loss |
+| 2 | **Scope** Crossplane owns | VPC (2 subnets/2 AZs), EC2 (spot) + EIP, **RDS PostgreSQL**, IAM instance profile, S3 ×2, DynamoDB ×1, Secrets Manager, KMS, CloudWatch. **No ECR** |
+| 3 | **Stateful data services** | **PostgreSQL → managed RDS** (durable source of truth). **Redis + FalkorDB → Docker** on the instance (disposable; Redis is a cache, FalkorDB rebuilds from `knowledge_versions.summary`). S3 + DynamoDB are real AWS services |
 | 4 | **Control plane location** | Local (Docker Desktop / kind), permanent — provisions into real AWS |
-| 5 | **IaC structure** | Compositions + XRDs, one `Claim` per environment; flat-composition-first (one Composition, fenced sections) |
-| 6 | **App delivery** | `userData` bootstrap → pulls `start` script + `docker-compose.aws.yml` from S3 → `docker login ghcr.io` (token from Secrets Manager) → `docker compose pull` → `docker compose up`. Per-service update/rollback by pushing a new tag to GHCR + `docker compose pull <svc>` + `docker compose up -d <svc>` |
+| 5 | **IaC structure** | **Crossplane v2.3**: one cluster-scoped XRD + one **namespaced `QuorumEnvironment` XR** (no Claim). Flat-composition-first (one Composition, fenced sections). Outputs surfaced via a **composed Secret** (XR-level connection details are removed in v2) |
+| 6 | **App delivery** | `userData` bootstrap → pulls `start` script + `docker-compose.aws.yml` from S3 → fetch secrets → `docker login ghcr.io` → `docker compose pull` → `docker compose up`. Per-service update/rollback by pushing a new GHCR tag + `docker compose pull <svc>` + `up -d <svc>` |
 | 7 | **Environment** | **One** environment named `prod`, its own AWS sub-account. Demo/test footprint |
 | 8 | **Exposure** | Public, via the instance **Elastic IP + auto-generated public DNS**. URL not shared publicly — demo/test only |
-| 9 | **DNS / TLS** | **Auto-generated** (`ec2-*.compute.amazonaws.com` / EIP), HTTP (or on-box self-signed). No Route53/custom domain/ACM in first cut — Caddy auto-HTTPS needs a real domain (later) |
-| 10 | **Container images** | Built **locally** (arm64 — see §6.7), `docker push`ed to **GHCR** (`ghcr.io/ayansasmal/quorum-*`) — matches the reference. Instance pulls with a GitHub token held in Secrets Manager. **No ECR** |
-| 11 | **DB migrations** | Run by the `start` script on the instance (compose one-shot / entrypoint), before the gateway starts serving |
-| 12 | **Cost posture** | Cheapest viable: one **spot** instance in a **public subnet (no NAT)**, graviton burstable, self-hosted data on an EBS volume. Slower is acceptable |
-| 13 | **IAM model** | **EC2 instance profile** (role attached to the instance) — the app uses the SDK default credential chain. No static keys, no IRSA |
+| 9 | **DNS / TLS** | **TLS on first cut** — on-box **Caddy** terminates HTTPS using its **internal CA** (self-signed; browser warning, no domain needed) on the auto-generated DNS. Real domain + Let's Encrypt (needs Route53/ACM) is the documented upgrade |
+| 10 | **Container images** | Built **locally** (arm64 — see §6.7), `docker push`ed to **GHCR** (`ghcr.io/ayansasmal/quorum-*`). Instance pulls with a GitHub PAT held in Secrets Manager. **No ECR** |
+| 11 | **DB schema / migrations** | The **real `init-db.sql`** (already the dev source of schema) is shipped to S3 and applied to RDS by `start.sh` via `psql` on boot. It is **idempotent** (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`), so re-running is safe. A migration tool (e.g. node-pg-migrate) is a noted future upgrade |
+| 12 | **Cost posture** | Cheapest viable: one **spot** instance in a **public subnet (no NAT)**, graviton burstable; single-AZ `db.t4g.micro` RDS. Slower is acceptable |
+| 13 | **IAM model** | **EC2 instance profile** — the app uses the SDK default credential chain. No static keys, no IRSA. (RDS uses password auth from Secrets Manager, not IAM auth) |
 | 14 | **Access** | **SSM Session Manager** (no bastion / no inbound SSH). Key pair retained for break-glass |
-| 15 | **KMS** | One CMK per environment |
-| 16 | **Secret rotation** | Rotate-by-redeploy: re-run the `start` script to re-fetch Secrets Manager values into the instance `.env` |
-| 17 | **FalkorDB storage** | Container on the instance's EBS volume. **Amazon Neptune** is the planned later backend (Graphiti supports it) |
+| 15 | **KMS** | One CMK per environment (encrypts S3, DynamoDB, Secrets Manager, **RDS storage**) |
+| 16 | **Secret rotation** | Rotate-by-redeploy: re-run `start.sh` to re-fetch Secrets Manager values into the instance `.env` |
+| 17 | **Operational jobs** | `job:decay` / `job:archive` / `job:recheck` run on the instance via **systemd timers** (one-shot containers) — §6.9 |
+| 18 | **FalkorDB / graph backend** | Container on the instance (disposable). **Amazon Neptune** is the planned later backend (Graphiti supports it) |
 
 ### Conventions adopted from the reference project
 
 (`/Users/ayan/Desktop/Work/vscode/low-carb-diet-app/backend/k8s/crossplane`)
 
 - Upbound AWS providers (`*.aws.upbound.io`); **label-selector cross-references** between MRs.
-- `writeConnectionSecretToRef` to surface resolved values (EIP, instance id).
+- `writeConnectionSecretToRef` on **managed resources** (RDS endpoint, EIP, instance id) — MRs retain
+  this in Crossplane v2; the Composition assembles them into one output Secret (§5).
 - `ProviderConfig` switching: `aws-prod` vs `aws-local`. **The `aws-prod` Crossplane identity is reused
   from the reference project** — its static-key secret must target the Quorum `prod` sub-account.
 - Tiny `userDataBase64` bootstrap; real setup/`start` scripts live in S3 so app/infra changes don't
@@ -78,8 +98,8 @@ Bedrock client — see §7); the OpenAI key is held in Secrets Manager and fetch
 flowchart TB
     subgraph LOCAL["LOCAL — Docker Desktop / kind (permanent control plane)"]
         direction TB
-        XP["Crossplane core"]
-        PROV["AWS providers<br/>ec2 · iam · s3 · dynamodb<br/>secretsmanager · kms · cloudwatch"]
+        XP["Crossplane v2.3 core"]
+        PROV["AWS providers<br/>ec2 · iam · s3 · dynamodb · rds<br/>secretsmanager · kms · cloudwatch"]
         FN["Composition functions<br/>patch-and-transform · auto-ready"]
         PC["ProviderConfig: aws-prod (creds secret) · aws-local"]
     end
@@ -90,24 +110,28 @@ flowchart TB
 
     subgraph AWS["AWS — prod sub-account · ap-southeast-2"]
         direction TB
-        S3D["S3: quorum-configs + deploy bucket<br/>(start script · docker-compose.aws.yml)"]
-        DDB["DynamoDB x2<br/>configs · user-projects"]
-        SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · GHCR token · OPENAI_API_KEY · PG password"]
-        subgraph VPC["VPC — single public subnet · IGW · no NAT"]
+        S3D["S3 ×2: quorum-configs + deploy bucket<br/>(start.sh · docker-compose.aws.yml · init-db.sql)"]
+        DDB["DynamoDB<br/>quorum-user-projects (GSI)"]
+        SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · GHCR PAT · OPENAI_API_KEY · PG password"]
+        subgraph VPC["VPC — public subnet (EC2) + DB subnet group (2 AZs)"]
             direction TB
             EIP["Elastic IP + auto public DNS"]
-            subgraph EC2["Spot EC2 (t4g) — instance profile role"]
+            subgraph EC2["Spot EC2 (t4g) — STATELESS — instance profile role"]
                 direction TB
-                COMPOSE["docker compose:<br/>gateway · dashboard · graphiti<br/>falkordb · postgres · redis"]
-                EBS["EBS gp3 volume<br/>(postgres · falkordb · redis data)"]
+                CADDY["Caddy :443 (TLS, internal CA)"]
+                COMPOSE["docker compose:<br/>gateway · dashboard · graphiti<br/>falkordb · redis · job-timers"]
+                EBS["EBS gp3 root (disposable)<br/>(falkordb · redis volumes)"]
             end
+            RDS[("RDS PostgreSQL<br/>db.t4g.micro · single-AZ<br/>durable source of truth")]
         end
     end
 
-    EIP --> EC2
-    GHCR -.->|"docker pull (token from Secrets Mgr)"| COMPOSE
-    S3D -.->|"boot: fetch start script + compose"| EC2
+    EIP --> CADDY
+    CADDY --> COMPOSE
+    GHCR -.->|"docker pull (PAT from Secrets Mgr)"| COMPOSE
+    S3D -.->|"boot: fetch start.sh + compose + init-db.sql"| EC2
     SM -.->|"boot: fetch secrets → .env + ghcr login"| EC2
+    COMPOSE -->|"5432 (SG-restricted)"| RDS
     COMPOSE -.->|"instance-profile creds (SDK chain)"| S3D
     COMPOSE -.->|"instance-profile creds"| DDB
     COMPOSE --> EBS
@@ -116,85 +140,112 @@ flowchart TB
 **Why the control plane stays local:** matches the operator's prior working pattern (local k8s +
 Crossplane → real AWS via a Crossplane identity), avoids an always-on management cluster, and keeps the
 bootstrap on a laptop/CI runner that already holds AWS credentials. Crossplane reconciliation is
-desired-state: if the local cluster is down, the running EC2 footprint is unaffected; only new changes pause.
+desired-state: if the local cluster is down, the running footprint is unaffected; only new changes pause.
+
+**Why the instance is now disposable:** the only durable state (PostgreSQL) lives in RDS. A spot reclaim
+re-launches the instance, which re-pulls images and reconnects to the same RDS endpoint and the same S3 /
+DynamoDB / Secrets — no governed knowledge is on the box.
 
 ---
 
-## 4. The Claim API
+## 4. The XR API (Crossplane v2.3)
 
-A namespaced `QuorumEnvironment` claim, backed by a cluster-scoped `XQuorumEnvironment` XRD. One claim
-file per environment under `crossplane/claims/`.
+A **namespaced `QuorumEnvironment` composite resource**, backed by a cluster-scoped
+`XQuorumEnvironment` XRD. Crossplane v2 removes Claims — the XR itself is namespaced and applied
+directly. One XR file per environment under `crossplane/environments/`.
 
 ```yaml
 apiVersion: platform.quorum.io/v1alpha1
-kind: QuorumEnvironment
+kind: QuorumEnvironment              # namespaced composite resource (v2) — there is NO Claim
 metadata:
   name: quorum-prod
   namespace: quorum-system
 spec:
-  parameters:
-    environment: prod                      # single environment for this demo footprint
-    region: ap-southeast-2
-    # No domainName/hostedZoneId — exposure is the instance's auto-generated public DNS (§6.6)
-    network:
-      vpcCidr: 10.20.0.0/16                 # single public subnet, IGW, no NAT
-    compute:
-      instanceType: t4g.large              # 2 vCPU / 8 GB graviton; bump to t4g.xlarge if memory-tight
-      capacityType: spot                   # cheapest; on-demand if spot interruptions bite
-      spotMaxPrice: "0.04"                  # per-hour ceiling
-      rootVolumeGiB: 50                     # gp3, holds docker volumes (postgres/falkordb/redis)
-      arch: arm64                           # images must be arm64 (§6.7)
-    llm:
-      provider: openai                     # Graphiti has no Bedrock client (§7)
-      model: gpt-4o-mini
-      embedModel: text-embedding-3-small
-      embedDim: 1536                        # unchanged → no FalkorDB re-embed
-      # OPENAI_API_KEY is NOT here — held in Secrets Manager, fetched at boot (§6.5)
-    images:
-      registry: ghcr.io/ayansasmal       # GHCR — images pushed here from the dev machine (§6.7)
-      runMigrations: true                  # start script runs migrations before gateway serves (§6.7)
-      gatewayTag: "0.4.12"                 # bump + restart to deploy gateway alone
-      dashboardTag: "0.4.12"              # bump + restart to deploy dashboard alone
-      backingTag: "0.4.x"                  # graphiti / falkordb / postgres / redis (updated together)
-  compositionRef:
-    name: xquorumenvironment
-  writeConnectionSecretToRef:
-    name: quorum-prod-connection           # surfaces EIP, public DNS, instance id
-    namespace: quorum-system
+  crossplane:
+    compositionRef:
+      name: xquorumenvironment       # the Composition (§5)
+  # ── parameters ──────────────────────────────────────────────────────────────
+  environment: prod                  # single environment for this demo footprint
+  region: ap-southeast-2
+  # No domainName/hostedZoneId — exposure is the instance's auto-generated public DNS (§6.6)
+  network:
+    vpcCidr: 10.20.0.0/16            # public subnet (EC2) + 2-AZ DB subnet group (RDS)
+  compute:
+    instanceType: t4g.large          # 2 vCPU / 8 GB graviton; bump to t4g.xlarge if memory-tight
+    capacityType: spot               # cheapest; on-demand if spot interruptions bite
+    spotMaxPrice: "0.04"             # per-hour ceiling
+    rootVolumeGiB: 30                # gp3, disposable — only redis + falkordb volumes
+    arch: arm64                      # images must be arm64 (§6.7)
+  database:                          # managed RDS PostgreSQL (durable source of truth)
+    engineVersion: "16"
+    instanceClass: db.t4g.micro      # cheapest graviton; single-AZ
+    allocatedStorageGiB: 20
+    multiAz: false                   # demo posture; flip to true for HA later
+    deletionProtection: false        # demo; see teardown matrix (§11)
+    backupRetentionDays: 7           # automated daily snapshots
+  llm:
+    provider: openai                 # Graphiti has no Bedrock client (§7)
+    model: gpt-4o-mini
+    embedModel: text-embedding-3-small
+    embedDim: 1536                   # unchanged → no FalkorDB re-embed
+    # OPENAI_API_KEY is NOT here — held in Secrets Manager, fetched at boot (§6.5)
+  tls:
+    mode: internal                   # Caddy internal CA (self-signed). 'letsencrypt' needs a domain
+  images:
+    registry: ghcr.io/ayansasmal     # GHCR — images pushed here from the dev machine (§6.7)
+    applySchema: true                # start.sh applies init-db.sql to RDS before the gateway serves (§6.7)
+    gatewayTag: "0.4.12"             # bump + restart to deploy gateway alone
+    dashboardTag: "0.4.12"           # bump + restart to deploy dashboard alone
+    backingTag: "0.4.x"              # graphiti / falkordb / redis (updated together)
 ```
 
-Every value is overridable on the claim. `kubectl apply -f claims/prod.yaml` converges the whole
-environment. Sizing above is the deliberately-cheap demo posture (decision 12).
+The Composition writes a **composed Secret** `quorum-prod-connection` in `quorum-system` carrying the
+resolved EIP, public DNS, instance id, and RDS endpoint (v2 has no XR-level `writeConnectionSecretToRef`,
+so the Composition builds this Secret explicitly — §5). `kubectl apply -f environments/prod.yaml`
+converges the whole environment. Sizing above is the deliberately-cheap demo posture (decision 12).
 
 ---
 
-## 5. Composition structure
+## 5. Composition structure (Crossplane v2.3)
 
 **Flat-composition-first.** One `Composition` (`xquorumenvironment`) using the
 `function-patch-and-transform` pipeline, holding all composed resources grouped into clearly fenced
-sections (§6). One XRD, one Claim. Sections are authored so they lift cleanly into nested XRDs
-(`XNetwork`, `XCompute`, `XStorage`, `XIam`) later if reuse justifies it.
+sections (§6). One cluster-scoped **XRD** (`XQuorumEnvironment`) whose `spec.scope: Namespaced` yields a
+namespaced XR — **no `claimNames`** (Claims are gone in v2). Sections are authored so they lift cleanly
+into nested XRDs (`XNetwork`, `XCompute`, `XStorage`, `XDatabase`, `XIam`) later if reuse justifies it.
+
+**Output Secret (replaces XR connection details).** Crossplane v2 removes native XR connection details.
+The Composition therefore composes an explicit `Secret` from MR-level `writeConnectionSecretToRef`
+outputs (RDS endpoint, EIP, instance id) and the consumer reads `quorum-prod-connection`. Managed
+resources still support `writeConnectionSecretToRef`, so the RDS instance writes its endpoint/port/user
+to a per-MR secret that the Composition aggregates.
 
 ```
 crossplane/
   apis/environment/
-    definition.yaml          # XRD: XQuorumEnvironment (+ claim QuorumEnvironment)
+    definition.yaml          # XRD: XQuorumEnvironment (spec.scope: Namespaced — no claimNames)
     composition.yaml         # Composition: pipeline of fenced sections (below)
-  claims/
-    prod.yaml                # single environment (one sub-account); add more later if needed
+  environments/
+    prod.yaml                # the namespaced QuorumEnvironment XR (one sub-account)
   providers/
-    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, secretsmanager, kms, cloudwatch)
+    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, rds, secretsmanager, kms, cloudwatch)
     functions.yaml           # function-patch-and-transform, function-auto-ready
     providerconfig-aws-prod.yaml   # reused identity from the reference project (prod sub-account)
     providerconfig-aws-local.yaml  # existing LocalStack path, retained
   bootstrap/
-    ec2-userdata.sh          # tiny: install docker+compose+jq, fetch start script from S3
-    start.sh                 # full: fetch secrets→.env, ghcr login, compose pull, migrate, compose up
-    docker-compose.aws.yml   # the AWS compose file (uploaded to the deploy bucket)
+    ec2-userdata.sh          # tiny: install docker+compose+jq+postgresql-client, fetch start.sh from S3
+    start.sh                 # full: fetch secrets→.env, ghcr login, apply init-db.sql to RDS, compose up
+    docker-compose.aws.yml   # the AWS compose file (gateway/dashboard/graphiti/falkordb/redis/caddy/jobs)
+    Caddyfile                # TLS termination (internal CA) → gateway:3001 / dashboard
+    init-db.sql              # COPIED from quorum/scripts/init-db.sql (single source of schema)
   # existing bucket/ dynamodb/ rds/ redis/ remain as the aws-local dev reference
 scripts/
   deploy-aws.sh              # orchestrator (see §9)
 ```
+
+> **Provider note (v2.3):** pin the provider family and `function-patch-and-transform` /
+> `function-auto-ready` versions in `providers.yaml` / `functions.yaml`; the Crossplane core must be
+> **v2.x** for the namespaced-XR model (open item §12.3).
 
 ---
 
@@ -203,56 +254,80 @@ scripts/
 Crossplane resolves creation order from references; sections below are logical groupings.
 
 ### 6.1 Network
-VPC, **one public subnet**, Internet Gateway, route table + association, and a security group. **No NAT
-gateway** (the instance sits in the public subnet with an Elastic IP — the single biggest cost saving).
-Security group inbound: 80/443 from the internet (app), nothing else — access is via SSM (§6.6), not SSH.
+VPC, **one public subnet** (the EC2 host), **plus a second subnet in a different AZ** so the RDS **DB
+subnet group** is valid (RDS requires subnets in ≥2 AZs even for a single-AZ instance). Internet Gateway,
+route table + association, and two security groups:
 
-### 6.2 Compute
-- **Spot EC2 instance** (`instanceType`/`capacityType` from claim, arm64 AMI — Amazon Linux 2023).
-- **Key pair** (break-glass only) + **Elastic IP** + EIP association.
-- Root **EBS gp3** volume sized from the claim — holds the Docker volumes for Postgres, FalkorDB, Redis.
+- **App SG** (EC2): inbound **443** (Caddy/TLS) and **80** (optional HTTP→HTTPS redirect) from the
+  internet; nothing else — shell access is via SSM (§6.6), not SSH.
+- **DB SG** (RDS): inbound **5432 only from the App SG** — RDS is **not publicly accessible**.
+
+**No NAT gateway** (the instance sits in the public subnet with an Elastic IP — the single biggest cost
+saving; RDS needs no NAT).
+
+### 6.2 Compute (stateless)
+- **Spot EC2 instance** (`instanceType`/`capacityType` from the XR, arm64 AMI — Amazon Linux 2023).
+- **Key pair** (break-glass only) + **Elastic IP** + EIP association (re-associates after spot replacement).
+- Root **EBS gp3** volume (small, `rootVolumeGiB`) — holds only the **disposable** Docker volumes for
+  Redis + FalkorDB. `deleteOnTermination: true` is acceptable because **none of this is a source of truth**.
 - Tiny `userDataBase64` bootstrap (from `bootstrap/ec2-userdata.sh`): installs Docker + compose plugin +
-  jq, then pulls and runs `start.sh` from the deploy bucket.
+  jq + `postgresql-client` (for `init-db.sql`), then pulls and runs `start.sh` from the deploy bucket.
+
+> The instance carries **no durable data**. On spot reclaim it is re-launched, re-pulls images, re-applies
+> the (idempotent) schema, and reconnects to the same RDS — governed knowledge is never at risk.
 
 ### 6.3 IAM (instance profile)
 A single EC2 role + instance profile (the app uses the SDK default credential chain — no static keys):
 - **S3** RW on the configs + deploy buckets.
-- **DynamoDB** RW on both tables (`quorum-configs`, `quorum-user-projects`).
+- **DynamoDB** RW on `quorum-user-projects`.
 - **Secrets Manager** `GetSecretValue` on `quorum/prod/*`; **KMS** decrypt on the env CMK.
 - **CloudWatch Logs** (Docker `awslogs` driver); **SSM** core (`AmazonSSMManagedInstanceCore`).
 
-> No image-registry policy is needed: GHCR is **not** an AWS service. The instance authenticates to
-> GHCR with a GitHub PAT (`read:packages`) that lives in the `quorum/prod/gateway` Secrets Manager
-> secret and is fetched at boot (§6.5) — the instance profile only grants the GHCR *token* (via
-> Secrets Manager), not registry access itself.
+> No RDS IAM policy is needed — PostgreSQL uses **password auth** (master password from Secrets Manager),
+> not IAM database authentication. No image-registry policy is needed — GHCR is not an AWS service; the
+> instance authenticates to GHCR with a GitHub PAT (`read:packages`) held in the `quorum/prod/gateway`
+> Secrets Manager secret and fetched at boot (§6.5).
 
 ### 6.4 Storage & state
-- **No ECR.** Images live in **GHCR** (`ghcr.io/ayansasmal/quorum-*`), pushed from the dev machine —
-  Crossplane provisions no registry (§6.7).
-- **S3** `quorum-configs` (app config) + a **deploy bucket** (holds `start.sh` + `docker-compose.aws.yml`)
-  — both versioned, SSE-KMS, public-access blocked.
-- **DynamoDB** `quorum-configs` + `quorum-user-projects` (with GSI) — PITR + SSE-KMS.
-- **KMS** one CMK per environment (decision 15) for S3/DynamoDB/Secrets encryption.
-- Postgres / FalkorDB / Redis are **not** AWS resources — they are compose services on the EBS volume.
+- **RDS PostgreSQL** (`db.t4g.micro`, single-AZ, storage SSE-KMS, 7-day automated backups, **final
+  snapshot on delete** — §11) — **the durable source of truth** (`knowledge_versions.summary` and the
+  whole governance schema). Master password generated out-of-band into Secrets Manager; endpoint surfaced
+  via the MR's `writeConnectionSecretToRef` and aggregated into the output Secret.
+- **No ECR.** Images live in **GHCR** (`ghcr.io/ayansasmal/quorum-*`), pushed from the dev machine.
+- **S3** `quorum-configs` (app config) + a **deploy bucket** (holds `start.sh`, `docker-compose.aws.yml`,
+  `Caddyfile`, `init-db.sql`) — both versioned, SSE-KMS, public-access blocked.
+- **DynamoDB** `quorum-user-projects` (with GSI) — PITR + SSE-KMS. *(The former `quorum-configs` table is
+  **retired** — Redis serves that role now, per `gateway/src/ddb.js`. Only one table is provisioned.)*
+- **KMS** one CMK per environment (decision 15) encrypts S3, DynamoDB, Secrets Manager, and RDS storage.
+- **Redis + FalkorDB** are **not** AWS resources — they are disposable compose services on the EBS root.
 
 ### 6.5 Secrets
 Secrets Manager secret `quorum/prod/gateway` holding `QUORUM_JWT_PRIVATE_KEY`, `QUORUM_JWT_PUBLIC_KEY`,
-`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD`, `OPENAI_API_KEY`, and `GHCR_TOKEN`.
-Values are seeded out-of-band (not in git; `OPENAI_API_KEY` comes from the existing `.env`). At boot,
-`start.sh` fetches the secret via the instance profile and writes a root-owned `.env` that
-docker-compose reads — the secret never touches git and never lands in the local control plane's etcd.
-**No ESO** (no Kubernetes).
+`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD` (the RDS master password),
+`OPENAI_API_KEY`, and `GHCR_TOKEN`. Values are seeded out-of-band (not in git; `OPENAI_API_KEY` comes
+from the existing `.env`). At boot, `start.sh` fetches the secret via the instance profile and writes a
+root-owned `.env` that docker-compose reads — together with the RDS endpoint from the output Secret. The
+secret never touches git and never lands in the local control plane's etcd. **No ESO** (no Kubernetes).
 
 > **Two distinct GitHub credentials — don't conflate them.** `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
-> are the app's GitHub **OAuth** login (dashboard sign-in). `GHCR_TOKEN` is a separate GitHub **PAT**
-> with only `read:packages` scope, used at boot to `docker login ghcr.io` and pull the private Quorum
-> images. They are different values with different scopes.
+> are the app's GitHub **OAuth** login (dashboard sign-in). `GHCR_TOKEN` is a separate GitHub **PAT** with
+> only `read:packages` scope, used at boot to `docker login ghcr.io` and pull the private Quorum images.
 
-### 6.6 Access & DNS
+### 6.6 Access, DNS & TLS
 - **SSM Session Manager** for shell access (`aws ssm start-session`) — no inbound SSH, no bastion.
-- **Exposure** is the instance's **auto-generated public DNS** / Elastic IP (decision 9). The EIP and
-  public DNS are surfaced via `writeConnectionSecretToRef`. A custom domain + Route53 + ACM/HTTPS is a
-  clean later add; for the demo, the app is reached on the EIP (HTTP, or self-signed/caddy TLS on-box).
+- **Exposure** is the instance's **auto-generated public DNS** / Elastic IP (decision 8), surfaced via the
+  output Secret.
+- **TLS on-box (Caddy).** A `caddy:2-alpine` sidecar terminates **HTTPS on :443** and reverse-proxies the
+  gateway (`:3001`) and dashboard. For the first cut, `tls internal` uses Caddy's **internal CA**
+  (self-signed) on the auto-DNS — a browser trust warning, but the **OAuth JWT redirect is encrypted in
+  transit**, closing the account-takeover gap the review flagged. `Caddyfile` ships in the deploy bucket.
+- **OAuth wiring.** The EIP is stable, so the public DNS is stable. After first deploy the operator (a) sets
+  the GitHub OAuth App's **Authorization callback URL** to `https://<public-dns>/oauth/callback`, and (b)
+  the boot writes `GITHUB_CALLBACK_URL=https://<public-dns>/oauth/callback` and
+  `DASHBOARD_URL=https://<public-dns>` into `.env` (derived from the output Secret) — these previously
+  defaulted to `localhost` and would have broken sign-in.
+- **Upgrade path:** real domain + Route53 + ACM/Let's Encrypt → set `tls.mode: letsencrypt` and a
+  `domainName` (decision 9).
 
 ### 6.7 App delivery & bootstrap
 
@@ -261,33 +336,56 @@ S3-hosted `start.sh`, so **app/infra changes go to S3, not an instance rebuild**
 
 ```mermaid
 flowchart TD
-    A["EC2 boot — userData (tiny)"] --> B["install docker + compose plugin + jq"]
-    B --> C["aws s3 cp start.sh + docker-compose.aws.yml<br/>(from deploy bucket, via instance profile)"]
-    C --> E["fetch quorum/prod/gateway secret → root-owned .env"]
-    E --> D["echo $GHCR_TOKEN | docker login ghcr.io -u ayansasmal --password-stdin"]
-    D --> F["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
-    F --> G{"runMigrations?"}
-    G -->|yes| H["one-shot: gateway migrate (before serving)"]
-    G -->|no| I
-    H --> I["docker compose up -d<br/>postgres · redis · falkordb · graphiti · gateway · dashboard"]
-    I --> J["awslogs driver → CloudWatch"]
+    A["EC2 boot — userData (tiny)"] --> B["install docker + compose + jq + postgresql-client"]
+    B --> C["aws s3 cp start.sh · docker-compose.aws.yml · Caddyfile · init-db.sql<br/>(from deploy bucket, via instance profile)"]
+    C --> D["fetch quorum/prod/gateway secret + RDS endpoint → root-owned .env"]
+    D --> E["echo $GHCR_TOKEN | docker login ghcr.io -u ayansasmal --password-stdin"]
+    E --> F{"applySchema?"}
+    F -->|yes| G["psql $RDS_URL -f init-db.sql<br/>(idempotent IF NOT EXISTS — safe to re-run)"]
+    F -->|no| H
+    G --> H["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
+    H --> I["docker compose up -d<br/>caddy · redis · falkordb · graphiti · gateway · dashboard"]
+    I --> J["enable systemd timers: decay · archive · recheck (§6.9)"]
+    J --> K["awslogs driver → CloudWatch"]
 ```
+
+**Schema application (replaces the fictional `gateway migrate`).** There is no `migrate` npm script; in
+dev, `init-db.sql` is mounted into Postgres's entrypoint. On RDS there is no such mount, so `start.sh`
+applies the **same `init-db.sql`** with `psql` before the gateway serves. The file is idempotent
+(`CREATE TABLE … IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), so every boot re-asserts the schema safely.
+`init-db.sql` is copied verbatim from `quorum/scripts/init-db.sql` into the bootstrap bundle — one source
+of schema truth. (A real migration tool is a future upgrade — §12.)
 
 **Per-service update/rollback (decision 6).** Push a new image to GHCR, bump its tag in the instance
 `.env`, and `docker compose pull gateway && docker compose up -d gateway` (or `dashboard`) — only that
 container is recreated; the others keep running. Rollback = re-pin the previous tag and `pull`/`up -d`
-again. This preserves the gateway/dashboard independent-deployability we wanted, via compose + GHCR tags
-rather than Helm releases. The backing services (graphiti/falkordb/postgres/redis) are updated together.
+again. This preserves gateway/dashboard independent-deployability via compose + GHCR tags rather than Helm
+releases. The backing services (graphiti/falkordb/redis) are updated together.
 
 > **arm64 note:** `t4g` is Graviton/arm64, so images must be built `linux/arm64`. The operator builds
 > locally on Apple Silicon, which is arm64-native — so `docker build` + `docker push` to GHCR Just Works
 > (use `docker buildx --platform linux/arm64` if ever building on x86 CI).
 
-### 6.8 Why no connection-detail propagation problem
-Because everything runs on one host, there is no cross-cluster endpoint/secret projection to solve.
-Postgres/Redis/FalkorDB are reachable at compose service names; AWS access uses the instance profile;
-secrets arrive as a local `.env`. (Under the earlier EKS design this needed `provider-kubernetes` +
-ESO — all removed.)
+### 6.8 Connection wiring (no cross-cluster propagation)
+The app containers run on one host: Redis and FalkorDB are reachable at compose service names; **PostgreSQL
+is reached at the RDS endpoint** (`POSTGRES_HOST` from the output Secret, over the DB SG on 5432); AWS
+access uses the instance profile; secrets arrive as a local `.env`. There is no cross-cluster
+endpoint/secret projection to solve (the earlier EKS design needed `provider-kubernetes` + ESO — removed).
+
+### 6.9 Operational jobs (scheduler)
+Quorum ships three recurring jobs that the deployment must run (the review flagged their absence):
+
+| Job | Command | Cadence (suggested) |
+|-----|---------|---------------------|
+| Confidence decay | `npm run job:decay` (`scripts/decay-confidence.js`) | daily |
+| Audit archival to S3 | `npm run job:archive` (`scripts/archive-audit.js`) | daily/weekly |
+| Conflict recheck | `npm run job:recheck` (`scripts/recheck-conflicts.js`) | hourly |
+
+They run as **systemd timers** on the instance, each launching a **one-shot container** off the gateway
+image (`docker compose run --rm <job>`), sharing the same `.env` (RDS + Secrets). systemd timers (not the
+gateway process) own scheduling so a gateway restart never double-fires a job, and `awslogs` captures
+their output. (Alternative: a small cron container in the compose file — systemd is preferred for
+visibility and `OnFailure` handling.)
 
 ---
 
@@ -295,8 +393,8 @@ ESO — all removed.)
 
 **Why not Bedrock:** verified against Graphiti's current clients (`graphiti_core`) — the supported
 LLM/embedder backends are OpenAI, Azure OpenAI, Anthropic (direct Anthropic API), Google Gemini, Groq,
-and OpenAI-generic (Ollama/local). **There is no AWS Bedrock client.** Rather than fork Graphiti or
-split providers, both consumers stay on OpenAI:
+and OpenAI-generic (Ollama/local). **There is no AWS Bedrock client.** Rather than fork Graphiti or split
+providers, both consumers stay on OpenAI:
 - **Gateway** governance endpoints (conflict detection, enrichment, extract) → OpenAI.
 - **Graphiti** container → OpenAI LLM (entity extraction) + OpenAI embedder.
 
@@ -313,84 +411,131 @@ EMBEDDER_MODEL_NAME=text-embedding-3-small   # 1536-dim — no FalkorDB re-embed
   FalkorDB embeddings valid.
 - **No LLM IAM** — OpenAI is reached over HTTPS with the key; the instance profile grants no LLM access.
 - **Bedrock remains a future option** if/when Graphiti ships a Bedrock client (would also pair with the
-  Neptune graph upgrade, decision 17).
+  Neptune graph upgrade, decision 18).
 
 ---
 
 ## 8. Why single-EC2 + Docker (not EKS)
 
-The reference project runs on a single spot EC2 with Docker for **~$2.50/mo** of compute. EKS would add
-a **~$73/mo control-plane charge** plus NAT (~$32/mo) plus worker nodes — **$130–160+/mo** — for a demo
-that serves one operator. Quorum already ships a working **docker-compose** stack (`npm run docker:start`),
-so the reference pattern transfers directly; only the instance size grows (`t4g.large` vs `t4g.micro`)
-to fit graphiti + falkordb. We keep the Crossplane Composition/XRD/Claim abstraction (decision 5) so the
-whole footprint is still one declarative `kubectl apply`. EKS/provider-helm remains a clean later
-evolution if Quorum ever needs multi-node HA, autoscaling, or per-service Helm lifecycle.
+The reference project runs on a single spot EC2 with Docker for **~$2.50/mo** of compute. EKS would add a
+**~$73/mo control-plane charge** plus NAT (~$32/mo) plus worker nodes — **$130–160+/mo** — for a demo that
+serves one operator. Quorum already ships a working **docker-compose** stack (`npm run docker:start`), so
+the reference pattern transfers directly; only the instance size grows (`t4g.large` vs `t4g.micro`) to fit
+graphiti + falkordb. We keep the Crossplane Composition/XRD/XR abstraction (decision 5) so the whole
+footprint is still one declarative `kubectl apply`. EKS/provider-helm remains a clean later evolution if
+Quorum ever needs multi-node HA, autoscaling, or per-service Helm lifecycle.
+
+**Cost delta from the RDS decision:** a single-AZ `db.t4g.micro` adds roughly **~$12–15/mo** (instance +
+20 GB gp3 + backups). That is the deliberate price of not losing the governed source of truth on a spot
+reclaim — the one place the demo refuses to be cheap.
 
 ---
 
 ## 9. Deployment flow (`scripts/deploy-aws.sh`)
 
+The original draft uploaded bootstrap files to the deploy bucket **before** the Composition created it —
+an impossible first run. Fixed by **managing the bootstrap artifacts as composed S3 objects** inside the
+Composition: the bucket and its objects (`start.sh`, `docker-compose.aws.yml`, `Caddyfile`, `init-db.sql`)
+are part of the same `kubectl apply`, and the EC2 instance references them, so Crossplane orders
+bucket → objects → EC2 automatically. No out-of-band upload step, no cycle.
+
 ```mermaid
 flowchart TD
-    A["1 · Ensure local cluster + Crossplane core healthy"] --> B["2 · Apply providers + functions — wait Healthy"]
+    A["1 · Ensure local cluster + Crossplane v2 core healthy"] --> B["2 · Apply providers + functions — wait Healthy"]
     B --> C["3 · Apply ProviderConfig aws-prod<br/>(reused creds secret, prod sub-account)"]
     C --> D["4 · Build + push arm64 images to GHCR<br/>(ghcr.io/ayansasmal/quorum-{gateway,dashboard,graphiti})"]
-    D --> E["5 · Upload start.sh + docker-compose.aws.yml to the deploy bucket"]
-    E --> F["6 · Apply XRD + Composition + claim (claims/prod.yaml)"]
-    F --> G["7 · Wait composite Ready:<br/>network → storage/secrets → IAM → EC2"]
-    G --> H["8 · EC2 userData boots → start.sh → compose up (§6.7)"]
-    H --> I["9 · Verify: curl http://<EIP>/health (PostgreSQL · Graphiti · Redis connected)"]
+    D --> E["5 · Seed Secrets Manager (JWT · OAuth · GHCR PAT · OPENAI_API_KEY · PG password)"]
+    E --> F["6 · Apply XRD + Composition + XR (environments/prod.yaml)"]
+    F --> G["7 · Crossplane converges, in dependency order:<br/>network → KMS/secrets → S3 + bucket-objects → RDS + DynamoDB → IAM → EC2"]
+    G --> H["8 · EC2 userData boots → start.sh → psql init-db.sql → compose up + timers (§6.7)"]
+    H --> I["9 · Verify: curl https://&lt;public-dns&gt;/health (PostgreSQL@RDS · Graphiti · Redis connected)"]
 ```
 
-A checksums file (mirroring `.crossplane-checksums` in the reference) guards against unintended
-manifest drift. Note the GHCR images must be pushed (step 4) and the deploy bucket must exist (steps
-6→7) before images/scripts are consumed at boot (step 8); the script ordering and Crossplane readiness
-gates enforce this.
+A checksums file (mirroring `.crossplane-checksums` in the reference) guards against unintended manifest
+drift. Because the bootstrap artifacts are composed S3 objects, the GHCR images (step 4) and the seeded
+secrets (step 5) are the only true prerequisites before the single `apply` in step 6; Crossplane readiness
+gates enforce the rest.
+
+> **Fallback if inlining `init-db.sql` as a composed object is impractical** (size/templating): a two-phase
+> apply — first converge the bucket, then `aws s3 cp` the artifacts, then apply the EC2-bearing
+> Composition — preserves correct ordering. The composed-object approach is preferred (fully declarative).
 
 ---
 
 ## 10. Observability (CloudWatch)
 
-Docker `awslogs` log driver ships gateway/graphiti/dashboard container logs to CloudWatch log groups
-(per the reference). Minimal alarms (instance status-check failed, CloudWatch agent disk/memory) with an
-optional SNS email subscription. Scoped as part of the Composition's observability section; can be
-trimmed for the first deploy.
+Docker `awslogs` log driver ships gateway/graphiti/dashboard/caddy/job container logs to CloudWatch log
+groups (per the reference). Minimal alarms: EC2 instance status-check failed, disk/memory (CloudWatch
+agent), and **RDS** free-storage / CPU / connection-count. Optional SNS email subscription. Scoped as part
+of the Composition's observability section; can be trimmed for the first deploy.
 
 ---
 
-## 11. Open items to resolve during implementation
+## 11. Teardown & retention matrix
+
+"Delete the XR" does **not** uniformly destroy everything — retained/durable resources and AWS recovery
+windows mean teardown is per-resource. Each managed resource carries an explicit Crossplane
+`deletionPolicy` and provider-level retention:
+
+| Resource | On XR delete | Rationale |
+|----------|-------------|-----------|
+| **RDS PostgreSQL** | `deletionPolicy: Delete` **with a final snapshot** (`finalDBSnapshotIdentifier`); `deletionProtection:false` for demo | Source of truth — never delete without a snapshot; restore-able |
+| **S3 buckets (×2)** | `deletionPolicy: Delete` — but **versioned, non-empty buckets must be emptied first** (lifecycle/force) | Crossplane delete fails on a non-empty bucket; script empties or sets a lifecycle expiry |
+| **DynamoDB** | `deletionPolicy: Delete` (PITR enables point-in-time restore within window) | Membership index — rebuildable from S3 configs via `/sync/configs` |
+| **KMS CMK** | `deletionPolicy: Delete` → enters a **7–30 day pending-deletion window** (not immediate) | AWS-enforced; cannot hard-delete instantly |
+| **Secrets Manager** | Deleted with a **recovery window** (7–30 days) unless `--force-delete` | AWS-enforced; avoids accidental loss |
+| **EBS root** | Deleted with the instance (`deleteOnTermination:true`) | Disposable (Redis/FalkorDB only) |
+| **EC2 / EIP** | Instance terminated; **EIP released** (else it bills while idle) | Stateless compute |
+| **VPC / subnets / SGs / IGW** | Deleted | No state |
+
+The deploy script's `down` path documents this order (empty S3 → delete XR → confirm RDS final snapshot →
+optionally `--force-delete` secrets / schedule KMS deletion). "Clean teardown" therefore means *the
+footprint is removed and the durable data is captured in a final RDS snapshot* — not that every byte
+vanishes immediately.
+
+---
+
+## 12. Open items to resolve during implementation
 
 1. **Instance sizing** — confirm `t4g.large` (8 GB) holds gateway + dashboard + graphiti + falkordb +
-   postgres + redis under demo load, or step to `t4g.xlarge` (16 GB).
-2. Spot interruption handling — accept restart-on-reclaim (EIP re-associates, compose volumes persist on
-   the root EBS) vs persistent spot request vs fall back to on-demand.
-3. Choose composition function versions and pin provider package versions.
-4. Where secret values are seeded from (manual `aws secretsmanager put-secret-value`, sourcing
-   `OPENAI_API_KEY` from the existing `.env`) — out of git either way.
-5. Backups — EBS snapshot schedule for the Postgres/FalkorDB volume (durability now rests on the volume,
-   decision 3) vs accepting demo-grade ephemerality.
-6. TLS on the EIP — plain HTTP for the demo vs an on-box caddy/nginx with a self-signed or Let's Encrypt
-   cert (the latter needs a domain → defer to the Route53/ACM upgrade).
-7. **Later upgrades — adopt when the budget justifies it** (this design is the cheap demo tier):
-   managed RDS/ElastiCache for durable/HA data, Amazon Neptune for the graph (decision 17), custom
-   domain + Route53 + ACM/HTTPS, and EKS/provider-helm if multi-node HA/autoscaling is ever needed.
-   Each is an additive change to the same Composition + Claim — the demo footprint graduates in place
-   rather than being rebuilt.
+   redis + caddy under demo load (Postgres is now off-box on RDS), or step to `t4g.xlarge`.
+2. **RDS sizing** — confirm `db.t4g.micro` (1 GB) suffices for the demo, or step to `db.t4g.small`.
+3. **Pin versions** — Crossplane **v2.x** core, provider family packages, and composition function
+   versions (`function-patch-and-transform`, `function-auto-ready`).
+4. **Secret seeding** — finalise how values are put into Secrets Manager (manual
+   `aws secretsmanager put-secret-value`, sourcing `OPENAI_API_KEY` from the existing `.env`) — out of git.
+5. **Composed S3 objects vs two-phase upload** (§9) — confirm `init-db.sql` is small enough to manage as a
+   composed object, else adopt the two-phase fallback.
+6. **Caddy internal CA acceptance** — the self-signed cert raises a browser warning; confirm acceptable
+   for the private demo, or bring the real-domain + Let's Encrypt upgrade forward.
+7. **Migration tooling** — `init-db.sql` idempotency is sufficient now; decide when to adopt a real
+   migration tool (e.g. node-pg-migrate) for ordered, versioned changes.
+8. **Later upgrades — adopt when the budget justifies it:** Multi-AZ RDS + ElastiCache for HA, Amazon
+   Neptune for the graph (decision 18), real domain + Route53 + ACM/HTTPS, and EKS/provider-helm if
+   multi-node HA/autoscaling is ever needed. Each is an additive change to the same Composition + XR — the
+   demo footprint graduates in place rather than being rebuilt.
 
 ---
 
-## 12. Success criteria
+## 13. Success criteria
 
-- `kubectl apply -f claims/prod.yaml` converges to a Ready composite with all AWS resources present
-  (VPC, EC2+EIP, IAM profile, S3 ×2, DynamoDB ×2, Secrets Manager, KMS, CloudWatch). No ECR.
-- The EC2 instance boots, runs `start.sh`, logs in to GHCR with the PAT from Secrets Manager, and
-  `docker compose pull` + `docker compose up` brings the full stack online.
-- `curl http://<EIP>/health` returns healthy with PostgreSQL, Graphiti, and Redis all connected.
-- Gateway and Graphiti perform LLM/embedding operations via OpenAI, with `OPENAI_API_KEY` fetched only
-  from Secrets Manager into the instance `.env` — never committed, never in the local control plane.
+- `kubectl apply -f environments/prod.yaml` converges a namespaced `QuorumEnvironment` XR to Ready, with
+  all AWS resources present (VPC + 2 subnets, EC2+EIP, **RDS PostgreSQL**, IAM profile, S3 ×2, DynamoDB ×1,
+  Secrets Manager, KMS, CloudWatch). No Claim, no ECR.
+- The EC2 instance boots, runs `start.sh`, logs in to GHCR with the PAT from Secrets Manager, **applies
+  `init-db.sql` to RDS**, and `docker compose up` brings the full stack (incl. Caddy TLS) online.
+- `curl https://<public-dns>/health` returns healthy with **PostgreSQL (on RDS)**, Graphiti, and Redis all
+  connected — over **TLS**.
+- GitHub OAuth sign-in completes against `GITHUB_CALLBACK_URL=https://<public-dns>/oauth/callback`.
+- Gateway and Graphiti perform LLM/embedding operations via OpenAI, with `OPENAI_API_KEY` fetched only from
+  Secrets Manager into the instance `.env` — never committed, never in the local control plane.
 - The app authenticates to S3/DynamoDB/Secrets via the **instance profile** (no static keys on the box).
-- **Gateway and dashboard update independently** — pushing a new image tag and
-  `docker compose up -d <svc>` recreates only that container; rollback by re-pinning the prior tag.
-- Tearing down the claim removes the AWS footprint cleanly.
+- The three **operational jobs** (decay/archive/recheck) are scheduled via systemd timers and log to
+  CloudWatch.
+- **A spot reclaim loses no governed knowledge** — the replacement instance reconnects to the same RDS and
+  re-applies the idempotent schema.
+- **Gateway and dashboard update independently** — pushing a new image tag and `docker compose up -d <svc>`
+  recreates only that container; rollback by re-pinning the prior tag.
+- **Teardown** removes the footprint and captures the durable data in a **final RDS snapshot**, per the
+  retention matrix (§11).
 ```
