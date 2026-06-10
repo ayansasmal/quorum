@@ -13,8 +13,9 @@ the reference project.
 
 Deploy the full Quorum stack to AWS using **Crossplane as the only IaC tool**, driven by a single
 declarative `Claim`. One `kubectl apply` of a `QuorumEnvironment` claim converges the complete
-environment: network, a spot EC2 host, IAM (instance profile), ECR, S3, DynamoDB, Secrets Manager,
-KMS, CloudWatch — and bootstraps the Quorum **docker-compose** stack onto the instance.
+environment: network, a spot EC2 host, IAM (instance profile), S3, DynamoDB, Secrets Manager,
+KMS, CloudWatch — and bootstraps the Quorum **docker-compose** stack onto the instance, pulling its
+images from **GHCR**.
 
 This extends the existing LocalStack-targeted Crossplane setup in [`crossplane/`](../../../crossplane/)
 to a real-AWS footprint. It follows the reference project's **single-spot-EC2 + Docker** topology
@@ -39,15 +40,15 @@ Bedrock client — see §7); the OpenAI key is held in Secrets Manager and fetch
 | # | Decision | Choice |
 |---|----------|--------|
 | 1 | **Compute platform** | **Single spot EC2 + Docker Compose** (reference pattern). No EKS |
-| 2 | **Scope** Crossplane owns | VPC, EC2 (spot) + EIP, IAM instance profile, ECR, S3, DynamoDB ×2, Secrets Manager, KMS, CloudWatch |
+| 2 | **Scope** Crossplane owns | VPC, EC2 (spot) + EIP, IAM instance profile, S3, DynamoDB ×2, Secrets Manager, KMS, CloudWatch. **No ECR** |
 | 3 | **Stateful data services** | **Self-hosted** as containers on the instance (Postgres + Redis + FalkorDB). Only S3 + DynamoDB are real AWS services |
 | 4 | **Control plane location** | Local (Docker Desktop / kind), permanent — provisions into real AWS |
 | 5 | **IaC structure** | Compositions + XRDs, one `Claim` per environment; flat-composition-first (one Composition, fenced sections) |
-| 6 | **App delivery** | `userData` bootstrap → pulls setup/`start` script + `docker-compose.aws.yml` from S3 → pulls images from **ECR** → `docker compose up`. Per-service update/rollback via image-tag pinning + `docker compose up -d <svc>` |
+| 6 | **App delivery** | `userData` bootstrap → pulls `start` script + `docker-compose.aws.yml` from S3 → `docker login ghcr.io` (token from Secrets Manager) → `docker compose pull` → `docker compose up`. Per-service update/rollback by pushing a new tag to GHCR + `docker compose pull <svc>` + `docker compose up -d <svc>` |
 | 7 | **Environment** | **One** environment named `prod`, its own AWS sub-account. Demo/test footprint |
 | 8 | **Exposure** | Public, via the instance **Elastic IP + auto-generated public DNS**. URL not shared publicly — demo/test only |
-| 9 | **DNS / TLS** | **Auto-generated** (`ec2-*.compute.amazonaws.com` / EIP). No Route53/custom domain/ACM in first cut |
-| 10 | **Container images** | Built **locally** (arm64 — see §6.7), pushed to **ECR**. Instance pulls via its instance-profile ECR read policy |
+| 9 | **DNS / TLS** | **Auto-generated** (`ec2-*.compute.amazonaws.com` / EIP), HTTP (or on-box self-signed). No Route53/custom domain/ACM in first cut — Caddy auto-HTTPS needs a real domain (later) |
+| 10 | **Container images** | Built **locally** (arm64 — see §6.7), `docker push`ed to **GHCR** (`ghcr.io/ayansasmal/quorum-*`) — matches the reference. Instance pulls with a GitHub token held in Secrets Manager. **No ECR** |
 | 11 | **DB migrations** | Run by the `start` script on the instance (compose one-shot / entrypoint), before the gateway starts serving |
 | 12 | **Cost posture** | Cheapest viable: one **spot** instance in a **public subnet (no NAT)**, graviton burstable, self-hosted data on an EBS volume. Slower is acceptable |
 | 13 | **IAM model** | **EC2 instance profile** (role attached to the instance) — the app uses the SDK default credential chain. No static keys, no IRSA |
@@ -78,19 +79,20 @@ flowchart TB
     subgraph LOCAL["LOCAL — Docker Desktop / kind (permanent control plane)"]
         direction TB
         XP["Crossplane core"]
-        PROV["AWS providers<br/>ec2 · iam · s3 · dynamodb · ecr<br/>secretsmanager · kms · cloudwatch"]
+        PROV["AWS providers<br/>ec2 · iam · s3 · dynamodb<br/>secretsmanager · kms · cloudwatch"]
         FN["Composition functions<br/>patch-and-transform · auto-ready"]
         PC["ProviderConfig: aws-prod (creds secret) · aws-local"]
     end
 
     LOCAL -->|"AWS API calls — region ap-southeast-2"| AWS
 
+    GHCR["GHCR (ghcr.io/ayansasmal/quorum-*)<br/>arm64 images built locally, docker push"]
+
     subgraph AWS["AWS — prod sub-account · ap-southeast-2"]
         direction TB
-        ECR["ECR repos<br/>gateway · dashboard · graphiti<br/>(arm64 images built locally, pushed up)"]
         S3D["S3: quorum-configs + deploy bucket<br/>(start script · docker-compose.aws.yml)"]
         DDB["DynamoDB x2<br/>configs · user-projects"]
-        SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · OPENAI_API_KEY · PG password"]
+        SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · GHCR token · OPENAI_API_KEY · PG password"]
         subgraph VPC["VPC — single public subnet · IGW · no NAT"]
             direction TB
             EIP["Elastic IP + auto public DNS"]
@@ -103,9 +105,9 @@ flowchart TB
     end
 
     EIP --> EC2
-    ECR -.->|"image pull"| COMPOSE
+    GHCR -.->|"docker pull (token from Secrets Mgr)"| COMPOSE
     S3D -.->|"boot: fetch start script + compose"| EC2
-    SM -.->|"boot: fetch secrets → .env"| EC2
+    SM -.->|"boot: fetch secrets → .env + ghcr login"| EC2
     COMPOSE -.->|"instance-profile creds (SDK chain)"| S3D
     COMPOSE -.->|"instance-profile creds"| DDB
     COMPOSE --> EBS
@@ -149,7 +151,7 @@ spec:
       embedDim: 1536                        # unchanged → no FalkorDB re-embed
       # OPENAI_API_KEY is NOT here — held in Secrets Manager, fetched at boot (§6.5)
     images:
-      registry: <acct>.dkr.ecr.ap-southeast-2.amazonaws.com   # ECR (Composition-provisioned)
+      registry: ghcr.io/ayansasmal       # GHCR — images pushed here from the dev machine (§6.7)
       runMigrations: true                  # start script runs migrations before gateway serves (§6.7)
       gatewayTag: "0.4.12"                 # bump + restart to deploy gateway alone
       dashboardTag: "0.4.12"              # bump + restart to deploy dashboard alone
@@ -181,13 +183,13 @@ crossplane/
   claims/
     prod.yaml                # single environment (one sub-account); add more later if needed
   providers/
-    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, ecr, secretsmanager, kms, cloudwatch)
+    providers.yaml           # provider packages (ec2, iam, s3, dynamodb, secretsmanager, kms, cloudwatch)
     functions.yaml           # function-patch-and-transform, function-auto-ready
     providerconfig-aws-prod.yaml   # reused identity from the reference project (prod sub-account)
     providerconfig-aws-local.yaml  # existing LocalStack path, retained
   bootstrap/
     ec2-userdata.sh          # tiny: install docker+compose+jq, fetch start script from S3
-    start.sh                 # full: ECR login, fetch secrets→.env, compose pull, migrate, compose up
+    start.sh                 # full: fetch secrets→.env, ghcr login, compose pull, migrate, compose up
     docker-compose.aws.yml   # the AWS compose file (uploaded to the deploy bucket)
   # existing bucket/ dynamodb/ rds/ redis/ remain as the aws-local dev reference
 scripts/
@@ -217,12 +219,16 @@ A single EC2 role + instance profile (the app uses the SDK default credential ch
 - **S3** RW on the configs + deploy buckets.
 - **DynamoDB** RW on both tables (`quorum-configs`, `quorum-user-projects`).
 - **Secrets Manager** `GetSecretValue` on `quorum/prod/*`; **KMS** decrypt on the env CMK.
-- **ECR** pull (`GetAuthorizationToken`, `BatchGetImage`, `GetDownloadUrlForLayer`).
 - **CloudWatch Logs** (Docker `awslogs` driver); **SSM** core (`AmazonSSMManagedInstanceCore`).
 
+> No image-registry policy is needed: GHCR is **not** an AWS service. The instance authenticates to
+> GHCR with a GitHub PAT (`read:packages`) that lives in the `quorum/prod/gateway` Secrets Manager
+> secret and is fetched at boot (§6.5) — the instance profile only grants the GHCR *token* (via
+> Secrets Manager), not registry access itself.
+
 ### 6.4 Storage & state
-- **ECR** repositories: `quorum-gateway`, `quorum-dashboard`, `quorum-graphiti` (scan-on-push, lifecycle
-  policy to expire untagged).
+- **No ECR.** Images live in **GHCR** (`ghcr.io/ayansasmal/quorum-*`), pushed from the dev machine —
+  Crossplane provisions no registry (§6.7).
 - **S3** `quorum-configs` (app config) + a **deploy bucket** (holds `start.sh` + `docker-compose.aws.yml`)
   — both versioned, SSE-KMS, public-access blocked.
 - **DynamoDB** `quorum-configs` + `quorum-user-projects` (with GSI) — PITR + SSE-KMS.
@@ -231,10 +237,16 @@ A single EC2 role + instance profile (the app uses the SDK default credential ch
 
 ### 6.5 Secrets
 Secrets Manager secret `quorum/prod/gateway` holding `QUORUM_JWT_PRIVATE_KEY`, `QUORUM_JWT_PUBLIC_KEY`,
-`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD`, `OPENAI_API_KEY`. Values are seeded
-out-of-band (not in git; `OPENAI_API_KEY` comes from the existing `.env`). At boot, `start.sh` fetches
-the secret via the instance profile and writes a root-owned `.env` that docker-compose reads — the
-secret never touches git and never lands in the local control plane's etcd. **No ESO** (no Kubernetes).
+`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD`, `OPENAI_API_KEY`, and `GHCR_TOKEN`.
+Values are seeded out-of-band (not in git; `OPENAI_API_KEY` comes from the existing `.env`). At boot,
+`start.sh` fetches the secret via the instance profile and writes a root-owned `.env` that
+docker-compose reads — the secret never touches git and never lands in the local control plane's etcd.
+**No ESO** (no Kubernetes).
+
+> **Two distinct GitHub credentials — don't conflate them.** `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+> are the app's GitHub **OAuth** login (dashboard sign-in). `GHCR_TOKEN` is a separate GitHub **PAT**
+> with only `read:packages` scope, used at boot to `docker login ghcr.io` and pull the private Quorum
+> images. They are different values with different scopes.
 
 ### 6.6 Access & DNS
 - **SSM Session Manager** for shell access (`aws ssm start-session`) — no inbound SSH, no bastion.
@@ -251,9 +263,9 @@ S3-hosted `start.sh`, so **app/infra changes go to S3, not an instance rebuild**
 flowchart TD
     A["EC2 boot — userData (tiny)"] --> B["install docker + compose plugin + jq"]
     B --> C["aws s3 cp start.sh + docker-compose.aws.yml<br/>(from deploy bucket, via instance profile)"]
-    C --> D["aws ecr get-login-password | docker login"]
-    D --> E["fetch quorum/prod/gateway secret → root-owned .env"]
-    E --> F["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
+    C --> E["fetch quorum/prod/gateway secret → root-owned .env"]
+    E --> D["echo $GHCR_TOKEN | docker login ghcr.io -u ayansasmal --password-stdin"]
+    D --> F["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
     F --> G{"runMigrations?"}
     G -->|yes| H["one-shot: gateway migrate (before serving)"]
     G -->|no| I
@@ -261,14 +273,14 @@ flowchart TD
     I --> J["awslogs driver → CloudWatch"]
 ```
 
-**Per-service update/rollback (decision 6).** Push a new image to ECR, bump its tag in the instance
-`.env`, and `docker compose up -d gateway` (or `dashboard`) — only that container is recreated; the
-others keep running. Rollback = re-pin the previous tag and `up -d` again. This preserves the
-gateway/dashboard independent-deployability we wanted, via compose + ECR tags rather than Helm releases.
-The backing services (graphiti/falkordb/postgres/redis) are updated together.
+**Per-service update/rollback (decision 6).** Push a new image to GHCR, bump its tag in the instance
+`.env`, and `docker compose pull gateway && docker compose up -d gateway` (or `dashboard`) — only that
+container is recreated; the others keep running. Rollback = re-pin the previous tag and `pull`/`up -d`
+again. This preserves the gateway/dashboard independent-deployability we wanted, via compose + GHCR tags
+rather than Helm releases. The backing services (graphiti/falkordb/postgres/redis) are updated together.
 
 > **arm64 note:** `t4g` is Graviton/arm64, so images must be built `linux/arm64`. The operator builds
-> locally on Apple Silicon, which is arm64-native — so `docker build` + `docker push` to ECR Just Works
+> locally on Apple Silicon, which is arm64-native — so `docker build` + `docker push` to GHCR Just Works
 > (use `docker buildx --platform linux/arm64` if ever building on x86 CI).
 
 ### 6.8 Why no connection-detail propagation problem
@@ -323,17 +335,18 @@ evolution if Quorum ever needs multi-node HA, autoscaling, or per-service Helm l
 flowchart TD
     A["1 · Ensure local cluster + Crossplane core healthy"] --> B["2 · Apply providers + functions — wait Healthy"]
     B --> C["3 · Apply ProviderConfig aws-prod<br/>(reused creds secret, prod sub-account)"]
-    C --> D["4 · Build + push arm64 images to ECR<br/>(gateway · dashboard · graphiti)"]
+    C --> D["4 · Build + push arm64 images to GHCR<br/>(ghcr.io/ayansasmal/quorum-{gateway,dashboard,graphiti})"]
     D --> E["5 · Upload start.sh + docker-compose.aws.yml to the deploy bucket"]
     E --> F["6 · Apply XRD + Composition + claim (claims/prod.yaml)"]
-    F --> G["7 · Wait composite Ready:<br/>network → storage/ECR/secrets → IAM → EC2"]
+    F --> G["7 · Wait composite Ready:<br/>network → storage/secrets → IAM → EC2"]
     G --> H["8 · EC2 userData boots → start.sh → compose up (§6.7)"]
     H --> I["9 · Verify: curl http://<EIP>/health (PostgreSQL · Graphiti · Redis connected)"]
 ```
 
 A checksums file (mirroring `.crossplane-checksums` in the reference) guards against unintended
-manifest drift. Note ECR repos + deploy bucket must exist (steps 6→7) before images/scripts are
-consumed at boot (step 8); the script ordering and Crossplane readiness gates enforce this.
+manifest drift. Note the GHCR images must be pushed (step 4) and the deploy bucket must exist (steps
+6→7) before images/scripts are consumed at boot (step 8); the script ordering and Crossplane readiness
+gates enforce this.
 
 ---
 
@@ -370,8 +383,9 @@ trimmed for the first deploy.
 ## 12. Success criteria
 
 - `kubectl apply -f claims/prod.yaml` converges to a Ready composite with all AWS resources present
-  (VPC, EC2+EIP, IAM profile, ECR, S3 ×2, DynamoDB ×2, Secrets Manager, KMS, CloudWatch).
-- The EC2 instance boots, runs `start.sh`, and `docker compose up` brings the full stack online.
+  (VPC, EC2+EIP, IAM profile, S3 ×2, DynamoDB ×2, Secrets Manager, KMS, CloudWatch). No ECR.
+- The EC2 instance boots, runs `start.sh`, logs in to GHCR with the PAT from Secrets Manager, and
+  `docker compose pull` + `docker compose up` brings the full stack online.
 - `curl http://<EIP>/health` returns healthy with PostgreSQL, Graphiti, and Redis all connected.
 - Gateway and Graphiti perform LLM/embedding operations via OpenAI, with `OPENAI_API_KEY` fetched only
   from Secrets Manager into the instance `.env` — never committed, never in the local control plane.
