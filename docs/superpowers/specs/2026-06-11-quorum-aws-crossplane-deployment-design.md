@@ -73,10 +73,10 @@ An external review (codex) caught eight issues in the original draft. The correc
 | 10 | **Container images** | Built **locally** (arm64 — see §6.7), `docker push`ed to **GHCR** (`ghcr.io/ayansasmal/quorum-*`). Instance pulls with a GitHub PAT held in Secrets Manager. **No ECR** |
 | 11 | **DB schema / migrations** | The **real `init-db.sql`** (already the dev source of schema) is shipped to S3 and applied to RDS by `start.sh` via `psql` on boot. It is **idempotent** (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`), so re-running is safe. A migration tool (e.g. node-pg-migrate) is a noted future upgrade |
 | 12 | **Cost posture** | Cheapest viable: one **spot** instance in a **public subnet (no NAT)**, graviton burstable; single-AZ `db.t4g.micro` RDS. Slower is acceptable |
-| 13 | **IAM model** | **EC2 instance profile** — the app uses the SDK default credential chain. No static keys, no IRSA. (RDS uses password auth from Secrets Manager, not IAM auth) |
+| 13 | **IAM model** | **EC2 instance profile** — the app uses the SDK default credential chain. No static AWS keys, no IRSA. RDS password auth uses an **RDS-managed Secrets Manager secret**, fetched at runtime |
 | 14 | **Access** | **SSM Session Manager** (no bastion / no inbound SSH). Key pair retained for break-glass |
 | 15 | **KMS** | One CMK per environment (encrypts S3, DynamoDB, Secrets Manager, **RDS storage**) |
-| 16 | **Secret rotation** | Rotate-by-redeploy: re-run `start.sh` to re-fetch Secrets Manager values into the instance `.env` |
+| 16 | **Secret rotation** | RDS manages and rotates its master-user secret. A systemd credential-refresh timer detects secret-version changes, atomically rewrites the DB variables in `.env`, and recreates the gateway container. Application secrets use rotate-by-redeploy |
 | 17 | **Operational jobs** | `job:decay` / `job:archive` / `job:recheck` run on the instance via **systemd timers** (one-shot containers) — §6.9 |
 | 18 | **FalkorDB / graph backend** | Container on the instance (disposable). **Amazon Neptune** is the planned later backend (Graphiti supports it) |
 
@@ -116,7 +116,7 @@ flowchart TB
         direction TB
         S3D["S3 ×2: quorum-configs + deploy bucket<br/>(start.sh · docker-compose.aws.yml · init-db.sql)"]
         DDB["DynamoDB<br/>quorum-user-projects (GSI)"]
-        SM["Secrets Manager · 1 KMS CMK<br/>JWT · GitHub OAuth · GHCR PAT · OPENAI_API_KEY · PG password"]
+        SM["Secrets Manager · 1 KMS CMK<br/>app secret: JWT · OAuth · GHCR PAT · OPENAI_API_KEY<br/>RDS-managed master credential secret"]
         subgraph VPC["VPC — public subnet (EC2) + DB subnet group (2 AZs)"]
             direction TB
             EIP["Elastic IP"]
@@ -185,6 +185,8 @@ spec:
     engineVersion: "16"
     instanceClass: db.t4g.micro      # cheapest graviton; single-AZ
     allocatedStorageGiB: 20
+    masterUsername: quorum
+    manageMasterUserPassword: true   # RDS generates and manages the password in Secrets Manager
     multiAz: false                   # demo posture; flip to true for HA later
     deletionProtection: false        # demo; see teardown matrix (§11)
     backupRetentionDays: 7           # automated daily snapshots
@@ -290,19 +292,25 @@ saving; RDS needs no NAT).
 A single EC2 role + instance profile (the app uses the SDK default credential chain — no static keys):
 - **S3** RW on the configs + deploy buckets.
 - **DynamoDB** RW on `quorum-user-projects`.
-- **Secrets Manager** `GetSecretValue` on `quorum/prod/*`; **KMS** decrypt on the env CMK.
+- **Secrets Manager** `GetSecretValue` on `quorum/prod/*` and the RDS-managed secret namespace;
+  **RDS** `DescribeDBInstances` for endpoint and master-secret ARN discovery; **KMS** decrypt on the env CMK.
 - **CloudWatch Logs** (Docker `awslogs` driver); **SSM** core (`AmazonSSMManagedInstanceCore`).
 
-> No RDS IAM policy is needed — PostgreSQL uses **password auth** (master password from Secrets Manager),
-> not IAM database authentication. No image-registry policy is needed — GHCR is not an AWS service; the
-> instance authenticates to GHCR with a GitHub PAT (`read:packages`) held in the `quorum/prod/gateway`
-> Secrets Manager secret and fetched at boot (§6.5).
+> No `rds-db:connect` permission is needed — PostgreSQL uses **password auth**, not IAM database
+> authentication. The instance does need read-only `rds:DescribeDBInstances` to discover
+> `MasterUserSecret.SecretArn` and `Endpoint.Address`. No image-registry policy is needed — GHCR is not an
+> AWS service; the instance authenticates with a GitHub PAT (`read:packages`) held in the
+> `quorum/prod/gateway` application secret (§6.5).
 
 ### 6.4 Storage & state
 - **RDS PostgreSQL** (`db.t4g.micro`, single-AZ, storage SSE-KMS, 7-day automated backups, **final
   snapshot on delete** — §11) — **the durable source of truth** (`knowledge_versions.summary` and the
-  whole governance schema). Master password generated out-of-band into Secrets Manager; endpoint surfaced
-  via the MR's `writeConnectionSecretToRef` and aggregated into the output Secret.
+  whole governance schema). `ManageMasterUserPassword` is enabled: RDS generates a strong master password,
+  stores it in an RDS-managed Secrets Manager secret encrypted by the environment CMK, and rotates it
+  without placing the password in Git, the XR, or local Kubernetes etcd. The exact Upbound YAML field
+  names must be verified against the pinned provider CRD during implementation; the authoritative AWS API
+  fields are `ManageMasterUserPassword` and `MasterUserSecretKmsKeyId`. See
+  [RDS password management with Secrets Manager](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-secrets-manager.html).
 - **No ECR.** Images live in **GHCR** (`ghcr.io/ayansasmal/quorum-*`), pushed from the dev machine.
 - **S3** `quorum-configs` (app config) + a **deploy bucket** (holds `start.sh`, `docker-compose.aws.yml`,
   `Caddyfile`, `init-db.sql`) — both versioned, SSE-KMS, public-access blocked.
@@ -312,12 +320,26 @@ A single EC2 role + instance profile (the app uses the SDK default credential ch
 - **Redis + FalkorDB** are **not** AWS resources — they are disposable compose services on the EBS root.
 
 ### 6.5 Secrets
-Secrets Manager secret `quorum/prod/gateway` holding `QUORUM_JWT_PRIVATE_KEY`, `QUORUM_JWT_PUBLIC_KEY`,
-`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `POSTGRES_PASSWORD` (the RDS master password),
-`OPENAI_API_KEY`, and `GHCR_TOKEN`. Values are seeded out-of-band (not in git; `OPENAI_API_KEY` comes
-from the existing `.env`). At boot, `start.sh` fetches the secret via the instance profile and writes a
-root-owned `.env` that docker-compose reads — together with the RDS endpoint from the output Secret. The
-secret never touches git and never lands in the local control plane's etcd. **No ESO** (no Kubernetes).
+There are **two distinct secret lifecycles**:
+
+1. **Application secret** `quorum/prod/gateway`: `QUORUM_JWT_PRIVATE_KEY`,
+   `QUORUM_JWT_PUBLIC_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `OPENAI_API_KEY`, and
+   `GHCR_TOKEN`. These values are seeded out-of-band and rotated by updating the secret and re-running
+   `start.sh`.
+2. **RDS-managed master credential secret:** RDS creates this automatically when
+   `ManageMasterUserPassword=true`. It contains the generated database username/password and is encrypted
+   with the environment CMK. The database password is **not copied** into `quorum/prod/gateway`.
+
+At boot, `start.sh` uses the instance profile to call `DescribeDBInstances`, reads
+`MasterUserSecret.SecretArn`, fetches that secret with `GetSecretValue`, and writes `POSTGRES_HOST`,
+`POSTGRES_PORT`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` into a root-owned `.env`. It separately fetches
+the application secret and writes the non-database values. Neither secret touches Git or local Kubernetes
+etcd. **No ESO** (no application Kubernetes cluster).
+
+The instance IAM policy scopes application-secret access to `quorum/prod/*`. For the AWS-generated RDS
+secret, use the narrowest policy supported by the pinned provider and composition outputs: prefer the
+observed secret ARN; otherwise restrict access to the account/region's `rds!db-*` secret namespace plus
+the environment CMK rather than granting unrestricted Secrets Manager access.
 
 > **Two distinct GitHub credentials — don't conflate them.** `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
 > are the app's GitHub **OAuth** login (dashboard sign-in). `GHCR_TOKEN` is a separate GitHub **PAT** with
@@ -356,15 +378,16 @@ S3-hosted `start.sh`, so **app/infra changes go to S3, not an instance rebuild**
 flowchart TD
     A["EC2 boot — userData (tiny)"] --> B["install docker + compose + jq + postgresql-client"]
     B --> C["aws s3 cp start.sh · docker-compose.aws.yml · Caddyfile · init-db.sql<br/>(from deploy bucket, via instance profile)"]
-    C --> D["fetch quorum/prod/gateway secret + RDS endpoint → root-owned .env"]
-    D --> E["echo $GHCR_TOKEN | docker login ghcr.io -u ayansasmal --password-stdin"]
-    E --> F{"applySchema?"}
-    F -->|yes| G["psql $RDS_URL -f init-db.sql<br/>(idempotent IF NOT EXISTS — safe to re-run)"]
-    F -->|no| H
-    G --> H["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
-    H --> I["docker compose up -d<br/>caddy · redis · falkordb · graphiti · gateway · dashboard"]
-    I --> J["enable systemd timers: decay · archive · recheck (§6.9)"]
-    J --> K["awslogs driver → CloudWatch"]
+    C --> D["DescribeDBInstances → endpoint + MasterUserSecret ARN"]
+    D --> E["fetch application secret + RDS-managed credential secret<br/>→ root-owned .env"]
+    E --> F["echo $GHCR_TOKEN | docker login ghcr.io -u ayansasmal --password-stdin"]
+    F --> G{"applySchema?"}
+    G -->|yes| H["psql $RDS_URL -f init-db.sql<br/>(idempotent IF NOT EXISTS — safe to re-run)"]
+    G -->|no| I
+    H --> I["docker compose pull (gateway/dashboard/graphiti @ tags from .env)"]
+    I --> J["docker compose up -d<br/>caddy · redis · falkordb · graphiti · gateway · dashboard"]
+    J --> K["enable systemd timers:<br/>credential refresh · decay · archive · recheck (§6.9)"]
+    K --> L["awslogs driver → CloudWatch"]
 ```
 
 **Schema application (replaces the fictional `gateway migrate`).** There is no `migrate` npm script; in
@@ -386,9 +409,10 @@ releases. The backing services (graphiti/falkordb/redis) are updated together.
 
 ### 6.8 Connection wiring (no cross-cluster propagation)
 The app containers run on one host: Redis and FalkorDB are reachable at compose service names; **PostgreSQL
-is reached at the RDS endpoint** (`POSTGRES_HOST` from the output Secret, over the DB SG on 5432); AWS
-access uses the instance profile; secrets arrive as a local `.env`. There is no cross-cluster
-endpoint/secret projection to solve (the earlier EKS design needed `provider-kubernetes` + ESO — removed).
+is reached at the endpoint returned by `DescribeDBInstances`**, over the DB SG on 5432. The same response
+provides the RDS-managed master secret ARN; `GetSecretValue` supplies the current username/password. AWS
+access uses the instance profile and secrets arrive as a local `.env`. The local Crossplane output Secret
+is for operator visibility only — EC2 does not depend on a Kubernetes-to-instance secret projection.
 
 ### 6.9 Operational jobs (scheduler)
 Quorum ships three recurring jobs that the deployment must run (the review flagged their absence):
@@ -404,6 +428,18 @@ image (`docker compose run --rm <job>`), sharing the same `.env` (RDS + Secrets)
 gateway process) own scheduling so a gateway restart never double-fires a job, and `awslogs` captures
 their output. (Alternative: a small cron container in the compose file — systemd is preferred for
 visibility and `OnFailure` handling.)
+
+An additional **credential-refresh timer** runs every 15 minutes. It retrieves the current RDS secret
+version, compares a stored checksum/version ID, and when the credentials change:
+
+1. writes a complete replacement `.env` to a root-only temporary file;
+2. atomically renames it over the active `.env`;
+3. runs `docker compose up -d --force-recreate gateway`;
+4. records the applied secret version only after the gateway health check succeeds.
+
+Scheduled jobs are one-shot containers and therefore read the latest `.env` each time they start. This
+keeps the Compose deployment compatible with RDS-managed rotation without embedding credentials in images
+or requiring application code changes.
 
 ---
 
@@ -462,11 +498,11 @@ flowchart TD
     A["1 · Ensure local cluster + Crossplane v2 core healthy"] --> B["2 · Apply providers + functions — wait Healthy"]
     B --> C["3 · Apply ProviderConfig aws-prod<br/>(reused creds secret, prod sub-account)"]
     C --> D["4 · Build + push arm64 images to GHCR<br/>(ghcr.io/ayansasmal/quorum-{gateway,dashboard,graphiti})"]
-    D --> E["5 · Seed Secrets Manager (JWT · OAuth · GHCR PAT · OPENAI_API_KEY · PG password)"]
+    D --> E["5 · Seed application secret<br/>(JWT · OAuth · GHCR PAT · OPENAI_API_KEY; no DB password)"]
     E --> F["6 · Apply XRD + Composition + XR (environments/prod.yaml)"]
     F --> G["7 · Crossplane converges, in dependency order:<br/>network → KMS/secrets → S3 + bucket-objects → RDS + DynamoDB → IAM → EC2/EIP"]
     G --> H["8 · Create/verify domainName A → EIP<br/>(automatic when manageRoute53=true; external otherwise)"]
-    H --> I["9 · EC2 userData boots → start.sh → psql init-db.sql → compose up + timers (§6.7)<br/>Caddy retries ACME until DNS resolves"]
+    H --> I["9 · EC2 discovers RDS endpoint + managed secret ARN<br/>fetches credentials → psql init-db.sql → compose up + timers"]
     I --> J["10 · Verify: curl https://&lt;domainName&gt;/health (PostgreSQL@RDS · Graphiti · Redis connected)"]
 ```
 
@@ -504,7 +540,8 @@ windows mean teardown is per-resource. Each managed resource carries an explicit
 | **S3 buckets (×2)** | `deletionPolicy: Delete` — but **versioned, non-empty buckets must be emptied first** (lifecycle/force) | Crossplane delete fails on a non-empty bucket; script empties or sets a lifecycle expiry |
 | **DynamoDB** | `deletionPolicy: Delete` (PITR enables point-in-time restore within window) | Membership index — rebuildable from S3 configs via `/sync/configs` |
 | **KMS CMK** | `deletionPolicy: Delete` → enters a **7–30 day pending-deletion window** (not immediate) | AWS-enforced; cannot hard-delete instantly |
-| **Secrets Manager** | Deleted with a **recovery window** (7–30 days) unless `--force-delete` | AWS-enforced; avoids accidental loss |
+| **Application secret** | Deleted with a **recovery window** (7–30 days) unless `--force-delete` | AWS-enforced; avoids accidental loss |
+| **RDS-managed credential secret** | Lifecycle follows the RDS instance; RDS deletes the managed secret when the DB instance is deleted | Do not duplicate or independently manage the database password |
 | **EBS root** | Deleted with the instance (`deleteOnTermination:true`) | Disposable (Redis/FalkorDB only) |
 | **EC2 / EIP** | Instance terminated; **EIP released** (else it bills while idle) | Stateless compute |
 | **VPC / subnets / SGs / IGW** | Deleted | No state |
@@ -523,8 +560,9 @@ vanishes immediately.
 2. **RDS sizing** — confirm `db.t4g.micro` (1 GB) suffices for the demo, or step to `db.t4g.small`.
 3. **Pin versions** — Crossplane **v2.x** core, provider family packages, and composition function
    versions (`function-patch-and-transform`, `function-auto-ready`).
-4. **Secret seeding** — finalise how values are put into Secrets Manager (manual
-   `aws secretsmanager put-secret-value`, sourcing `OPENAI_API_KEY` from the existing `.env`) — out of git.
+4. **Application-secret seeding** — finalise how JWT/OAuth/GHCR/OpenAI values are put into
+   `quorum/prod/gateway` (manual `aws secretsmanager put-secret-value`, sourcing `OPENAI_API_KEY` from the
+   existing `.env`) — out of git. The RDS password is not part of this step.
 5. **Composed S3 objects vs two-phase upload** (§9) — confirm `init-db.sql` is small enough to manage as a
    composed object, else adopt the two-phase fallback.
 6. **Domain and DNS provider** — select `domainName`, create its A record to the EIP, and decide whether
@@ -546,6 +584,11 @@ vanishes immediately.
   Secrets Manager, KMS, CloudWatch). No Claim, no ECR.
 - The EC2 instance boots, runs `start.sh`, logs in to GHCR with the PAT from Secrets Manager, **applies
   `init-db.sql` to RDS**, and `docker compose up` brings the full stack (incl. Caddy TLS) online.
+- RDS generates the master password, stores it only in its managed Secrets Manager secret, and EC2
+  discovers/fetches the current credentials through the instance profile. No database password appears in
+  Git, XR manifests, the application secret, or local Kubernetes etcd.
+- Rotating the RDS-managed secret updates the database and causes the credential-refresh timer to
+  atomically refresh `.env` and recreate a healthy gateway without manual password synchronization.
 - The configured domain resolves to the EIP, Caddy obtains a **publicly trusted ACME certificate**, and
   `curl https://<domainName>/health` returns healthy with **PostgreSQL (on RDS)**, Graphiti, and Redis all
   connected.

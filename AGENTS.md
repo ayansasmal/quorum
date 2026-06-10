@@ -237,6 +237,12 @@ graph TD
 - Route 53 is optional. DNS may remain with any registrar/provider; no ALB or ACM is required for the direct-EIP topology.
 - Design source: `docs/superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md`.
 
+**AWS RDS credential decision (2026-06-11):**
+- RDS generates and manages the master-user password in AWS Secrets Manager; no database password is supplied through Git, XR manifests, the application secret, or local Kubernetes etcd.
+- EC2 uses its instance profile to discover the RDS endpoint and `MasterUserSecret.SecretArn`, then fetches the current credential secret into a root-owned `.env`.
+- The application secret contains JWT, OAuth, OpenAI, and GHCR values only. It must never duplicate the RDS password.
+- A systemd credential-refresh timer detects RDS secret rotation, atomically replaces the DB variables, and recreates the gateway container after a successful health check.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)
