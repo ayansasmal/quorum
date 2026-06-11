@@ -659,6 +659,14 @@ A 15-minute systemd timer:
 
 Implementation must keep preparation separate from execution.
 
+### Hard prerequisites before a real deployment
+
+A **registered domain is required** before the stack can be deployed end-to-end: Caddy's ACME TLS
+issuance and the GitHub OAuth callback both need a real `domainName`. While `domainName` is the
+`<gateway-domain>` placeholder, manifests still render and validate, but the TLS and OAuth steps
+(workflow items 9–11) cannot complete. The other prerequisite is the seeded `quorum/prod/gateway`
+application secret (workflow item 6). Neither blocks authoring or offline validation.
+
 ### Safe implementation and validation commands
 
 These do not create AWS resources:
@@ -794,6 +802,17 @@ The alert lands at normal monthly spend so the operator simply sees "you've used
 action sits well above it, so an ordinary month is never force-stopped, but a runaway bill — for example
 an instance left running after a manual `quorum-resume.sh` — is still capped. The schedule controls
 *normal* cost; the alert *informs*; the action caps *worst-case* cost.
+
+Two limits on what this budget guarantees:
+
+- **AWS-only scope.** The budget covers AWS spend, not OpenAI. Embedding (`text-embedding-3-small`) and
+  LLM (`gpt-4o-mini`) calls bill to OpenAI on a separate invoice that AWS Budgets cannot see, so "under
+  ~60 AUD" is the AWS bill alone. Cap OpenAI independently with an org-level monthly usage limit in the
+  OpenAI dashboard so both major cost levers have a guardrail.
+- **Not real-time.** AWS Budgets refresh actual-cost data only a few times a day, so the stop action can
+  lag the true spend by hours. At this footprint that is at most a few dollars of overrun — the action is
+  insurance against a forgotten instance, not a real-time circuit breaker. The daily auto-stop, not the
+  budget, is what actually keeps cost down.
 
 ---
 
