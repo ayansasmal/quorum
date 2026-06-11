@@ -290,20 +290,17 @@ gateway/                ← @as-quorum/gateway (private, enterprise self-hosted)
                            config/ · graph/ · audit/ · governance/
     redis.js · keys.js · config-cache.js · ddb.js · errors.js
 
-dashboard/src/          ← React dashboard (private, enterprise self-hosted)
-  pages/                ← Stats · Graph · Pending · Knowledge · Audit · Config · Status · Admin
-  components/           ← layout/ · session/ · status/
-  context/              ← AuthContext.jsx · ThemeContext.jsx
-  api/                  ← typed API clients (incl. governance.js for v0.3 endpoints)
-
 tests/
   gateway/              ← gateway route tests (auth · graphiti · governance)
+  e2e/                  ← API-level E2E scenarios (Playwright); browser @ui tests live in quorum-dash
 
 scripts/                ← seed · audit-scan · decay · archive · recheck
   audit-cli.js          ← ops audit CLI (verify · lineage · export · stats) via gateway HTTP
 ```
 
 > MCP server source: `github.com/as-quorum/quorum-mcp` (canonical) — installed as `@as-quorum/mcp`
+>
+> Dashboard source: `github.com/ayansasmal/Quorum-dash` — the React SPA (:3002) moved to its own repo and consumes the gateway's BFF (`/api/*`) over HTTP. The gateway's `routes/dashboard.js` BFF handlers stay here.
 
 ---
 

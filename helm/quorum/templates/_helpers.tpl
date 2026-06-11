@@ -124,21 +124,7 @@ app.kubernetes.io/component: graphiti
 app.kubernetes.io/component: graphiti
 {{- end }}
 
-{{/* ── Dashboard helpers ──────────────────────────────────────── */}}
-
-{{- define "quorum.dashboard.fullname" -}}
-{{- printf "%s-dashboard" (include "quorum.fullname" .) | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{- define "quorum.dashboard.labels" -}}
-{{ include "quorum.labels" . }}
-app.kubernetes.io/component: dashboard
-{{- end }}
-
-{{- define "quorum.dashboard.selectorLabels" -}}
-{{ include "quorum.selectorLabels" . }}
-app.kubernetes.io/component: dashboard
-{{- end }}
+{{/* The dashboard now lives in its own repo (quorum-dash) with its own chart. */}}
 
 {{/* Graphiti OpenAI secret name */}}
 {{- define "quorum.graphiti.openaiSecretName" -}}

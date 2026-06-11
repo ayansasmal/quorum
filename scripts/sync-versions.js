@@ -8,7 +8,7 @@
  * Also called automatically by the npm `version` lifecycle hook (defined in
  * root package.json "scripts.version"). This means `npm version patch/minor/major`
  * bumps the root version AND syncs it to all workspace packages in one step,
- * so the git commit created by npm includes all three package.json files.
+ * so the git commit created by npm includes both package.json files.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -31,7 +31,7 @@ const root    = readPkg('package.json')
 const version = root.version
 
 /** Workspace package.json paths relative to repo root */
-const workspaces = ['gateway/package.json', 'dashboard/package.json']
+const workspaces = ['gateway/package.json']
 
 for (const rel of workspaces) {
   const pkg = readPkg(rel)

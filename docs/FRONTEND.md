@@ -3,6 +3,13 @@
 > Created: 2026-04-19
 > Status: Implemented — Wave 4 complete (2026-04-21)
 > Purpose: Full reference for the Quorum visibility dashboard implementation
+>
+> **Note (2026-06-11):** The dashboard application has since moved to its own
+> repo — [`github.com/ayansasmal/Quorum-dash`](https://github.com/ayansasmal/Quorum-dash).
+> The `dashboard/`-relative paths, Dockerfile, nginx config, and build commands
+> in this document now live there. This file is retained as the design reference;
+> the gateway's BFF (`/api/*`) handlers in `gateway/src/routes/dashboard.js` remain
+> in this repo.
 
 ---
 

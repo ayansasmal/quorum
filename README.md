@@ -137,7 +137,7 @@ npm install -g @as-quorum/mcp
 quorum install
 ```
 
-After setup: **Dashboard** → http://localhost:3002 · **Gateway** → http://localhost:3001/health
+After setup: **Gateway** → http://localhost:3001/health · **Dashboard** → http://localhost:3002 (runs from the [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) repo against this stack)
 
 ```bash
 node scripts/audit-cli.js stats    # ops audit CLI (requires QUORUM_GATEWAY_URL + QUORUM_GITHUB_TOKEN)
@@ -236,8 +236,7 @@ Engineering decisions explain *how* things are built. Business requirements expl
 
 ```
 gateway/             ← @as-quorum/gateway — Express :3001 (private, self-hosted)
-dashboard/           ← React SPA served via nginx :3002 (private, self-hosted)
-tests/               ← Gateway integration tests (vitest)
+tests/               ← Gateway integration tests (vitest) + API-level E2E (Playwright)
 mock-openai/         ← Zero-dependency Node.js OpenAI mock for E2E test isolation
 scripts/             ← setup.sh · audit-cli.js · seed · decay · archive · e2e-docker.sh
 docs/                ← ARCHITECTURE · TESTING · DEPLOYMENT · QUICKSTART · FRONTEND · E2E-JOURNEYS
@@ -301,7 +300,7 @@ A curated index of the docs in this repo. (The MCP server's own docs live in the
 | Doc | What's in it |
 |-----|--------------|
 | [gateway/README.md](gateway/README.md) | Gateway service — Express :3001 |
-| [dashboard/README.md](dashboard/README.md) | React dashboard SPA — :3002 |
+| [github.com/ayansasmal/Quorum-dash](https://github.com/ayansasmal/Quorum-dash) | React dashboard SPA — :3002 (own repo; consumes the gateway BFF over HTTP) |
 
 ### Decisions, roadmap & contributing
 

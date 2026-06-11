@@ -129,7 +129,8 @@ check_localstack_persistence() {
 
 # ── docker mode ───────────────────────────────────────────────────────────────
 # Starts the full stack via Docker Compose: FalkorDB + PostgreSQL + Graphiti +
-# Quorum MCP server + Gateway + Dashboard. No Kubernetes required.
+# Quorum MCP server + Gateway. No Kubernetes required.
+# The dashboard ships from its own repo (quorum-dash) and runs separately.
 
 cmd_docker() {
   local LOG_FILE="$LOG_DIR/setup.${TIMESTAMP}.log"
@@ -140,8 +141,6 @@ cmd_docker() {
   if [[ "$_QUORUM_DEV_MODE" == "1" ]]; then
     ok "Dev mode: bind-mounted source (docker-compose.dev.yml overlay active)"
     ok "  Gateway:   node --watch on gateway/src/         →  http://localhost:3001"
-    ok "  Dashboard: nginx serving ./dashboard/dist        →  http://localhost:3002"
-    ok "  Rebuild dashboard: npm run build --workspace=dashboard"
   else
     info "Production mode: built images (pass --env=dev or set QUORUM_ENV=dev for live source)"
   fi
@@ -207,7 +206,7 @@ cmd_docker() {
       && ok "$EXTERNAL_LOCALSTACK connected to quorum_default (alias: localstack)" \
       || ok "$EXTERNAL_LOCALSTACK already in quorum_default — no action needed"
   else
-    info "Starting FalkorDB + PostgreSQL + Graphiti + Gateway + Dashboard..."
+    info "Starting FalkorDB + PostgreSQL + Graphiti + Gateway..."
     docker compose up -d
   fi
 
@@ -261,14 +260,13 @@ cmd_docker() {
   echo "  Verify:"
   echo "    node scripts/audit-cli.js stats"
   echo ""
-  echo "  Dashboard:  http://localhost:3002"
   echo "  Gateway:    http://localhost:3001/health"
   echo "  LocalStack: http://localhost:4566/_localstack/health"
   echo ""
 }
 
 # ── docker rebuild ────────────────────────────────────────────────────────────
-# Rebuild all custom images (gateway, graphiti, dashboard) from scratch,
+# Rebuild all custom images (gateway, graphiti) from scratch,
 # then restart the stack. Skips LocalStack — existing data is preserved.
 # Use after Dockerfile or source code changes that don't hot-reload.
 # The quorum MCP service is opt-in (profile: mcp) and excluded from default builds.
@@ -291,7 +289,7 @@ cmd_docker_rebuild() {
   docker compose down --remove-orphans 2>/dev/null || true
 
   info "Rebuilding images without cache..."
-  docker compose build --no-cache --parallel gateway quorum-dashboard graphiti
+  docker compose build --no-cache --parallel gateway graphiti
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
@@ -355,7 +353,7 @@ cmd_docker_clean() {
     | xargs docker rmi -f 2>/dev/null \
     || true
   # Also remove by name in case labels aren't set
-  for img in quorum-quorum quorum-gateway quorum-quorum-dashboard quorum-graphiti; do
+  for img in quorum-quorum quorum-gateway quorum-graphiti; do
     docker rmi -f "$img" 2>/dev/null || true
   done
 

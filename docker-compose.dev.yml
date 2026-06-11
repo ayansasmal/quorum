@@ -8,10 +8,9 @@
 #   QUORUM_ENV=dev ./scripts/setup.sh docker
 #
 # Gateway:   node --watch restarts automatically on any .js change under gateway/src/
-# Dashboard: nginx serves ./dashboard/dist — rebuild with: npm run build --workspace=dashboard
-#            nginx picks up the new dist immediately (no container restart needed).
 #
-# Both services remain on their original ports (gateway :3001, dashboard :3002).
+# The dashboard now lives in its own repo (quorum-dash) and runs separately
+# (its own Vite dev server) — it is no longer part of this stack.
 
 name: quorum
 
@@ -26,9 +25,3 @@ services:
     command: node --watch gateway/src/server.js
     environment:
       - NODE_ENV=development
-
-  quorum-dashboard:
-    # Use the existing nginx image — just replace /usr/share/nginx/html with the local dist.
-    # Build first: npm run build --workspace=dashboard
-    volumes:
-      - ./dashboard/dist:/usr/share/nginx/html:ro

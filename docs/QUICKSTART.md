@@ -74,10 +74,13 @@ The first run takes 3–5 minutes (Docker image pulls). Subsequent runs are unde
 ✓ LocalStack S3 ready
 ✓ Seed complete
 
-  Dashboard:  http://localhost:3002
   Gateway:    http://localhost:3001/health
   LocalStack: http://localhost:4566/_localstack/health
 ```
+
+> The dashboard (:3002) ships from its own repo —
+> [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash). Run it separately
+> against this stack (`npm run dev` in that repo).
 
 ---
 
@@ -96,7 +99,7 @@ node scripts/audit-cli.js verify
 # ✓ Chain integrity: OK (N entries verified)
 ```
 
-Open the dashboard in your browser: **http://localhost:3002**
+Once the dashboard is running from the [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) repo against this stack, open it in your browser: **http://localhost:3002**
 
 ---
 
@@ -127,7 +130,6 @@ claude mcp list
 | Service | URL | Purpose |
 |---|---|---|
 | `gateway` | http://localhost:3001 | Central API — JWT auth, S3 config, Graphiti proxy |
-| `quorum-dashboard` | http://localhost:3002 | Web UI — browse knowledge, pending decisions |
 | `graphiti` | http://localhost:8001 | Python sidecar — temporal knowledge graph engine |
 | `falkordb` | http://localhost:3000 | Graph database browser UI |
 | `postgresql` | localhost:5432 | Audit log store (dual-store with graph) |
@@ -242,7 +244,6 @@ docker compose restart gateway
 **Port already in use**
 ```bash
 lsof -i :3001    # find what's using the gateway port
-lsof -i :3002    # find what's using the dashboard port
 # Change ports in .env if needed: QUORUM_GATEWAY_PORT=3011
 ```
 

@@ -6,8 +6,7 @@
   ],
   "bumpFiles": [
     { "filename": "package.json",           "type": "json" },
-    { "filename": "gateway/package.json",   "type": "json" },
-    { "filename": "dashboard/package.json", "type": "json" }
+    { "filename": "gateway/package.json",   "type": "json" }
   ],
 
   "types": [

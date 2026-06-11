@@ -4,7 +4,7 @@
  * Journey: J09 — Platform Admin Operations
  * Pillars: Functional Correctness (S-09.1, S-09.2, S-09.3)
  *          Validation Guards      (S-09.4)
- *          Dashboard Visibility   (S-09.5 — browser-only)
+ *          Dashboard Visibility   (S-09.5 — browser-only; MOVED to quorum-dash 09-admin-operations-ui)
  *          User Profile           (S-09.6)
  *
  * Sub-scenarios:
@@ -12,7 +12,7 @@
  *   S-09.2  User management — add/remove admin users
  *   S-09.3  Project listing — GET /admin/projects returns all projects
  *   S-09.4  Reason guard — short reason on admin/users → 400 REASON_REQUIRED
- *   S-09.5  Dashboard admin panel visible only with is_admin:true JWT (browser)
+ *   S-09.5  Dashboard admin panel visibility (browser) — MOVED to quorum-dash
  *   S-09.6  User profile — GET /user/profile/:username (any authenticated user)
  *   S-09.7  Admin filtered audit log — GET /pg/audit?tool=role_update (GAP-021)
  *   S-09.8  Project archive — DELETE /admin/projects/:groupId soft-archives; guards 400+403 (GAP-022)
@@ -30,7 +30,6 @@ import { test, expect } from '@playwright/test'
 const { describe, beforeAll } = test
 import { api }                      from '../helpers/api.js'
 import { tokens }                   from '../helpers/jwt.js'
-import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 
 const PROJECT = 'quorum-test-project'
 const CATALOG = 'quorum-test-catalog'
@@ -153,41 +152,6 @@ describe('S-09.4 — Reason Guard on Admin User Management', () => {
   })
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-// S-09.5 — Dashboard Admin Panel (browser-only)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('S-09.5 — Dashboard Admin Panel Visibility', () => {
-  test('step 1 — /admin page renders when is_admin:true JWT injected', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'Browser tests run in Docker mode only (QUORUM_DASHBOARD_URL not set)')
-
-    await injectSession(page, { sub: 'test-admin', is_admin: true, project: PROJECT })
-    await page.goto(`${DASHBOARD_URL}/admin`)
-
-    // Admin panel should render — not redirected to home or shown permission-denied
-    await page.waitForLoadState('networkidle')
-    const url = page.url()
-    expect(url).not.toMatch(/\/$/)
-    // Admin-specific content present (heading or section)
-    const heading = await page.locator('h1, h2').first().textContent()
-    expect(heading.toLowerCase()).toMatch(/admin/)
-  })
-
-  test('step 2 — /admin page not accessible to non-admin PE', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'Browser tests run in Docker mode only (QUORUM_DASHBOARD_URL not set)')
-
-    await injectSession(page, { sub: 'test-pe', role: 'principal_architect', project: PROJECT })
-    await page.goto(`${DASHBOARD_URL}/admin`)
-
-    await page.waitForLoadState('networkidle')
-    // Should be redirected away from /admin (no admin access for non-admin PE)
-    const url = page.url()
-    // Either redirected to root or shows an error state
-    const notAdmin = url.endsWith('/') || url.endsWith('/admin') === false ||
-      (await page.locator('[data-testid="forbidden"], .forbidden, .permission-denied').count()) > 0
-    expect(notAdmin || !url.includes('/admin') || url.endsWith('/')).toBe(true)
-  })
-})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S-09.6 — User Profile Endpoint

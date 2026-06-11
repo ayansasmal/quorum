@@ -22,7 +22,7 @@
  *
  * Notes:
  *   - S-22.1–22.4 are API-only; no seed required beyond setup.js fixtures.
- *   - S-22.5–22.8 require the dashboard (QUORUM_DASHBOARD_URL).
+ *   - S-22.5–22.8 (browser) MOVED to quorum-dash (22-portfolio-intelligence-ui).
  *   - S-22.3 uses quorum-test-isolated-project (no globals → always UNCERTIFIED).
  *   - Serial mode required: S-22.2 and S-22.3 both call GET /api/portfolio and must
  *     not interleave with concurrent workers that might alter fixture state.
@@ -33,7 +33,6 @@ import axios             from 'axios'
 import { api }               from '../helpers/api.js'
 import { tokens }            from '../helpers/jwt.js'
 import { uid }               from '../helpers/seed.js'
-import { injectSession, DASHBOARD_URL } from '../helpers/browser.js'
 
 const { describe, beforeAll } = test
 
@@ -189,128 +188,6 @@ describe('S-22.4 — node_id Hierarchy Filter', () => {
   })
 })
 
-// ── S-22.5 — Browser: Page Renders ─────────────────────────────────────────────
-
-describe('S-22.5 — Portfolio Page Renders', { tag: '@ui' }, () => {
-  test('step 1 — rollup banner is visible after navigation', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-    const rollup = page.getByTestId('portfolio-rollup')
-    await expect(rollup).toBeVisible()
-  })
-
-  test('step 2 — portfolio score badge is present', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-    const badge = page.getByTestId('portfolio-score-badge')
-    await expect(badge).toBeVisible()
-  })
-
-  test('step 3 — certified and uncertified counts are visible', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-    await expect(page.getByTestId('portfolio-certified-count')).toBeVisible()
-    await expect(page.getByTestId('portfolio-uncertified-count')).toBeVisible()
-  })
-})
-
-// ── S-22.6 — Browser: Table Rows ───────────────────────────────────────────────
-
-describe('S-22.6 — Portfolio Table Rows', { tag: '@ui' }, () => {
-  test('step 1 — table container is visible', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-    await expect(page.getByTestId('portfolio-table')).toBeVisible()
-  })
-
-  test('step 2 — at least one project row is rendered', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-    const rows = page.getByTestId('portfolio-row')
-    await expect(rows.first()).toBeVisible()
-  })
-})
-
-// ── S-22.7 — Browser: Search Filter ───────────────────────────────────────────
-
-describe('S-22.7 — Portfolio Search Filter', { tag: '@ui' }, () => {
-  // POSITIVE: known search term narrows results
-  test('step 1 — POSITIVE: searching for a known project name filters the table', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-
-    const allRows = page.getByTestId('portfolio-row')
-    const totalBefore = await allRows.count()
-
-    await page.getByTestId('portfolio-search').fill('quorum-test-catalog')
-    await expect(allRows).not.toHaveCount(0)
-    const totalAfter = await allRows.count()
-    expect(totalAfter).toBeLessThanOrEqual(totalBefore)
-  })
-
-  test('step 2 — POSITIVE: clearing search restores full list', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-
-    const allRows = page.getByTestId('portfolio-row')
-    const countBefore = await allRows.count()
-
-    await page.getByTestId('portfolio-search').fill('quorum-test-catalog')
-    await page.getByTestId('portfolio-search').clear()
-    const countAfter = await allRows.count()
-    expect(countAfter).toBe(countBefore)
-  })
-
-  // NEGATIVE: nonsense search term shows empty state, not a crash or stale rows
-  test('step 3 — NEGATIVE: no-match search shows empty state', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-
-    await page.getByTestId('portfolio-search').fill('zzz-no-such-project-zzz')
-    await expect(page.getByTestId('portfolio-empty')).toBeVisible()
-    await expect(page.getByTestId('portfolio-row')).toHaveCount(0)
-  })
-})
-
-// ── S-22.8 — Browser: Status Filter ───────────────────────────────────────────
-
-describe('S-22.8 — Portfolio Status Filter', { tag: '@ui' }, () => {
-  test('step 1 — selecting UNCERTIFIED shows only UNCERTIFIED rows', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-
-    await page.getByTestId('portfolio-status-filter').selectOption('UNCERTIFIED')
-    // All visible rows should show UNCERTIFIED badge text
-    const rows = page.getByTestId('portfolio-row')
-    const count = await rows.count()
-    for (let i = 0; i < count; i++) {
-      await expect(rows.nth(i)).toContainText('UNCERTIFIED')
-    }
-  })
-
-  test('step 2 — selecting All restores full list', async ({ page }) => {
-    test.skip(!process.env.QUORUM_DASHBOARD_URL, 'browser tests require dashboard — set QUORUM_DASHBOARD_URL or use npm run test:e2e:docker')
-    await injectSession(page)
-    await page.goto(`${DASHBOARD_URL}/portfolio`, { waitUntil: 'networkidle' })
-
-    const allRows = page.getByTestId('portfolio-row')
-    const countBefore = await allRows.count()
-
-    await page.getByTestId('portfolio-status-filter').selectOption('UNCERTIFIED')
-    await page.getByTestId('portfolio-status-filter').selectOption('')
-    const countAfter = await allRows.count()
-    expect(countAfter).toBe(countBefore)
-  })
-})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S-22.9 — Archived Project Isolation + Cross-Project Portfolio Guard (NEGATIVE)

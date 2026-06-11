@@ -6,11 +6,10 @@
   "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "workspaces": [
-    "gateway",
-    "dashboard"
+    "gateway"
   ],
   "scripts": {
-    "version": "node scripts/sync-versions.js && git add gateway/package.json dashboard/package.json",
+    "version": "node scripts/sync-versions.js && git add gateway/package.json",
     "version:sync": "node scripts/sync-versions.js",
     "release": "commit-and-tag-version",
     "release:dry": "commit-and-tag-version --dry-run",

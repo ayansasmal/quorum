@@ -139,7 +139,7 @@ npm run release:minor # force minor bump regardless of commit types
 git push --follow-tags origin main
 ```
 
-`npm run release` bumps `package.json`, `gateway/package.json`, and `dashboard/package.json` together, appends `CHANGELOG.md`, and creates a git commit + tag (`v0.x.y`) in one step.
+`npm run release` bumps `package.json` and `gateway/package.json` together, appends `CHANGELOG.md`, and creates a git commit + tag (`v0.x.y`) in one step.
 
 ---
 

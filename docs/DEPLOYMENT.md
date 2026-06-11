@@ -17,12 +17,16 @@ Platform Team                          Engineers
 Runs the central Quorum stack:         Connect from their local machine:
 
   gateway       :3001                    npm install -g @as-quorum/mcp
-  dashboard     :3002                    quorum install   ← one-time setup
+  dashboard     :3002 †                  quorum install   ← one-time setup
   postgresql    :5432                    quorum init      ← connect to project
   graphiti      :8001
   falkordb      :6379                  Claude Code auto-starts the MCP each
   localstack    :4566 (local/S3)       session. Engineers never touch infra.
 ```
+
+> † The dashboard (:3002) ships from its own repo —
+> [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) — with its own image and
+> Helm chart. This repo's chart provisions the gateway + backing stores only.
 
 The MCP server runs **locally on each engineer's machine** — not in the platform stack.
 It talks to the central gateway over HTTP. Engineers never need database credentials,
@@ -86,8 +90,8 @@ automatically at session start when the token is missing or expired.
 │  postgresql       → audit store   :5432         │
 │  graphiti         → LLM sidecar   :8001         │
 │  gateway          → central API   :3001         │
-│  dashboard        → web UI        :3002         │
 └─────────────────────────────────────────────────┘
+   (the dashboard :3002 ships from the quorum-dash repo)
 
 Note: The MCP server is NOT in this stack.
       It runs locally on each engineer's machine via Claude Code.
@@ -307,9 +311,6 @@ helm/quorum/
       deployment.yaml
       service.yaml
       configmap.yaml
-    dashboard/
-      deployment.yaml
-      service.yaml
     graphiti/
       deployment.yaml
       service.yaml

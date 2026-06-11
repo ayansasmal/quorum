@@ -19,11 +19,8 @@
 
 import { defineConfig, devices } from '@playwright/test'
 
-// Default to localhost:3002 so browser test skip guards pass without manual env setup.
-// Docker mode sets QUORUM_DASHBOARD_URL=http://dashboard (non-localhost) which skips webServer.
-process.env.QUORUM_DASHBOARD_URL ??= 'http://localhost:3002'
-
-const isDashboardLocal = process.env.QUORUM_DASHBOARD_URL.startsWith('http://localhost')
+// This suite is API-level only. The dashboard's browser (@ui) E2E tests live in
+// the separate quorum-dash repo, where the gateway is exercised as a black box.
 
 export default defineConfig({
   testDir:    'tests/e2e/scenarios',
@@ -50,9 +47,6 @@ export default defineConfig({
     // Gateway base URL — override via QUORUM_GATEWAY_URL env
     baseURL:      process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001',
 
-    // Dashboard base URL — override via QUORUM_DASHBOARD_URL env
-    // Used by Playwright browser tests (J14 dashboard visual, J08, etc.)
-    // If your dashboard runs elsewhere, override this.
     ...devices['Desktop Chrome'],
 
     // Full-page screenshot after every test (pass or fail) — fullPage scrolls the
@@ -81,25 +75,6 @@ export default defineConfig({
     },
   },
 
-  // Auto-start the dashboard Vite dev server when running locally.
-  // In Docker mode (QUORUM_DASHBOARD_URL=http://dashboard), the container is already
-  // running — webServer would fail trying to bind port 3002 inside a non-local env.
-  // reuseExistingServer means iterative local runs don't restart an already-hot server.
-  ...(isDashboardLocal ? {
-    webServer: {
-      command: 'npm --prefix dashboard run dev -- --port 3002 --strictPort',
-      url:     'http://localhost:3002',
-      reuseExistingServer: true,
-      timeout: 60_000,
-      stdout:  'ignore',
-      stderr:  'pipe',
-      env: {
-        ...process.env,
-        VITE_GATEWAY_URL: process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001',
-      },
-    },
-  } : {}),
-
   // T0 infrastructure probes run before any test.
   // Defined in tests/e2e/helpers/setup.js — must export a default function.
   globalSetup: './tests/e2e/helpers/setup.js',
@@ -108,21 +83,12 @@ export default defineConfig({
   // See tests/e2e/helpers/teardown.js for rationale.
   globalTeardown: './tests/e2e/helpers/teardown.js',
 
-  // Two projects so the HTML report groups API tests and browser tests separately.
-  // Browser tests are tagged @ui on their describe block; grep/grepInvert routes
-  // each test to the right project without changing test titles.
+  // Single API-level project. Browser (@ui) tests live in the quorum-dash repo.
   projects: [
     {
       name: 'api',
       testMatch: '**/scenarios/**/*.spec.js',
       use: { browserName: 'chromium' },
-      grepInvert: /@ui/,
-    },
-    {
-      name: 'ui',
-      testMatch: '**/scenarios/**/*.spec.js',
-      use: { browserName: 'chromium' },
-      grep: /@ui/,
     },
   ],
 })

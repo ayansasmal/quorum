@@ -26,37 +26,8 @@ recheckJob:
   batchSize: "50"           # max rows processed per run
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
-# React/nginx SPA. Nginx proxies /api + /auth to the Gateway service at runtime.
-# Build locally: docker build -t quorum-dashboard:0.2.0 ./dashboard
-dashboard:
-  enabled: true
-  image:
-    repository: quorum-dashboard
-    tag: "0.2.0"
-    pullPolicy: IfNotPresent
-  replicaCount: 1
-  service:
-    type: ClusterIP
-    port: 80
-    nodePort: null   # set when type=NodePort (local dev)
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
-  ingress:
-    enabled: true
-    className: nginx
-    annotations: {}
-    host: quorum-dashboard.company.internal
-    tls:
-      enabled: true
-      secretName: quorum-dashboard-tls
-  podAnnotations: {}
-  tolerations: []
-  affinity: {}
+# The React/nginx SPA now lives in its own repo (quorum-dash) and ships its own
+# Helm chart / deployment. This chart provisions the gateway + backing stores only.
 
 # ── Quorum Gateway ──────────────────────────────────────────────────────────────
 # Central microservice: holds DB credentials, S3 access, JWT signing keys.
