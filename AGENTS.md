@@ -296,6 +296,7 @@ graph TD
 - Bootstrap loads the application secret before resolving the canonical RDS identifier, ignores stale `DB_INSTANCE_ID` secret values, creates `quorum_audit` when absent, and then applies the idempotent schema.
 - `crossplane/deploy.sh apply` is complete only after XR readiness, bootstrap upload, successful SSM execution, and the instance-local gateway health check.
 - `crossplane/deploy.sh destroy` empties every deploy-bucket object version, requests XR deletion, and waits until all namespaced managed resources are actually gone.
+- RDS teardown keeps one rolling final snapshot named `quorum-prod-final`; after typed confirmation, destroy deletes the previous snapshot before XR deletion so the current RDS instance can create its replacement without `DBSnapshotAlreadyExists`.
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 

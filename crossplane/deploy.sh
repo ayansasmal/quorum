@@ -16,6 +16,7 @@ ENVIRONMENT="quorum-prod"
 AWS_REGION="ap-southeast-2"
 DEPLOY_BUCKET="quorum-prod-deploy"
 BOOTSTRAP_VERSION="current"
+FINAL_SNAPSHOT_ID="quorum-prod-final"
 
 validate() {
   cd "${ROOT}/.."
@@ -169,6 +170,23 @@ delete_deploy_bucket_versions() {
   done
 }
 
+# Replaces the prior rolling final snapshot so RDS deletion can create a new one.
+delete_previous_final_snapshot() {
+  if ! aws rds describe-db-snapshots \
+    --region "${AWS_REGION}" \
+    --db-snapshot-identifier "${FINAL_SNAPSHOT_ID}" >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "deleting previous rolling RDS snapshot ${FINAL_SNAPSHOT_ID}..."
+  aws rds delete-db-snapshot \
+    --region "${AWS_REGION}" \
+    --db-snapshot-identifier "${FINAL_SNAPSHOT_ID}" >/dev/null
+  aws rds wait db-snapshot-deleted \
+    --region "${AWS_REGION}" \
+    --db-snapshot-identifier "${FINAL_SNAPSHOT_ID}"
+}
+
 # Waits for Kubernetes finalizers and AWS deletions to finish, not merely start.
 wait_for_managed_deletion() {
   local attempt managed_json remaining
@@ -308,6 +326,7 @@ case "${COMMAND}" in
     ;;
   destroy)
     confirm "delete"
+    delete_previous_final_snapshot
     delete_deploy_bucket_versions
     kubectl delete --ignore-not-found -f "${ROOT}/environments/prod.yaml"
     wait_for_managed_deletion

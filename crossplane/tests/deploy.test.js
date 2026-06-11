@@ -72,6 +72,9 @@ describe('S-DEPLOY deployment gate', () => {
   })
 
   it('makes destroy idempotent, empties versioned artifacts, and waits for deletion', () => {
+    expect(source).toContain('delete_previous_final_snapshot')
+    expect(source).toContain('aws rds delete-db-snapshot')
+    expect(source).toContain('aws rds wait db-snapshot-deleted')
     expect(source).toContain('delete_deploy_bucket_versions')
     expect(source).toContain('aws s3api list-object-versions')
     expect(source).toContain('aws s3api delete-objects')

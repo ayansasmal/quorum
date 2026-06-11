@@ -319,4 +319,7 @@ Take a final snapshot, confirm the retained RDS/S3 data requirements, then run:
 The destroy command removes all versions from the deploy bucket before deleting the XR, then waits
 up to 40 minutes for Kubernetes finalizers and AWS deletion to remove every managed resource. It
 prints the remaining resource names while waiting and exits non-zero with status diagnostics on
-timeout. The externally managed `quorum/prod/gateway` secret and Vercel DNS record are retained.
+timeout. RDS uses a rolling final snapshot named `quorum-prod-final`: after typed confirmation,
+destroy removes the previous snapshot and waits for its deletion so the current database deletion
+can create the replacement. The externally managed `quorum/prod/gateway` secret and Vercel DNS
+record are retained.
