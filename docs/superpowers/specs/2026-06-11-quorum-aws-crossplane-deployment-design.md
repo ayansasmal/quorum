@@ -235,6 +235,7 @@ The AWS gateway remains the sole authentication and authorization authority:
 | Crossplane core | Docker Desktop Kubernetes | Helm chart `crossplane-stable/crossplane` |
 | AWS providers and functions | Docker Desktop Kubernetes | Crossplane package resources |
 | VPC, EC2, RDS, IAM, S3, DynamoDB, KMS, logs | AWS | Crossplane Composition |
+| EventBridge Scheduler stop/start schedules, AWS Budget + budget action | AWS | Crossplane Composition |
 | Gateway application secret | AWS Secrets Manager | Operator-created and seeded before the production XR |
 | Caddy | EC2 | Docker Compose |
 | Gateway | EC2 | Docker Compose, image from GHCR |
@@ -491,6 +492,16 @@ keep running whether or not the local Crossplane control plane is online; Crossp
 
 The scheduler and budget roles are separate from the EC2 instance role: the instance never needs
 permission to stop or start itself or the database.
+
+These resources are composed inside the single `XQuorumEnvironment` Composition — they are **not** a
+separate XRD. They require two AWS provider-family subpackages beyond the ec2/rds/s3/iam/dynamodb/kms
+set, added to `providers/providers.yaml` and pinned to the same provider-family v2 line:
+
+- `upbound/provider-aws-scheduler` — the `Schedule` resource (`scheduler.aws.upbound.io`).
+- `upbound/provider-aws-budgets` — the `Budget` and `BudgetAction` resources (`budgets.aws.upbound.io`).
+
+The Composition wires the two schedules' and the budget action's resource ARNs to the EC2 instance and
+RDS instance it already creates, and references the scheduler/budget IAM roles for `assumeRole`.
 
 ---
 
