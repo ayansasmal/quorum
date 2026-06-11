@@ -196,6 +196,18 @@ Crossplane uses a namespaced `aws.m.upbound.io/v1beta1` ProviderConfig named `aw
 After rotating the `quorum-prod` AWS profile, rerun step 1 above; provider pods read the updated Secret
 without requiring credentials to be stored in Git.
 
+### Future Private GHCR Hardening
+
+The demo currently uses public runtime packages to avoid placing GitHub credentials on EC2. A future
+production hardening task may make both packages private and use a dedicated GitHub machine account or
+classic personal access token with `read:packages` only. Store that credential in a separate AWS
+Secrets Manager secret such as `quorum/prod/ghcr`; do not add it to `quorum/prod/gateway`.
+
+Grant the EC2 instance role `secretsmanager:GetSecretValue` only for that secret ARN. During bootstrap,
+retrieve the username/token, authenticate with `docker login ghcr.io --password-stdin`, pull the pinned
+images, and then run `docker logout ghcr.io`. The token must not include `repo`, `workflow`,
+`write:packages`, or administrative scopes.
+
 RDS generates the master credential in AWS Secrets Manager. The EC2 instance profile reads the RDS
 endpoint and managed-secret ARN, then writes database variables to `/etc/quorum/quorum.env` with mode
 `0600`. `quorum-credential-refresh.timer` repeats this every 15 minutes so password rotation does not

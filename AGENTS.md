@@ -279,6 +279,9 @@ graph TD
   `ghcr.io/ayansasmal/graphiti-mcp:0.4.x` are public Linux ARM64 packages; EC2 must pull them
   anonymously rather than storing a GitHub token. Upload bootstrap assets to
   `s3://quorum-prod-deploy/bootstrap/current/` with `*.example` excluded.
+- Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
+  dedicated machine-user or classic token with `read:packages` only. Scope the EC2 role to that secret
+  ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
 
 **AWS composition and bootstrap completion (2026-06-11):**
 - The production render contains 44 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.
