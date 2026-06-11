@@ -61,11 +61,11 @@ kind: Provider
 metadata:
   name: provider-aws-scheduler
 spec:
-  package: xpkg.upbound.io/upbound/provider-aws-scheduler:v2.3.0
+  package: xpkg.upbound.io/upbound/provider-aws-scheduler:v2.5.0
 ---
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: provider-aws-budgets
 spec:
-  package: xpkg.upbound.io/upbound/provider-aws-budgets:v2.3.0
+  package: xpkg.upbound.io/upbound/provider-aws-budgets:v2.5.0
