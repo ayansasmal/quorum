@@ -112,7 +112,7 @@ sequenceDiagram
     Gateway->>Redis: profile:{sub} (cache hit or DDB miss)
     Redis-->>Gateway: { projects: [...] }
     Gateway-->>Browser: full profile with projects + roles
-    Note over Browser: 1 project → auto-select; n projects → show selector
+    Note over Browser: 1 project → auto-select, n projects → show selector
     Note over Browser: Active project stored in X-Quorum-Project header on all subsequent requests
 ```
 
@@ -891,7 +891,7 @@ graph TD
     T[Quorum enrichment trigger] --> M[Atlassian MCP Server<br/>OAuth auth]
     M --> AC[Atlassian Cloud<br/>Jira + Confluence]
     AC --> R[Raw Atlassian content]
-    R --> EA[Quorum Enrichment Agent - Claude<br/>extracts decisions, requirements,<br/>constraints, patterns;<br/>diagrams via image to Mermaid flow]
+    R --> EA[Quorum Enrichment Agent - Claude<br/>extracts decisions, requirements,<br/>constraints, patterns,<br/>diagrams via image to Mermaid flow]
     EA --> GP[Quorum Governance Pipeline<br/>conflict check → DRAFT → reviewer notified]
     GP --> G[Graph updated with enriched provenance<br/>source: jira:AUTH-247 or confluence:page_id]
 ```

@@ -251,6 +251,69 @@ playwright.config.js         ← E2E test runner config
 
 ---
 
+## Documentation
+
+A curated index of the docs in this repo. (The MCP server's own docs live in the [`quorum-mcp`](../quorum-mcp/README.md) package; the workspace-level index is at [`../README.md`](../README.md).)
+
+### Start here
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/WHY.md](docs/WHY.md) | The case for Quorum — eight narratives from teams who've felt the pain |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | Local setup walkthrough with troubleshooting |
+| [docs/ONBOARDING.md](docs/ONBOARDING.md) | Connect an existing project to a running Quorum stack |
+
+### Design & internals
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component design, Graphiti integration, versioning model, governance flows, entity schema |
+| [docs/ANALYSIS.md](docs/ANALYSIS.md) | System analysis & end-to-end data-flow reference |
+| [docs/DIAGRAMS.md](docs/DIAGRAMS.md) | Architecture, data-flow, and use-case sequence diagrams |
+| [docs/AUDIT.md](docs/AUDIT.md) | Audit-by-architecture — dual-store pipeline + SHA256 tamper-evident chain |
+| [docs/FRONTEND.md](docs/FRONTEND.md) | Dashboard architecture, pages, and BFF routes |
+| [gateway/openapi.yaml](gateway/openapi.yaml) | OpenAPI 3.1 spec for every gateway route |
+
+### Operations & deployment
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Helm chart, Crossplane IaC, LocalStack, production config |
+| [crossplane/README.md](crossplane/README.md) | Crossplane infrastructure composition |
+| [crossplane/COMPONENTS.md](crossplane/COMPONENTS.md) | Crossplane component reference |
+
+### Testing & quality
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/TESTING.md](docs/TESTING.md) | Three-layer test strategy, constitutional coverage, CI enforcement |
+| [docs/e2e/README.md](docs/e2e/README.md) | E2E journey index, scenario IDs, running tests, graph reporter |
+| [docs/e2e/TEST-PLAN.md](docs/e2e/TEST-PLAN.md) | Risk-weighted E2E plan — OwnScore/FailureCost model, fix priority |
+| [docs/e2e/GAP-ANALYSIS.md](docs/e2e/GAP-ANALYSIS.md) | 38 prioritised coverage gaps (P0–P6) |
+| [docs/e2e/AGENT-QUALITY-FRAMEWORK-PLAN.md](docs/e2e/AGENT-QUALITY-FRAMEWORK-PLAN.md) | Plan to evolve the test plan into an agent-readable quality framework |
+| [docs/e2e/MANUAL-TESTS.md](docs/e2e/MANUAL-TESTS.md) | Manual scenarios not automatable via HTTP (LLM quality, OAuth browser) |
+| [docs/e2e/PRODUCT-DIAGRAMS.md](docs/e2e/PRODUCT-DIAGRAMS.md) | Product-level journey diagrams |
+| [docs/e2e/TOKENS.md](docs/e2e/TOKENS.md) | JWT developer tooling — minting test tokens |
+| [docs/e2e/journeys/](docs/e2e/journeys/) | 22 detailed E2E journey specs (J01–J22) |
+
+### Subsystem READMEs
+
+| Doc | What's in it |
+|-----|--------------|
+| [gateway/README.md](gateway/README.md) | Gateway service — Express :3001 |
+| [dashboard/README.md](dashboard/README.md) | React dashboard SPA — :3002 |
+
+### Decisions, roadmap & contributing
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/adr/README.md](docs/adr/README.md) | Architecture Decision Records index (ADR 0000–0010) |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | v0.1 → v1.0 feature roadmap |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Contribution guidelines, PR process |
+| [docs/superpowers/](docs/superpowers/) | Design plans & specs (development history) |
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](docs/CONTRIBUTING.md). Elastic License 2.0.
