@@ -1,12 +1,13 @@
-# Production AWS ProviderConfig. Credentials are operator-created out of band.
-apiVersion: aws.upbound.io/v1beta1
+# Production namespaced AWS ProviderConfig. Credentials are operator-created out of band.
+apiVersion: aws.m.upbound.io/v1beta1
 kind: ProviderConfig
 metadata:
   name: aws-prod
+  namespace: quorum-system
 spec:
   credentials:
     source: Secret
     secretRef:
-      namespace: crossplane-system
+      namespace: quorum-system
       name: aws-creds-prod
       key: creds

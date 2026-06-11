@@ -30,6 +30,74 @@ confirm() {
   [[ "${answer}" == yes ]] || { echo "aborted"; exit 1; }
 }
 
+# Reports aggregate health, published connection outputs, and actionable resource failures.
+status() {
+  local namespace="quorum-system"
+  local environment="quorum-prod"
+  local managed_json
+
+  managed_json="$(kubectl get managed -n "${namespace}" -o json)"
+
+  printf '\n=== Composite environment ===\n'
+  kubectl get xquorumenvironment "${environment}" -n "${namespace}" -o wide
+
+  printf '\n=== Published outputs ===\n'
+  kubectl get xquorumenvironment "${environment}" -n "${namespace}" -o json |
+    jq -r '
+      [
+        ["ELASTIC_IP", (.status.elasticIp // "pending")],
+        ["INSTANCE_ID", (.status.instanceId // "pending")],
+        ["RDS_ENDPOINT", (.status.rdsEndpoint // "pending")]
+      ] |
+      .[] | @tsv
+    ' |
+    column -t
+
+  printf '\n=== Managed resources ===\n'
+  jq -r '
+    ["READY", "SYNCED", "KIND", "NAME", "EXTERNAL_NAME"],
+    (
+      .items[] |
+      [
+        (if any(.status.conditions[]?; .type == "Ready" and .status == "True") then "yes" else "no" end),
+        (if any(.status.conditions[]?; .type == "Synced" and .status == "True") then "yes" else "no" end),
+        .kind,
+        .metadata.name,
+        (.metadata.annotations["crossplane.io/external-name"] // "pending")
+      ]
+    ) |
+    @tsv
+  ' <<<"${managed_json}" |
+    column -t
+
+  printf '\n=== Non-ready details ===\n'
+  jq -r '
+    .items[] |
+    select(any(.status.conditions[]?; .type == "Ready" and .status == "True") | not) |
+    [
+      .kind,
+      .metadata.name,
+      (
+        [
+          .status.conditions[]? |
+          select(.status == "False" or .type == "LastAsyncOperation") |
+          "\(.reason): \(.message // "waiting for reconciliation")"
+        ] |
+        unique |
+        join(" | ")
+      )
+    ] |
+    @tsv
+  ' <<<"${managed_json}" |
+    column -t -s $'\t'
+
+  printf '\n=== Recent warnings ===\n'
+  kubectl get events -n "${namespace}" \
+    --field-selector type=Warning \
+    --sort-by=.lastTimestamp |
+    tail -20
+}
+
 case "${COMMAND}" in
   validate) validate ;;
   apply)
@@ -43,7 +111,8 @@ case "${COMMAND}" in
     echo "waiting for providers and functions to become healthy (first pull can take minutes)..."
     kubectl wait --for=condition=Healthy provider.pkg.crossplane.io --all --timeout=600s
     kubectl wait --for=condition=Healthy function.pkg.crossplane.io --all --timeout=300s
-    kubectl wait --for=condition=Established crd/providerconfigs.aws.upbound.io --timeout=120s
+    kubectl wait --for=condition=Established crd/providerconfigs.aws.m.upbound.io --timeout=120s
+    kubectl create namespace quorum-system --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f "${ROOT}/providers/providerconfig-aws-prod.yaml"
     # Applying the XRD generates the XQuorumEnvironment CRD asynchronously; wait
     # for it to be established before applying the composite resource.
@@ -51,11 +120,10 @@ case "${COMMAND}" in
     echo "waiting for the composite resource definition to be established..."
     kubectl wait --for=condition=Established xrd --all --timeout=120s
     kubectl apply -f "${ROOT}/apis/environment/composition.yaml"
-    kubectl create namespace quorum-system --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f "${ROOT}/environments/prod.yaml"
     ;;
   status)
-    kubectl get xquorumenvironment -n quorum-system -o wide
+    status
     ;;
   destroy)
     confirm "delete"

@@ -25,7 +25,8 @@ The `apply` and `destroy` paths require an explicit subcommand and typed `yes` c
 - Docker Buildx and Compose v2.
 - ShellCheck `0.11.0` or newer.
 - `kubectl`, AWS CLI v2, and access to `ap-southeast-2`.
-- Existing `aws-creds-prod` Kubernetes Secret in `crossplane-system`.
+- AWS CLI profile `quorum-prod`, used to generate the gitignored
+  `aws-creds-prod` Kubernetes Secret in `quorum-system`.
 - Vercel DNS access for `ayansasmal.work`.
 
 Confirm the offline toolchain:
@@ -48,13 +49,39 @@ KMS-backed versioning and encryption controls for all three S3 buckets. The RDS 
 to its subnet group and database security group rather than the account default network.
 
 The XR publishes `status.elasticIp`, `status.instanceId`, and `status.rdsEndpoint` once the managed
-resources reconcile, so `./crossplane/deploy.sh status` returns the values needed for DNS and ops.
+resources reconcile. `./crossplane/deploy.sh status` shows the XR, those outputs, every managed
+resource, current non-ready condition messages, and the 20 most recent warning events.
 
 ## Operator Deployment Order
 
 The following steps are operator-run and intentionally excluded from tests.
 
-1. Build the arm64 images locally:
+1. Generate the Crossplane credential Secret from the local AWS profile without writing credentials
+   to a repository file:
+
+   ```bash
+   aws configure export-credentials --profile quorum-prod --format process |
+   jq -r '
+     "[default]",
+     "aws_access_key_id = \(.AccessKeyId)",
+     "aws_secret_access_key = \(.SecretAccessKey)",
+     if .SessionToken then "aws_session_token = \(.SessionToken)" else empty end
+   ' |
+   kubectl create secret generic aws-creds-prod \
+     --namespace quorum-system \
+     --from-file=creds=/dev/stdin \
+     --dry-run=client -o yaml |
+   kubectl apply -f -
+   ```
+
+   Verify only the identity and Secret metadata:
+
+   ```bash
+   aws sts get-caller-identity --profile quorum-prod
+   kubectl get secret aws-creds-prod -n quorum-system
+   ```
+
+2. Build the arm64 images locally:
 
    ```bash
    docker buildx build --platform linux/arm64 -f Dockerfile.gateway \
@@ -63,20 +90,20 @@ The following steps are operator-run and intentionally excluded from tests.
      -t ghcr.io/ayansasmal/graphiti-mcp:0.4.x --load .
    ```
 
-2. Authenticate to GHCR and push the reviewed images:
+3. Authenticate to GHCR and push the reviewed images:
 
    ```bash
    docker push ghcr.io/ayansasmal/quorum-gateway:0.4.12
    docker push ghcr.io/ayansasmal/graphiti-mcp:0.4.x
    ```
 
-3. Create `quorum/prod/gateway` in AWS Secrets Manager from the local, gitignored `.env.prod`.
+4. Create `quorum/prod/gateway` in AWS Secrets Manager from the local, gitignored `.env.prod`.
    Do not print the file or commit generated JSON. The secret contains application values only:
    JWT, GitHub OAuth, OpenAI, and `GHCR_USERNAME` / `GHCR_TOKEN`. RDS owns its master password
    separately. Bootstrap writes values as shell-escaped assignments and authenticates to GHCR with
    `--password-stdin`.
 
-4. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under the live prefix:
+5. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under the live prefix:
 
    ```bash
    aws s3 cp crossplane/bootstrap/ \
@@ -87,46 +114,50 @@ The following steps are operator-run and intentionally excluded from tests.
    The instance boots from this prefix (see [Updating The Bootstrap](#updating-the-bootstrap)).
    The deploy bucket has S3 versioning enabled, so overwriting `current/` retains prior revisions.
 
-5. Run:
+6. Run:
 
    ```bash
    ./crossplane/deploy.sh apply
    ```
 
    `apply` installs the provider family and function, then **waits** for them to report
-   `Healthy` and for the `ProviderConfig` and `XQuorumEnvironment` CRDs to be established before
-   applying the `ProviderConfig`, composition, and composite resource. This prevents the
+   `Healthy` and for the namespaced `ProviderConfig` and `XQuorumEnvironment` CRDs to be
+   established before applying the ProviderConfig, composition, and composite resource. This prevents the
    "no matches for kind ProviderConfig" race on a cold cluster. The first provider pull can take
    several minutes, so the `kubectl wait` steps may sit for a while — that is expected.
 
-6. Watch readiness:
+7. Watch readiness:
 
    ```bash
    ./crossplane/deploy.sh status
    ```
 
-7. Read the allocated Elastic IP from the XR status:
+   The environment is complete only when the XR is `READY=True`, no rows appear under
+   `Non-ready details`, and all three published outputs have values. A resource with
+   `AsyncCreateFailure` is blocked and will not become ready merely by waiting.
+
+8. Read the allocated Elastic IP from the XR status:
 
    ```bash
    kubectl get xquorumenvironment quorum-prod -n quorum-system \
      -o jsonpath='{.status.elasticIp}{"\n"}'
    ```
 
-8. In Vercel DNS, replace the placeholder A record for `quorum-gateway.ayansasmal.work` with that EIP.
+9. In Vercel DNS, replace the placeholder A record for `quorum-gateway.ayansasmal.work` with that EIP.
 
-9. Wait for Caddy to complete ACME HTTP-01 issuance on ports 80 and 443.
+10. Wait for Caddy to complete ACME HTTP-01 issuance on ports 80 and 443.
 
-10. Set the Vercel dashboard environment variable:
+11. Set the Vercel dashboard environment variable:
 
     ```text
     QUORUM_GATEWAY_URL=https://quorum-gateway.ayansasmal.work
     ```
 
-11. Set the GitHub OAuth callback to the production gateway callback URL.
+12. Set the GitHub OAuth callback to the production gateway callback URL.
 
-12. Verify `https://quorum-gateway.ayansasmal.work/health`.
+13. Verify `https://quorum-gateway.ayansasmal.work/health`.
 
-13. Run the MCP integration suite with an MCP client after the gateway is available.
+14. Run the MCP integration suite with an MCP client after the gateway is available.
 
 ## Resume And Suspend
 
@@ -151,6 +182,11 @@ also stop both resources daily at 10:00 and 23:00 Australia/Sydney. To restore s
 set `spec.schedule.autoStart.enabled: true`, review the two start schedules, and reapply the XR.
 
 ## Credentials And Rotation
+
+Crossplane uses a namespaced `aws.m.upbound.io/v1beta1` ProviderConfig named `aws-prod` in
+`quorum-system`. Its credentials come from `quorum-system/aws-creds-prod`, key `creds`.
+After rotating the `quorum-prod` AWS profile, rerun step 1 above; provider pods read the updated Secret
+without requiring credentials to be stored in Git.
 
 RDS generates the master credential in AWS Secrets Manager. The EC2 instance profile reads the RDS
 endpoint and managed-secret ARN, then writes database variables to `/etc/quorum/quorum.env` with mode

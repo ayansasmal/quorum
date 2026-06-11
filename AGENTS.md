@@ -268,7 +268,13 @@ graph TD
 
 **AWS deployment operator workflow (2026-06-11):**
 - `./crossplane/deploy.sh validate` renders, provider-schema-validates, and runs all deployment tests without applying resources.
+- `./crossplane/deploy.sh status` reports the XR, published outputs, all managed resources, current
+  non-ready condition messages, and recent warnings; use current conditions rather than old events
+  to decide whether provisioning is waiting or blocked.
 - `docs/DEPLOYMENT-AWS.md` is the canonical operator runbook for image delivery, secret seeding, apply order, DNS, resume/suspend, cost controls, and teardown.
+- Crossplane v2 namespaced managed resources use `aws.m.upbound.io/v1beta1` ProviderConfig
+  `quorum-system/aws-prod`; generate `quorum-system/aws-creds-prod` key `creds` from the
+  `quorum-prod` AWS CLI profile through stdin. Never store production access keys in repository YAML.
 
 **AWS composition and bootstrap completion (2026-06-11):**
 - The production render contains 44 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.
