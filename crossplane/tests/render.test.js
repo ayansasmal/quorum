@@ -28,7 +28,7 @@ describe('S-DEPLOY composition render', () => {
       'Key', 'VPC', 'Subnet', 'SecurityGroup', 'Bucket', 'Table',
       'Instance', 'EIP', 'Group', 'Role', 'Schedule', 'Budget',
       'Route', 'RouteTableAssociation', 'SubnetGroup', 'InstanceProfile',
-      'RolePolicy', 'EIPAssociation', 'BucketVersioning',
+      'RolePolicy', 'RolePolicyAttachment', 'EIPAssociation', 'BucketVersioning',
       'BucketServerSideEncryptionConfiguration', 'BudgetAction',
     ]) {
       expect(kinds).toContain(kind)

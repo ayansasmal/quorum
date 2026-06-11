@@ -403,6 +403,8 @@ spec:
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.instanceClass", toFieldPath: "spec.forProvider.instanceClass" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.allocatedStorageGiB", toFieldPath: "spec.forProvider.allocatedStorage" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.masterUsername", toFieldPath: "spec.forProvider.username" }
+              # Surface the RDS endpoint (address:port) on the XR for visibility.
+              - { type: ToCompositeFieldPath, fromFieldPath: "status.atProvider.endpoint", toFieldPath: "status.rdsEndpoint" }
           - name: instance-role
             base:
               apiVersion: iam.aws.m.upbound.io/v1beta1
@@ -478,6 +480,17 @@ spec:
                     {"Version":"2012-10-17","Statement":[
                     {"Effect":"Allow","Action":["rds:StopDBInstance","ec2:StopInstances"],"Resource":"*"}]}
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: instance-ssm-core
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                forProvider:
+                  policyArn: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: instance }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: instance-profile
             base:
               apiVersion: iam.aws.m.upbound.io/v1beta1
@@ -532,6 +545,8 @@ spec:
             patches:
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.compute.instanceType", toFieldPath: "spec.forProvider.instanceType" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.compute.rootVolumeGiB", toFieldPath: "spec.forProvider.rootBlockDevice.volumeSize" }
+              # Surface the instance ID for ops scripts (EC2_INSTANCE_ID) and SSM targeting.
+              - { type: ToCompositeFieldPath, fromFieldPath: "status.atProvider.id", toFieldPath: "status.instanceId" }
           - name: elastic-ip
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
@@ -541,6 +556,10 @@ spec:
                   region: ap-southeast-2
                   domain: vpc
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+            patches:
+              # Surface the allocated public IP on the XR so `deploy.sh status`
+              # gives the value to point the Vercel quorum-gateway A record at.
+              - { type: ToCompositeFieldPath, fromFieldPath: "status.atProvider.publicIp", toFieldPath: "status.elasticIp" }
           - name: elastic-ip-association
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1

@@ -40,11 +40,15 @@ shellcheck --version
 
 ## Provisioned Resource Graph
 
-The production Composition renders 44 managed AWS resources plus the XR. It includes a public
+The production Composition renders 45 managed AWS resources plus the XR. It includes a public
 subnet with an internet route, two private RDS subnets, application/database security groups, an
-instance profile with scoped inline policies, an Elastic IP association, and KMS-backed versioning
-and encryption controls for all three S3 buckets. The RDS instance is attached to its subnet group
-and database security group rather than the account default network.
+instance profile with scoped inline policies plus the AWS-managed `AmazonSSMManagedInstanceCore`
+policy (Session Manager / RunShellScript access with no inbound SSH), an Elastic IP association, and
+KMS-backed versioning and encryption controls for all three S3 buckets. The RDS instance is attached
+to its subnet group and database security group rather than the account default network.
+
+The XR publishes `status.elasticIp`, `status.instanceId`, and `status.rdsEndpoint` once the managed
+resources reconcile, so `./crossplane/deploy.sh status` returns the values needed for DNS and ops.
 
 ## Operator Deployment Order
 
@@ -95,7 +99,12 @@ The following steps are operator-run and intentionally excluded from tests.
    ./crossplane/deploy.sh status
    ```
 
-7. Read the allocated Elastic IP from the XR or AWS console.
+7. Read the allocated Elastic IP from the XR status:
+
+   ```bash
+   kubectl get xquorumenvironment quorum-prod -n quorum-system \
+     -o jsonpath='{.status.elasticIp}{"\n"}'
+   ```
 
 8. In Vercel DNS, replace the placeholder A record for `quorum-gateway.ayansasmal.work` with that EIP.
 
@@ -120,7 +129,7 @@ Scheduled auto-start is disabled. Export the resource identifiers, then resume o
 ```bash
 export AWS_REGION=ap-southeast-2
 export DB_INSTANCE_ID=quorum-prod
-export EC2_INSTANCE_ID=i-xxxxxxxxxxxxxxxxx
+export EC2_INSTANCE_ID=$(kubectl get xquorumenvironment quorum-prod -n quorum-system -o jsonpath='{.status.instanceId}')
 export GATEWAY_URL=https://quorum-gateway.ayansasmal.work
 ./crossplane/ops/quorum-resume.sh
 ```
