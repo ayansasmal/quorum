@@ -386,6 +386,7 @@ spec:
               spec:
                 forProvider:
                   region: ap-southeast-2
+                  identifier: quorum-prod
                   engine: postgres
                   engineVersion: "16"
                   instanceClass: db.t4g.micro
@@ -406,6 +407,7 @@ spec:
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
             patches:
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.identifier", toFieldPath: "metadata.annotations[crossplane.io/external-name]" }
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.identifier", toFieldPath: "spec.forProvider.identifier" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.engineVersion", toFieldPath: "spec.forProvider.engineVersion" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.instanceClass", toFieldPath: "spec.forProvider.instanceClass" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.allocatedStorageGiB", toFieldPath: "spec.forProvider.allocatedStorage" }

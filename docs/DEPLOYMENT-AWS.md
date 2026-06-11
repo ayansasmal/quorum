@@ -122,7 +122,9 @@ The following steps are operator-run and intentionally excluded from tests.
    The application secret does not control the RDS resource identifier. Production bootstrap uses
    the canonical `quorum-prod` identifier, matching `spec.database.identifier`, schedules, and budget
    actions. An explicit operator override may use `QUORUM_DB_INSTANCE_ID`, but stale
-   `DB_INSTANCE_ID` values in the application secret are ignored.
+   `DB_INSTANCE_ID` values in the application secret are ignored. The Composition sets both the RDS
+   provider's `spec.forProvider.identifier` and its external-name annotation; the annotation alone
+   does not control the AWS identifier during creation.
 
 5. The apply command uploads the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under
    the live prefix after Crossplane reports the infrastructure ready:

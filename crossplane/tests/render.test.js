@@ -167,6 +167,7 @@ describe('S-DEPLOY composition render', () => {
     const action = documents.find((document) => document.kind === 'BudgetAction')
 
     expect(database.metadata.annotations['crossplane.io/external-name']).toBe(identifier)
+    expect(database.spec.forProvider.identifier).toBe(identifier)
     expect(schedules).toHaveLength(2)
     expect(schedules.every((schedule) => (
       JSON.parse(schedule.spec.forProvider.target.input).DbInstanceIdentifier === identifier
