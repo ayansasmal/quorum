@@ -2,6 +2,13 @@
 # EC2 bootstrap: install runtime dependencies, download the bundle, and start.
 set -euo pipefail
 
+# Mirror all output to a timestamped log file (override dir via QUORUM_LOG_DIR).
+LOG_DIR="${QUORUM_LOG_DIR:-/var/log/quorum}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || { LOG_DIR="${TMPDIR:-/tmp}/quorum-logs"; mkdir -p "${LOG_DIR}"; }
+LOG_FILE="${LOG_DIR}/$(basename "${BASH_SOURCE[0]}" .sh)-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+echo "[quorum] $(date '+%Y-%m-%dT%H:%M:%S%z') start $(basename "${BASH_SOURCE[0]}"); log -> ${LOG_FILE}"
+
 : "${AWS_REGION:=ap-southeast-2}" "${DEPLOY_BUCKET:?}" "${BOOTSTRAP_VERSION:?}"
 : "${COMPOSE_VERSION:=v5.1.4}"
 

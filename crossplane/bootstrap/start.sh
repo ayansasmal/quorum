@@ -2,6 +2,13 @@
 # Idempotently prepares and starts the production backend stack.
 set -euo pipefail
 
+# Mirror all output to a timestamped log file (override dir via QUORUM_LOG_DIR).
+LOG_DIR="${QUORUM_LOG_DIR:-/var/log/quorum}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || { LOG_DIR="${TMPDIR:-/tmp}/quorum-logs"; mkdir -p "${LOG_DIR}"; }
+LOG_FILE="${LOG_DIR}/$(basename "${BASH_SOURCE[0]}" .sh)-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+echo "[quorum] $(date '+%Y-%m-%dT%H:%M:%S%z') start $(basename "${BASH_SOURCE[0]}"); log -> ${LOG_FILE}"
+
 : "${AWS_REGION:?}" "${APP_SECRET_ID:=quorum/prod/gateway}" "${DB_INSTANCE_ID:=quorum-prod}"
 install -d -o root -g root -m 0700 /etc/quorum
 install -d -o root -g root -m 0755 /opt/quorum

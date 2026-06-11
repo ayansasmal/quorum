@@ -186,6 +186,29 @@ re-run on the box without rebuilding or replacing the instance:
    re-fetching the bundle, run `/opt/quorum/start.sh` instead. `userData` itself runs only at first
    launch, so editing the stub requires reapplying the XR; editing the S3 scripts does not.
 
+## Script Logs
+
+Every bootstrap and operator script mirrors its full stdout and stderr to a timestamped log file in
+addition to the console. Each run names its own file as
+`${QUORUM_LOG_DIR:-/var/log/quorum}/<script>-YYYYMMDD-HHMMSS.log`, so successive runs never overwrite
+each other and timer-driven runs (`quorum-credential-refresh.timer`, `quorum-snapshot.timer`) and SSM
+re-runs stay independently traceable. On the EC2 instance the scripts run as root and write to
+`/var/log/quorum`; when the directory is not writable (for example, an operator laptop running
+`ops/quorum-resume.sh` without `sudo`), they fall back to `${TMPDIR:-/tmp}/quorum-logs`. Override the
+directory with `QUORUM_LOG_DIR`:
+
+```bash
+# Inspect the most recent bootstrap log on the instance over SSM:
+aws ssm send-command --region ap-southeast-2 \
+  --document-name AWS-RunShellScript \
+  --targets Key=tag:Name,Values=quorum-prod \
+  --parameters 'commands=["ls -t /var/log/quorum | head","tail -n 50 \"$(ls -t /var/log/quorum/start.sh-*.log | head -1)\""]'
+```
+
+The userData boot stub itself is not a script file; its output is captured by cloud-init at
+`/var/log/cloud-init-output.log`, and from `exec /opt/quorum/ec2-userdata.sh` onward the per-script
+logs take over.
+
 ## Cost Controls
 
 - Monthly budget: USD 40.

@@ -65,6 +65,20 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
     expect(alterPosition).toBeGreaterThan(createPosition)
   })
 
+  it('mirrors every script run to a timestamped log file', () => {
+    for (const script of scripts) {
+      /** Source of the script under inspection. */
+      const body = readFileSync(script, 'utf8')
+
+      // Each run names its own file with a per-second timestamp, so timer-driven
+      // and SSM re-runs stay independently traceable.
+      expect(body, `${script} must build a timestamped log file name`).toContain('date +%Y%m%d-%H%M%S')
+      expect(body, `${script} must tee stdout and stderr to the log file`).toContain(
+        'exec > >(tee -a "${LOG_FILE}") 2>&1',
+      )
+    }
+  })
+
   it('applies the database schema before starting containers', () => {
     /** Production stack startup source under test. */
     const start = readFileSync('crossplane/bootstrap/start.sh', 'utf8')
