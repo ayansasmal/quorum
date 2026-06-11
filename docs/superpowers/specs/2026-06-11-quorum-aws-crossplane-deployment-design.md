@@ -11,9 +11,14 @@
 ## 1. Executive Summary
 
 Quorum uses the local Docker Desktop Kubernetes cluster as its Crossplane control plane.
-Crossplane provisions the production AWS infrastructure, while a stateless spot EC2 instance runs the
-backend application stack with Docker Compose. The instance is fully disposable — it holds no durable
-state on its own disk. The two pieces of state that are expensive to rebuild live off-instance:
+Crossplane provisions the production AWS infrastructure, while a stateless on-demand EC2 instance runs the
+backend application stack with Docker Compose. To keep the demo cheap, the instance and its RDS database
+are stopped and started on a schedule (EventBridge Scheduler), with an AWS Budgets action as a spend
+ceiling — see [§13](#13-observability-operations-and-cost-control). On-demand capacity (rather than Spot)
+is what makes that schedule reliable: a stopped on-demand instance restarts on demand at the scheduled
+time, whereas a stopped Spot instance can only be restarted by EC2 when capacity frees up. The instance is
+fully disposable — it holds no durable state on its own disk. The two pieces of state that are expensive
+to rebuild live off-instance:
 **PostgreSQL (the source of truth) on managed RDS**, and **FalkorDB's derived graph/embeddings plus
 Caddy's TLS material as versioned snapshots in S3** that a replacement instance restores on boot. A
 replacement can pull the latest snapshot and normally resume without a full re-embedding or Let's
@@ -80,7 +85,7 @@ As of June 11, 2026:
 | 4 | Crossplane installation | Helm installs Crossplane core only |
 | 5 | Application deployment | EC2 bootstrap plus Docker Compose; no application Helm release |
 | 6 | Helm provider | Do not install `provider-helm` for this topology |
-| 7 | Compute | Single stateless Graviton spot EC2 instance |
+| 7 | Compute | Single stateless Graviton on-demand EC2 instance (on-demand, not Spot, so it can be reliably stopped/started on a schedule) |
 | 8 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
 | 9 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
 | 10 | Dashboard | Separate GitHub repository deployed to Vercel |
@@ -96,6 +101,7 @@ As of June 11, 2026:
 | 20 | Deployment trigger | Implementation and offline validation only until explicitly approved |
 | 21 | Service level | Demo workload; brief downtime and manual recovery are acceptable |
 | 22 | Crossplane credentials | Existing local AWS ProviderConfig credentials are reused and remain outside Git |
+| 23 | Cost control | Scheduled EventBridge stop/start of EC2 + RDS (weeknights and weekends off), with an AWS Budgets action as an absolute spend ceiling; AWS-native and independent of the local Crossplane control plane |
 
 ---
 
@@ -107,8 +113,17 @@ deliberately accepted:
 
 - The Crossplane control plane runs on a local Docker Desktop Kubernetes cluster. If that machine or
   cluster is offline, reconciliation pauses until it returns.
-- A standalone Spot instance may be interrupted and may require Crossplane or manual intervention to
-  replace it. There is no Auto Scaling Group in the initial footprint.
+- The instance is a single standalone on-demand EC2 instance with no Auto Scaling Group. If it fails an
+  instance status check, Crossplane or manual intervention replaces it; there is no automatic failover.
+- The stack is deliberately offline outside its scheduled window (stopped weeknights and weekends by the
+  EventBridge schedule). The demo is expected to be available only during scheduled hours or after a
+  manual start. A scheduled start is best-effort; if a `StartInstances` call fails, the operator starts
+  the instance manually.
+- RDS is stopped on the same schedule. AWS automatically restarts a stopped RDS instance after seven
+  days. The operator accepts this: the schedule's daily start normally pre-empts it, and a stray
+  auto-restart only costs idle RDS hours until the next scheduled stop.
+- The Elastic IP continues to bill its small hourly charge while the instance is stopped, because the
+  address is allocated but not associated with a running instance.
 - FalkorDB may restore from a snapshot that is up to one snapshot interval old. PostgreSQL remains the
   governed source of truth; full graph reconciliation is a manual recovery option for the demo.
 - RDS is Single-AZ with seven-day backups, `deletionProtection: false`, and no Crossplane orphan policy.
@@ -151,10 +166,12 @@ flowchart TB
         APP_SECRET["Secrets Manager<br/>quorum/prod/gateway"]
         KMS["KMS CMK"]
         LOGS["CloudWatch Logs"]
+        SCHED["EventBridge Scheduler<br/>stop/start cron"]
+        BUDGET["AWS Budgets<br/>spend-ceiling action"]
 
         subgraph VPC["VPC"]
             subgraph APP_SUBNET["Public subnet"]
-                EC2["Spot EC2 t4g<br/>stateless"]
+                EC2["On-demand EC2 t4g<br/>stateless"]
                 CADDY["Caddy :80/:443"]
                 GATEWAY["Gateway :3001"]
                 GRAPHITI["Graphiti"]
@@ -192,6 +209,10 @@ flowchart TB
     KMS -.-> S3_CONFIG
     KMS -.-> S3_DEPLOY
     KMS -.-> S3_SNAP
+    SCHED -.->|"StopInstances / StartInstances"| EC2
+    SCHED -.->|"StopDBInstance / StartDBInstance"| RDS
+    BUDGET -.->|"stop on spend ceiling"| EC2
+    BUDGET -.->|"stop on spend ceiling"| RDS
 ```
 
 ### Trust boundary
@@ -261,10 +282,19 @@ spec:
     vpcCidr: 10.20.0.0/16
   compute:
     instanceType: t4g.large
-    capacityType: spot
-    spotMaxPrice: "0.04"
+    capacityType: on-demand           # on-demand (not spot) so the instance can be stopped/started on a schedule
     rootVolumeGiB: 30
     arch: arm64
+  schedule:
+    enabled: true
+    timezone: Australia/Sydney
+    startCron: "cron(0 8 ? * MON-FRI *)"    # 08:00 weekdays - start RDS then EC2
+    stopCron: "cron(0 19 ? * MON-FRI *)"    # 19:00 weekdays - snapshot, then stop EC2 and RDS
+    weekendsOff: true                       # remain stopped all weekend (no Sat/Sun start)
+  budget:
+    monthlyLimitUSD: 120
+    actionThresholdPercent: 90              # at 90% of the monthly limit, stop EC2 + RDS as a hard ceiling
+    notifyEmail: operator@example.com
   snapshot:
     bucketSuffix: snapshots             # versioned S3 bucket for FalkorDB + Caddy state
     intervalMinutes: 60                 # BGSAVE + upload cadence
@@ -381,13 +411,17 @@ No NAT Gateway is required.
 ### 9.2 Compute
 
 - Graviton-compatible Amazon Linux 2023 AMI.
-- Spot instance using the requested instance type and maximum price.
+- On-demand instance of the requested instance type — chosen over Spot specifically so it can be stopped
+  and started on a schedule (a stopped Spot instance can only be restarted by EC2 when capacity is
+  available, which would make the scheduled morning start unreliable).
 - Instance profile attached before boot.
 - Elastic IP and association.
-- Disposable encrypted gp3 root volume.
+- Disposable encrypted gp3 root volume (EBS-backed, so a stop preserves the volume while compute billing
+  pauses; the bootstrap is idempotent and re-runs cleanly on every start).
 - SSM agent and `AmazonSSMManagedInstanceCore`.
 - Minimal `userData` that downloads the versioned bootstrap entrypoint from S3.
-- On boot, restores the latest FalkorDB and Caddy snapshot from S3 before the Compose stack starts.
+- On boot, restores the latest FalkorDB and Caddy snapshot from S3 before the Compose stack starts. The
+  same boot path runs on a scheduled morning start as on a fresh replacement.
 
 EC2 contains no durable governed knowledge and pins no data to its disk. All
 expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 snapshot bucket.
@@ -434,6 +468,29 @@ The EC2 instance role receives only the permissions required to:
 - register with SSM.
 
 GHCR authentication uses a read-only package token from Secrets Manager, not an AWS registry permission.
+
+### 9.6 Cost-control resources
+
+These resources implement the scheduled stop/start and the budget ceiling. They are all AWS-native and
+keep running whether or not the local Crossplane control plane is online; Crossplane only creates them.
+
+- **EventBridge Scheduler — stop schedule.** Fires on `schedule.stopCron`. Uses the universal target to
+  call `ec2:StopInstances` on the instance and `rds:StopDBInstance` on the database. The gateway is
+  drained by the OS shutdown; the FalkorDB/Caddy snapshot runs just before stop (see [§13](#13-observability-operations-and-cost-control)).
+- **EventBridge Scheduler — start schedule.** Fires on `schedule.startCron`. Calls `rds:StartDBInstance`
+  first, then `ec2:StartInstances` (with a short delay so the database is reachable when the gateway
+  boots). With `weekendsOff: true`, both schedules use a `MON-FRI` cron so Saturday and Sunday stay off.
+- **Scheduler execution role.** An IAM role assumed by EventBridge Scheduler, scoped to
+  `ec2:StopInstances`/`ec2:StartInstances` and `rds:StopDBInstance`/`rds:StartDBInstance` on the two
+  specific resource ARNs. No Lambda is involved.
+- **AWS Budget + budget action.** A monthly cost budget at `budget.monthlyLimitUSD`. At
+  `budget.actionThresholdPercent`, a budget action stops the EC2 instance and the RDS instance as a hard
+  spend ceiling, independent of the time-of-day schedule, and emails `budget.notifyEmail`.
+- **Budget action role.** An IAM role the AWS Budgets service assumes to perform the stop action, scoped
+  to the same two resource ARNs.
+
+The scheduler and budget roles are separate from the EC2 instance role: the instance never needs
+permission to stop or start itself or the database.
 
 ---
 
@@ -629,7 +686,9 @@ Do not run these during implementation:
 
 ---
 
-## 13. Observability and Operations
+## 13. Observability, Operations, and Cost Control
+
+### Observability
 
 - Docker `awslogs` driver sends gateway, Graphiti, Caddy, and job output to CloudWatch.
 - CloudWatch alarms cover EC2 status checks, disk pressure, and RDS storage/CPU/connections.
@@ -637,7 +696,9 @@ Do not run these during implementation:
 - Application updates use a new GHCR tag plus `docker compose pull` and service recreation.
 - Dashboard updates remain independent through Vercel Git deployment.
 
-Recommended initial schedules:
+### Recommended initial schedules
+
+These are in-instance systemd timers (they only run while the instance is up):
 
 | Job | Command | Cadence |
 |-----|---------|---------|
@@ -646,6 +707,46 @@ Recommended initial schedules:
 | Conflict recheck | `npm run job:recheck` | Hourly |
 | FalkorDB + Caddy snapshot | `snapshot-save.sh` | Every 60 minutes |
 | RDS credential refresh | bootstrap script | Every 15 minutes |
+
+### Scheduled suspend and resume
+
+The single largest demo cost is paying for compute and database hours the demo is not using. The stack is
+therefore stopped overnight and on weekends and started again each weekday morning. Stopping is the EC2
+"stop" operation: an EBS-backed instance keeps its root volume while compute billing pauses, and the
+disposable-instance design already starts cleanly from a stop via snapshot-restore-on-boot.
+
+The mechanism is **AWS-native and independent of the local Crossplane control plane** — it keeps working
+when the laptop running Docker Desktop Kubernetes is off. Two **EventBridge Scheduler** schedules
+(defined in [§9.6](#96-cost-control-resources)) drive it through a universal target and a scoped IAM
+role; no Lambda is involved:
+
+| Schedule | Trigger | Action |
+|----------|---------|--------|
+| Stop | `schedule.stopCron` (default 19:00 Mon–Fri, Sydney) | `ec2:StopInstances` + `rds:StopDBInstance` |
+| Start | `schedule.startCron` (default 08:00 Mon–Fri, Sydney) | `rds:StartDBInstance`, then `ec2:StartInstances` |
+
+Ordering and interactions:
+
+1. **Snapshot before stop.** The hourly `snapshot-save.sh` already captures FalkorDB + Caddy state; the
+   most a scheduled stop can lose is one snapshot interval of *derived* graph state, which is
+   re-derivable from PostgreSQL. (The implementation may additionally trigger a final snapshot in the
+   instance's shutdown path for tighter freshness.)
+2. **Start RDS before EC2.** The gateway's boot health check needs the database reachable, so the start
+   schedule wakes RDS first and the instance a short delay later.
+3. **Manual override.** Outside the schedule, an operator can start the stack on demand with
+   `aws rds start-db-instance` followed by `aws ec2 start-instances` (or one stop pair to shut it down
+   early). A scheduled start is best-effort; if it fails, the manual start is the fallback.
+4. **RDS seven-day auto-restart.** AWS auto-starts a stopped RDS instance after seven days. The weekday
+   start schedule normally pre-empts this; a stray auto-restart only adds idle RDS hours until the next
+   scheduled stop.
+
+### Budget backstop
+
+Independently of the time-of-day schedule, an **AWS Budget** (monthly limit `budget.monthlyLimitUSD`)
+with a **budget action** acts as an absolute spend ceiling. At `budget.actionThresholdPercent` of the
+limit, the budget action stops the EC2 and RDS instances and emails `budget.notifyEmail`. This protects
+against a schedule failing to fire (for example a left-running instance after a manual start) turning
+into an unbounded bill. The schedule controls *normal* cost; the budget caps *worst-case* cost.
 
 ---
 
@@ -663,6 +764,9 @@ Recommended initial schedules:
 | KMS key | Schedule deletion using AWS minimum waiting period |
 | EC2 root volume | Delete with instance |
 | EIP | Release after instance teardown |
+| EventBridge stop/start schedules | Delete with the XR |
+| AWS Budget + budget action | Delete with the XR |
+| Scheduler and budget IAM roles | Delete with the XR |
 | VPC resources | Delete after dependants |
 | Vercel dashboard | Independent; not deleted with AWS XR |
 
@@ -685,9 +789,11 @@ The implementation phase must produce:
 8. systemd units and timers.
 9. RDS credential-refresh logic.
 10. FalkorDB and Caddy snapshot save/restore scripts and their systemd timer.
-11. Offline manifest rendering and script tests.
-12. Updated operator documentation.
-13. A deployment script whose mutating operations require an explicit `apply` command.
+11. EventBridge Scheduler stop/start schedules, the AWS Budget plus budget action, and their scoped
+    scheduler and budget IAM roles.
+12. Offline manifest rendering and script tests.
+13. Updated operator documentation.
+14. A deployment script whose mutating operations require an explicit `apply` command.
 
 ---
 
@@ -714,11 +820,18 @@ The implementation phase must produce:
 - The gateway serves trusted HTTPS.
 - Vercel proxies authenticated dashboard traffic to the gateway.
 - GitHub OAuth redirects back to `https://quorum-dashboard.ayansasmal.work`.
-- A replacement spot instance restores the latest FalkorDB and Caddy snapshot from S3 on boot when the
+- A replacement instance restores the latest FalkorDB and Caddy snapshot from S3 on boot when the
   local Crossplane control plane is available or the operator replaces it manually.
-- Replacing the spot instance loses no governed knowledge — PostgreSQL is unaffected and FalkorDB's
+- Replacing the instance loses no governed knowledge — PostgreSQL is unaffected and FalkorDB's
   derived index is restored from snapshot (or, worst case, re-derivable from PostgreSQL).
 - A replacement instance reuses the existing TLS certificate without triggering a Let's Encrypt re-issue.
+- The EventBridge stop schedule stops both EC2 and RDS, and the start schedule brings them back (RDS
+  first, then EC2) with the gateway healthy after a scheduled morning start.
+- A scheduled or manual stop loses no governed knowledge — the morning start reuses the same EBS volume,
+  and a snapshot bounds any derived-state loss to one snapshot interval.
+- The AWS Budget action stops EC2 and RDS when the monthly spend ceiling is reached, independent of the
+  time-of-day schedule.
+- Both the schedule and the budget action operate with the local Crossplane control plane offline.
 
 ---
 
@@ -734,7 +847,10 @@ The following are not part of the first production footprint:
 - `provider-helm`.
 - Kubernetes application deployment.
 - multi-region failover.
-- Auto Scaling Group or other AWS-native automatic Spot replacement.
+- Auto Scaling Group or other AWS-native automatic instance replacement.
+- Spot capacity (rejected here because it cannot be reliably stopped/started on a schedule).
+- Idle/wake-on-request (scale-to-zero) — starting the stack on the first inbound request rather than on a
+  fixed clock schedule.
 - A continuously available Crossplane control plane.
 - RDS deletion protection and Crossplane orphan-on-delete lifecycle.
 - Automated post-restore FalkorDB reconciliation from PostgreSQL.
