@@ -12,7 +12,12 @@
 
 Quorum uses the local Docker Desktop Kubernetes cluster as a permanent Crossplane control plane.
 Crossplane provisions the production AWS infrastructure, while a stateless spot EC2 instance runs the
-backend application stack with Docker Compose.
+backend application stack with Docker Compose. The instance is fully disposable — it holds no durable
+state on its own disk. The two pieces of state that are expensive to rebuild live off-instance:
+**PostgreSQL (the source of truth) on managed RDS**, and **FalkorDB's derived graph/embeddings plus
+Caddy's TLS material as versioned snapshots in S3** that a replacement instance restores on boot. A
+replacement can therefore launch in any availability zone, pull the latest snapshot, and resume with no
+re-embedding and no Let's Encrypt re-issue.
 
 The dashboard is not part of the AWS workload. It lives in the separate
 [`ayansasmal/Quorum-dash`](https://github.com/ayansasmal/Quorum-dash) repository and deploys to Vercel.
@@ -75,11 +80,11 @@ As of June 11, 2026:
 | 6 | Helm provider | Do not install `provider-helm` for this topology |
 | 7 | Compute | Single stateless Graviton spot EC2 instance |
 | 8 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
-| 9 | Disposable services | Redis and FalkorDB run on EC2 and may be rebuilt |
+| 9 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
 | 10 | Dashboard | Separate GitHub repository deployed to Vercel |
 | 11 | Gateway exposure | Public HTTPS domain pointing to the EC2 Elastic IP |
-| 12 | TLS | Caddy on EC2 obtains and renews a trusted ACME certificate |
-| 13 | DNS | Existing DNS provider by default; Route 53 remains optional |
+| 12 | TLS | Caddy on EC2 obtains and renews a trusted ACME certificate; cert/account state is snapshotted to S3 so replacement avoids re-issue |
+| 13 | DNS | Route 53 hosted zone for the gateway domain once a domain is acquired; a placeholder domain is used until then |
 | 14 | Images | Gateway and Graphiti images in GHCR; no dashboard image in AWS |
 | 15 | AWS authentication | EC2 instance profile; no static AWS credentials on EC2 |
 | 16 | Database credentials | RDS generates and manages the master password in Secrets Manager |
@@ -114,6 +119,7 @@ flowchart TB
         EIP["Elastic IP"]
         S3_CONFIG["S3 config bucket"]
         S3_DEPLOY["S3 deploy bucket"]
+        S3_SNAP["S3 snapshot bucket<br/>versioned - FalkorDB + Caddy"]
         DDB["DynamoDB<br/>quorum-user-projects"]
         APP_SECRET["Secrets Manager<br/>quorum/prod/gateway"]
         KMS["KMS CMK"]
@@ -149,6 +155,7 @@ flowchart TB
     GATEWAY --> S3_CONFIG
     GATEWAY --> DDB
     EC2 -.->|"bootstrap assets"| S3_DEPLOY
+    EC2 -.->|"restore on boot / snapshot on timer"| S3_SNAP
     EC2 -.->|"application secrets"| APP_SECRET
     EC2 -.->|"database credentials"| RDS_SECRET
     EC2 -.-> LOGS
@@ -157,6 +164,7 @@ flowchart TB
     KMS -.-> RDS
     KMS -.-> S3_CONFIG
     KMS -.-> S3_DEPLOY
+    KMS -.-> S3_SNAP
 ```
 
 ### Trust boundary
@@ -185,6 +193,7 @@ The AWS gateway remains the sole authentication and authorization authority:
 | FalkorDB | EC2 | Docker Compose |
 | Redis | EC2 | Docker Compose |
 | Decay/archive/recheck jobs | EC2 | systemd timers plus one-shot Compose services |
+| FalkorDB + Caddy snapshot | EC2 | systemd timer running `snapshot-save.sh` to S3 |
 | Dashboard | Vercel | Git integration from `Quorum-dash` |
 
 ### Explicit exclusions
@@ -218,7 +227,7 @@ spec:
       name: xquorumenvironment
   environment: prod
   region: ap-southeast-2
-  domainName: api.example.com
+  domainName: <gateway-domain>          # placeholder until a domain is acquired; becomes a Route 53 record
   dashboardUrl: https://quorum-dashboard.ayansasmal.work
   network:
     vpcCidr: 10.20.0.0/16
@@ -228,6 +237,10 @@ spec:
     spotMaxPrice: "0.04"
     rootVolumeGiB: 30
     arch: arm64
+  snapshot:
+    bucketSuffix: snapshots             # versioned S3 bucket for FalkorDB + Caddy state
+    intervalMinutes: 60                 # BGSAVE + upload cadence
+    restoreOnBoot: true                 # pull latest snapshot before starting falkordb/caddy
   database:
     engineVersion: "16"
     instanceClass: db.t4g.micro
@@ -246,8 +259,8 @@ spec:
     mode: acme
     acmeEmail: operator@example.com
   dns:
-    manageRoute53: false
-    hostedZoneId: ""
+    manageRoute53: false                # flip to true once a domain is acquired and a hosted zone exists
+    hostedZoneId: ""                    # Route 53 hosted zone for <gateway-domain>
   images:
     registry: ghcr.io/ayansasmal
     gatewayTag: "0.4.12"
@@ -255,8 +268,11 @@ spec:
     applySchema: true
 ```
 
-`domainName` and `acmeEmail` remain operator inputs. The actual gateway domain must be selected before
-deployment, but it is not required for authoring or rendering the manifests.
+`domainName` and `acmeEmail` remain operator inputs. The gateway domain is a deliberate placeholder
+(`<gateway-domain>`) — no domain has been acquired yet. The intended DNS path is a **Route 53 record**
+for the Elastic IP once a domain exists: at that point `domainName` is filled in, `dns.manageRoute53`
+flips to `true`, and `dns.hostedZoneId` is set. The placeholder does not block authoring or rendering
+the manifests; only the deploy-time DNS and TLS steps depend on a real domain.
 
 The Composition creates a `quorum-prod-connection` Secret in `quorum-system` for operator-visible,
 non-credential outputs:
@@ -265,6 +281,7 @@ non-credential outputs:
 - EC2 instance ID
 - RDS endpoint and port
 - configured gateway domain
+- snapshot bucket name
 - dashboard URL
 
 The RDS password is not copied into this Secret.
@@ -291,12 +308,16 @@ crossplane/
     ec2-userdata.sh
     start.sh
     refresh-rds-credentials.sh
+    snapshot-save.sh           # BGSAVE FalkorDB + tar Caddy state -> upload to S3
+    snapshot-restore.sh        # download latest snapshot from S3 -> seed volumes before compose up
     docker-compose.aws.yml
     Caddyfile
     systemd/
       quorum.service
       quorum-credential-refresh.service
       quorum-credential-refresh.timer
+      quorum-snapshot.service
+      quorum-snapshot.timer
       quorum-decay.service
       quorum-decay.timer
       quorum-archive.service
@@ -338,8 +359,10 @@ No NAT Gateway is required.
 - Disposable encrypted gp3 root volume.
 - SSM agent and `AmazonSSMManagedInstanceCore`.
 - Minimal `userData` that downloads the versioned bootstrap entrypoint from S3.
+- On boot, restores the latest FalkorDB and Caddy snapshot from S3 before the Compose stack starts.
 
-EC2 contains no durable governed knowledge.
+EC2 contains no durable governed knowledge and pins no data to its disk or availability zone. All
+expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 snapshot bucket.
 
 ### 8.3 Database
 
@@ -358,6 +381,9 @@ RDS is the durable source of truth. Redis and FalkorDB may be destroyed and rebu
 
 - Versioned, encrypted S3 config bucket.
 - Versioned, encrypted S3 deploy bucket.
+- Versioned, encrypted S3 snapshot bucket for FalkorDB `dump.rdb` and Caddy TLS state. S3 versioning
+  retains a point-in-time history; a lifecycle rule expires non-current versions after a fixed window
+  (for example 14 days) to bound cost.
 - DynamoDB `quorum-user-projects` table with the existing membership GSI.
 - No retired `quorum-configs` DynamoDB table.
 
@@ -367,6 +393,7 @@ The EC2 instance role receives only the permissions required to:
 
 - read and write the config bucket;
 - read bootstrap files from the deploy bucket;
+- read and write the snapshot bucket (restore on boot, upload on the snapshot timer);
 - read and write the membership table;
 - read `quorum/prod/*` application secrets;
 - discover the RDS endpoint and managed-secret ARN;
@@ -448,8 +475,9 @@ Caddy:
 - redirects HTTP to HTTPS;
 - obtains and renews an ACME certificate;
 - proxies all traffic to `gateway:3001`;
-- persists its certificate state on the disposable root disk;
-- can reacquire a certificate after replacement because the EIP and domain remain stable.
+- has its certificate and ACME account state captured into the S3 snapshot and restored on boot, so a
+  replacement instance reuses the existing certificate instead of re-issuing;
+- the stable EIP and domain mean a re-issue is still possible as a fallback if no snapshot exists.
 
 Gateway and Graphiti images are built for `linux/arm64` and published to GHCR. FalkorDB, Redis, and Caddy
 use pinned compatible public images.
@@ -464,11 +492,37 @@ flowchart TD
     D --> E["Fetch application and RDS secrets"]
     E --> F["Atomically write root-owned environment file"]
     F --> G["Authenticate to GHCR"]
-    G --> H["Apply idempotent init-db.sql"]
-    H --> I["docker compose pull"]
-    I --> J["docker compose up -d"]
-    J --> K["Enable systemd timers"]
+    G --> H["Restore latest FalkorDB + Caddy snapshot from S3"]
+    H --> I["Apply idempotent init-db.sql"]
+    I --> J["docker compose pull"]
+    J --> K["docker compose up -d"]
+    K --> L["Enable systemd timers (incl. snapshot timer)"]
 ```
+
+### FalkorDB and Caddy snapshots
+
+FalkorDB is a Redis-module process: its entire keyspace — graph nodes, `SUPERSEDES` edges, and the
+1536-dim OpenAI embeddings — serialises to a single `/data/dump.rdb` file. Because the graph is a
+**derived index** rebuildable from PostgreSQL, the snapshot does not need millisecond consistency with
+RDS; it only needs to be recent enough to avoid a costly re-embed.
+
+**Capture** — `snapshot-save.sh`, run by a `quorum-snapshot.timer` on the configured interval
+(default 60 minutes):
+
+1. issues `BGSAVE` to FalkorDB and waits for the background save to finish;
+2. uploads `dump.rdb` to the versioned snapshot bucket;
+3. tars Caddy's `/data` (certificate + ACME account state) and uploads it alongside;
+4. relies on S3 versioning to retain prior point-in-time snapshots.
+
+**Restore** — `snapshot-restore.sh`, run once during boot before `docker compose up`:
+
+1. downloads the latest `dump.rdb` into the FalkorDB data volume location;
+2. downloads and untars the Caddy state into its volume;
+3. if no snapshot exists (first-ever boot), proceeds with empty volumes — FalkorDB starts clean and
+   Caddy issues a fresh certificate.
+
+This makes the instance disposable in any AZ: the worst-case data loss is one snapshot interval of
+derived graph state, all of which is re-derivable from PostgreSQL.
 
 ### RDS credential rotation
 
@@ -493,7 +547,7 @@ Implementation must keep preparation separate from execution.
 These do not create AWS resources:
 
 - `helm template`
-- `crossplane beta render`
+- `crossplane render` (GA in Crossplane v2; the older `crossplane beta render` is deprecated)
 - YAML and JSON schema validation
 - `shellcheck`
 - `bash -n`
@@ -525,7 +579,7 @@ Do not run these during implementation:
 6. Apply XRD and Composition.
 7. Apply `environments/prod.yaml`.
 8. Wait for the AWS resources and output Secret.
-9. Point the gateway DNS record at the EIP.
+9. Once a domain is acquired, create the Route 53 record (or equivalent) pointing `<gateway-domain>` at the EIP.
 10. Wait for Caddy TLS and verify gateway health.
 11. Update the GitHub OAuth App callback.
 12. Replace Vercel `QUORUM_GATEWAY_URL` and redeploy production.
@@ -548,6 +602,7 @@ Recommended initial schedules:
 | Confidence decay | `npm run job:decay` | Daily |
 | Audit archival | `npm run job:archive` | Daily |
 | Conflict recheck | `npm run job:recheck` | Hourly |
+| FalkorDB + Caddy snapshot | `snapshot-save.sh` | Every 60 minutes |
 | RDS credential refresh | bootstrap script | Every 15 minutes |
 
 ---
@@ -560,6 +615,7 @@ Recommended initial schedules:
 | RDS-managed secret | Lifecycle follows RDS |
 | Config S3 bucket | Empty object versions before deletion |
 | Deploy S3 bucket | Empty object versions before deletion |
+| Snapshot S3 bucket | Optionally retain the final snapshot for DR; empty object versions before deletion |
 | DynamoDB | Delete; membership index is rebuildable from S3 configs |
 | Application secret | Use recovery window |
 | KMS key | Schedule deletion using AWS minimum waiting period |
@@ -585,9 +641,10 @@ The implementation phase must produce:
 7. Caddy gateway configuration.
 8. systemd units and timers.
 9. RDS credential-refresh logic.
-10. Offline manifest rendering and script tests.
-11. Updated operator documentation.
-12. A deployment script whose mutating operations require an explicit `apply` command.
+10. FalkorDB and Caddy snapshot save/restore scripts and their systemd timer.
+11. Offline manifest rendering and script tests.
+12. Updated operator documentation.
+13. A deployment script whose mutating operations require an explicit `apply` command.
 
 ---
 
@@ -612,7 +669,10 @@ The implementation phase must produce:
 - The gateway serves trusted HTTPS.
 - Vercel proxies authenticated dashboard traffic to the gateway.
 - GitHub OAuth redirects back to `https://quorum-dashboard.ayansasmal.work`.
-- Replacing the spot instance loses no governed knowledge.
+- A replacement spot instance restores the latest FalkorDB and Caddy snapshot from S3 on boot.
+- Replacing the spot instance loses no governed knowledge — PostgreSQL is unaffected and FalkorDB's
+  derived index is restored from snapshot (or, worst case, re-derivable from PostgreSQL).
+- A replacement instance reuses the existing TLS certificate without triggering a Let's Encrypt re-issue.
 
 ---
 
