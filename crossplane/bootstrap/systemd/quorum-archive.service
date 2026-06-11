@@ -1,0 +1,8 @@
+[Unit]
+Description=Archive Quorum audit records
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/quorum/quorum.env
+ExecStart=/usr/bin/docker compose -f /opt/quorum/docker-compose.aws.yml --profile jobs run --rm archive-job

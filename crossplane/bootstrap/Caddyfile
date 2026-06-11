@@ -1,0 +1,8 @@
+{
+	email {$ACME_EMAIL}
+}
+
+quorum-gateway.ayansasmal.work {
+	encode gzip
+	reverse_proxy gateway:3001
+}

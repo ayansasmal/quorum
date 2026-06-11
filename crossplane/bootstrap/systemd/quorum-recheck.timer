@@ -1,0 +1,10 @@
+[Unit]
+Description=Recheck Quorum pending conflicts hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=60min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=Run Quorum confidence decay
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/quorum/quorum.env
+ExecStart=/usr/bin/docker compose -f /opt/quorum/docker-compose.aws.yml --profile jobs run --rm decay-job

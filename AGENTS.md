@@ -261,6 +261,11 @@ graph TD
 - The harness uses Vitest for XRD/XR schema tests and invokes `bash -n` plus ShellCheck for every production shell script.
 - The canonical API is `platform.quorum.dev/v1alpha1`, kind `XQuorumEnvironment`, scoped to the `quorum-system` namespace.
 
+**AWS production runtime implementation (2026-06-11):**
+- `crossplane/bootstrap/docker-compose.aws.yml` is backend-only: Caddy, gateway, Graphiti, FalkorDB, Redis, and profiled one-shot jobs.
+- EC2 bootstrap restores derived snapshots, refreshes the RDS-managed credential atomically, and enables five systemd timers.
+- Operator resume/suspend scripts use AWS CLI and SSM directly, so routine demo control does not depend on the local Crossplane control plane.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)

@@ -1,0 +1,8 @@
+[Unit]
+Description=Snapshot Quorum derived state
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/quorum/quorum.env
+ExecStart=/opt/quorum/snapshot-save.sh

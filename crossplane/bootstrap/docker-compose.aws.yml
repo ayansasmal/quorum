@@ -1,0 +1,73 @@
+# Backend-only production stack for the disposable EC2 host.
+name: quorum
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [gateway]
+    logging: &awslogs
+      driver: awslogs
+      options:
+        awslogs-group: ${LOG_GROUP}
+        awslogs-region: ${AWS_REGION}
+        awslogs-stream: caddy
+  gateway:
+    image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
+    restart: unless-stopped
+    env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    depends_on: [falkordb, redis, graphiti]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit([200,503].includes(r.status)?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-group: ${LOG_GROUP}
+        awslogs-region: ${AWS_REGION}
+        awslogs-stream: gateway
+  graphiti:
+    image: ${IMAGE_REGISTRY}/graphiti-mcp:${GRAPHITI_TAG}
+    restart: unless-stopped
+    env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    depends_on: [falkordb]
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-group: ${LOG_GROUP}
+        awslogs-region: ${AWS_REGION}
+        awslogs-stream: graphiti
+  falkordb:
+    image: falkordb/falkordb:latest
+    restart: unless-stopped
+    volumes: [falkordb_data:/data]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+  decay-job:
+    image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
+    profiles: [jobs]
+    env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    command: ["npm", "run", "job:decay"]
+  archive-job:
+    image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
+    profiles: [jobs]
+    env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    command: ["npm", "run", "job:archive"]
+  recheck-job:
+    image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
+    profiles: [jobs]
+    env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    command: ["npm", "run", "job:recheck"]
+volumes:
+  caddy_data:
+  caddy_config:
+  falkordb_data:
