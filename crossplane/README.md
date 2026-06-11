@@ -8,11 +8,20 @@ Crossplane manages all Quorum infrastructure — the only IaC tool in this proje
 > Helm installs Crossplane core only; `provider-helm` and an application Helm release are not used.
 > The dashboard runs independently on Vercel. See the
 > [current AWS deployment design](../docs/superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md).
+> See [DEPLOYMENT-AWS.md](../docs/DEPLOYMENT-AWS.md) for the implemented production manifests,
+> offline validation command, operator apply order, resume/suspend workflow, and teardown.
 
 ## Folder Structure
 
 ```
 crossplane/
+├── apis/environment/                         # Production XRD and Composition
+├── environments/prod.yaml                    # Canonical production XR, no secrets
+├── providers/                                # Pinned production providers and function
+├── bootstrap/                                # EC2 Compose bundle, scripts, and systemd units
+├── ops/                                      # Operator resume and suspend scripts
+├── tests/                                    # Offline Vitest, render, schema, shell, Compose checks
+├── deploy.sh                                 # Validate by default; apply/destroy are gated
 ├── crossplane.sh                              # Script: setup / start / status / cleanup
 ├── provider/
 │   ├── provider-family-aws.yaml               # Pins provider-family-aws; applies runtimeConfigRef

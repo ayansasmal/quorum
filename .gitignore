@@ -38,6 +38,7 @@ crossplane/credentials/aws-creds-secret.yaml
 .terraform/
 .crossplane-cache/
 .docker-config/
+crossplane/tests/rendered.yaml
 
 # Quorum session state (project-local, per-engineer)
 .quorum-session

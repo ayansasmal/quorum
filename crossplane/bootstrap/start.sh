@@ -7,7 +7,7 @@ install -d -o root -g root -m 0700 /etc/quorum
 install -d -o root -g root -m 0755 /opt/quorum
 
 SECRET="$(aws secretsmanager get-secret-value --secret-id "${APP_SECRET_ID}" --region "${AWS_REGION}" --query SecretString --output text)"
-jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"${SECRET}" > /etc/quorum/quorum.env.tmp
+jq -r 'to_entries[] | "\(.key)=\(.value | @sh)"' <<<"${SECRET}" > /etc/quorum/quorum.env.tmp
 install -o root -g root -m 0600 /etc/quorum/quorum.env.tmp /etc/quorum/quorum.env
 rm -f /etc/quorum/quorum.env.tmp
 
@@ -17,7 +17,17 @@ set -a
 # shellcheck disable=SC1091
 source /etc/quorum/quorum.env
 set +a
+
+: "${POSTGRES_DB:=quorum_audit}"
+PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+  "host=${POSTGRES_HOST} port=${POSTGRES_PORT} dbname=${POSTGRES_DB} user=${POSTGRES_USER} sslmode=require" \
+  --set ON_ERROR_STOP=1 \
+  --file /opt/quorum/init-db.sql
+
 /opt/quorum/snapshot-restore.sh
+if [[ -n "${GHCR_USERNAME:-}" && -n "${GHCR_TOKEN:-}" ]]; then
+  printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username "${GHCR_USERNAME}" --password-stdin
+fi
 docker compose -f /opt/quorum/docker-compose.aws.yml pull
 docker compose -f /opt/quorum/docker-compose.aws.yml up -d
 systemctl daemon-reload

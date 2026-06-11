@@ -8,6 +8,11 @@ COMMAND="${1:-validate}"
 validate() {
   cd "${ROOT}/.."
   bash crossplane/tests/render.sh >"${ROOT}/tests/rendered.yaml"
+  crossplane resource validate \
+    "${ROOT}/providers/providers.yaml,${ROOT}/apis/environment/definition.yaml" \
+    "${ROOT}/tests/rendered.yaml" \
+    --error-on-missing-schemas \
+    --cache-dir "${ROOT}/../.crossplane-cache"
   npm run test:deploy
 }
 

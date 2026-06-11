@@ -107,11 +107,41 @@ spec:
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
               kind: RouteTable
+              metadata:
+                labels: { quorum.io/route-table: public }
               spec:
                 forProvider:
                   region: ap-southeast-2
                   vpcIdSelector:
                     matchControllerRef: true
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: public-default-route
+            base:
+              apiVersion: ec2.aws.m.upbound.io/v1beta1
+              kind: Route
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  destinationCidrBlock: 0.0.0.0/0
+                  gatewayIdSelector:
+                    matchControllerRef: true
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/route-table: public }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: public-route-table-association
+            base:
+              apiVersion: ec2.aws.m.upbound.io/v1beta1
+              kind: RouteTableAssociation
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/route-table: public }
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/tier: public }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: app-security-group
             base:
@@ -207,6 +237,7 @@ spec:
               kind: Bucket
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-config }
+                labels: { quorum.io/bucket: config }
               spec:
                 forProvider: { region: ap-southeast-2 }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
@@ -216,6 +247,7 @@ spec:
               kind: Bucket
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-deploy }
+                labels: { quorum.io/bucket: deploy }
               spec:
                 forProvider: { region: ap-southeast-2 }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
@@ -225,8 +257,89 @@ spec:
               kind: Bucket
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-snapshots }
+                labels: { quorum.io/bucket: snapshots }
               spec:
                 forProvider: { region: ap-southeast-2 }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: config-bucket-versioning
+            base: &bucketVersioning
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketVersioning
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: config }
+                  versioningConfiguration: { status: Enabled }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: deploy-bucket-versioning
+            base:
+              <<: *bucketVersioning
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: deploy }
+                  versioningConfiguration: { status: Enabled }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: snapshot-bucket-versioning
+            base:
+              <<: *bucketVersioning
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: snapshots }
+                  versioningConfiguration: { status: Enabled }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: config-bucket-encryption
+            base: &bucketEncryption
+              apiVersion: s3.aws.m.upbound.io/v1beta1
+              kind: BucketServerSideEncryptionConfiguration
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: config }
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: aws:kms
+                        kmsMasterKeyIdSelector: { matchControllerRef: true }
+                      bucketKeyEnabled: true
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: deploy-bucket-encryption
+            base:
+              <<: *bucketEncryption
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: deploy }
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: aws:kms
+                        kmsMasterKeyIdSelector: { matchControllerRef: true }
+                      bucketKeyEnabled: true
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: snapshot-bucket-encryption
+            base:
+              <<: *bucketEncryption
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  bucketSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/bucket: snapshots }
+                  rule:
+                    - applyServerSideEncryptionByDefault:
+                        sseAlgorithm: aws:kms
+                        kmsMasterKeyIdSelector: { matchControllerRef: true }
+                      bucketKeyEnabled: true
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: membership-table
             base:
@@ -243,6 +356,20 @@ spec:
                   attribute:
                     - { name: github_username, type: S }
                     - { name: group_id, type: S }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: database-subnet-group
+            base:
+              apiVersion: rds.aws.m.upbound.io/v1beta1
+              kind: SubnetGroup
+              metadata:
+                labels: { quorum.io/database: prod }
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  description: Private subnets for Quorum PostgreSQL
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/tier: database }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: database
             base:
@@ -262,6 +389,12 @@ spec:
                   storageEncrypted: true
                   publiclyAccessible: false
                   backupRetentionPeriod: 7
+                  dbSubnetGroupNameSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/database: prod }
+                  vpcSecurityGroupIdSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/security-group: database }
                   skipFinalSnapshot: false
                   finalSnapshotIdentifier: quorum-prod-final
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
@@ -276,6 +409,7 @@ spec:
               kind: Role
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-instance }
+                labels: { quorum.io/role: instance }
               spec:
                 forProvider:
                   assumeRolePolicy: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
@@ -286,6 +420,7 @@ spec:
               kind: Role
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-scheduler }
+                labels: { quorum.io/role: scheduler }
               spec:
                 forProvider:
                   assumeRolePolicy: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"scheduler.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
@@ -296,9 +431,64 @@ spec:
               kind: Role
               metadata:
                 annotations: { crossplane.io/external-name: quorum-prod-budget }
+                labels: { quorum.io/role: budget }
               spec:
                 forProvider:
                   assumeRolePolicy: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"budgets.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: instance-role-policy
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: RolePolicy
+              spec:
+                forProvider:
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: instance }
+                  policy: >-
+                    {"Version":"2012-10-17","Statement":[
+                    {"Effect":"Allow","Action":["secretsmanager:GetSecretValue","rds:DescribeDBInstances","rds-db:connect"],"Resource":"*"},
+                    {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],"Resource":["arn:aws:s3:::quorum-prod-*","arn:aws:s3:::quorum-prod-*/*"]},
+                    {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query"],"Resource":"*"},
+                    {"Effect":"Allow","Action":["kms:Decrypt","kms:Encrypt","kms:GenerateDataKey","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"*"}]}
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: scheduler-role-policy
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: RolePolicy
+              spec:
+                forProvider:
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: scheduler }
+                  policy: >-
+                    {"Version":"2012-10-17","Statement":[
+                    {"Effect":"Allow","Action":["ssm:StartAutomationExecution","ec2:StartInstances","ec2:StopInstances","rds:StartDBInstance","rds:StopDBInstance"],"Resource":"*"}]}
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: budget-role-policy
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: RolePolicy
+              spec:
+                forProvider:
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: budget }
+                  policy: >-
+                    {"Version":"2012-10-17","Statement":[
+                    {"Effect":"Allow","Action":["rds:StopDBInstance","ec2:StopInstances"],"Resource":"*"}]}
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: instance-profile
+            base:
+              apiVersion: iam.aws.m.upbound.io/v1beta1
+              kind: InstanceProfile
+              metadata:
+                annotations: { crossplane.io/external-name: quorum-prod-instance }
+              spec:
+                forProvider:
+                  roleSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: instance }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: application-instance
             base:
@@ -311,6 +501,7 @@ spec:
                   region: ap-southeast-2
                   ami: resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
                   instanceType: t4g.large
+                  iamInstanceProfile: quorum-prod-instance
                   subnetIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/tier: public }
@@ -335,6 +526,16 @@ spec:
                   region: ap-southeast-2
                   domain: vpc
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+          - name: elastic-ip-association
+            base:
+              apiVersion: ec2.aws.m.upbound.io/v1beta1
+              kind: EIPAssociation
+              spec:
+                forProvider:
+                  region: ap-southeast-2
+                  allocationIdSelector: { matchControllerRef: true }
+                  instanceIdSelector: { matchControllerRef: true }
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: log-group
             base:
               apiVersion: cloudwatchlogs.aws.m.upbound.io/v1beta1
@@ -358,9 +559,11 @@ spec:
                   state: ENABLED
                   flexibleTimeWindow: { mode: "OFF" }
                   target:
-                    arn: arn:aws:scheduler:::aws-sdk:ec2:stopInstances
-                    roleArn: arn:aws:iam::000000000000:role/quorum-prod-scheduler
-                    input: '{"InstanceIds":["pending"]}'
+                    arn: arn:aws:scheduler:::aws-sdk:ssm:startAutomationExecution
+                    roleArnSelector:
+                      matchControllerRef: true
+                      matchLabels: { quorum.io/role: scheduler }
+                    input: '{"DocumentName":"AWS-StopEC2Instance","Targets":[{"Key":"tag:Name","Values":["quorum-prod"]}]}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: rds-stop-schedule
             base:
@@ -374,7 +577,9 @@ spec:
                   flexibleTimeWindow: { mode: "OFF" }
                   target:
                     arn: arn:aws:scheduler:::aws-sdk:rds:stopDBInstance
-                    roleArn: arn:aws:iam::000000000000:role/quorum-prod-scheduler
+                    roleArnSelector:
+                      matchControllerRef: true
+                      matchLabels: { quorum.io/role: scheduler }
                     input: '{"DbInstanceIdentifier":"quorum-prod"}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: ec2-start-schedule
@@ -388,9 +593,11 @@ spec:
                   state: DISABLED
                   flexibleTimeWindow: { mode: "OFF" }
                   target:
-                    arn: arn:aws:scheduler:::aws-sdk:ec2:startInstances
-                    roleArn: arn:aws:iam::000000000000:role/quorum-prod-scheduler
-                    input: '{"InstanceIds":["pending"]}'
+                    arn: arn:aws:scheduler:::aws-sdk:ssm:startAutomationExecution
+                    roleArnSelector:
+                      matchControllerRef: true
+                      matchLabels: { quorum.io/role: scheduler }
+                    input: '{"DocumentName":"AWS-StartEC2Instance","Targets":[{"Key":"tag:Name","Values":["quorum-prod"]}]}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: rds-start-schedule
             base:
@@ -404,7 +611,9 @@ spec:
                   flexibleTimeWindow: { mode: "OFF" }
                   target:
                     arn: arn:aws:scheduler:::aws-sdk:rds:startDBInstance
-                    roleArn: arn:aws:iam::000000000000:role/quorum-prod-scheduler
+                    roleArnSelector:
+                      matchControllerRef: true
+                      matchLabels: { quorum.io/role: scheduler }
                     input: '{"DbInstanceIdentifier":"quorum-prod"}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: monthly-budget
@@ -426,3 +635,42 @@ spec:
                       notificationType: FORECASTED
                       subscriberEmailAddresses: [ayandelhi@gmail.com]
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+            patches:
+              - type: CombineFromComposite
+                toFieldPath: spec.forProvider.limitAmount
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: spec.budget.monthlyLimitUSD
+                  string:
+                    fmt: "%v"
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.alertThresholdPercent", toFieldPath: "spec.forProvider.notification[0].threshold" }
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.notifyEmail", toFieldPath: "spec.forProvider.notification[0].subscriberEmailAddresses[0]" }
+          - name: monthly-budget-rds-stop-action
+            base:
+              apiVersion: budgets.aws.m.upbound.io/v1beta1
+              kind: BudgetAction
+              spec:
+                forProvider:
+                  actionThreshold:
+                    actionThresholdType: PERCENTAGE
+                    actionThresholdValue: 100
+                  actionType: RUN_SSM_DOCUMENTS
+                  approvalModel: AUTOMATIC
+                  budgetNameSelector: { matchControllerRef: true }
+                  definition:
+                    ssmActionDefinition:
+                      actionSubType: STOP_RDS_INSTANCES
+                      instanceIds: [quorum-prod]
+                      region: ap-southeast-2
+                  executionRoleArnSelector:
+                    matchControllerRef: true
+                    matchLabels: { quorum.io/role: budget }
+                  notificationType: ACTUAL
+                  subscriber:
+                    - subscriptionType: EMAIL
+                      address: ayandelhi@gmail.com
+                providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+            patches:
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.actionThresholdPercent", toFieldPath: "spec.forProvider.actionThreshold.actionThresholdValue" }
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.notifyEmail", toFieldPath: "spec.forProvider.subscriber[0].address" }

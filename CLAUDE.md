@@ -395,6 +395,7 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [docs/e2e/MANUAL-TESTS.md](docs/e2e/MANUAL-TESTS.md) | Manual test scenarios not automatable via HTTP (LLM quality, MCP client, OAuth browser) |
 | [docs/e2e/TOKENS.md](docs/e2e/TOKENS.md) | JWT developer tooling — minting test tokens, token contents, CLI examples |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Helm chart, Crossplane IaC, LocalStack, production config |
+| [DEPLOYMENT-AWS.md](docs/DEPLOYMENT-AWS.md) | Crossplane v2 AWS demo deployment, validation, operations, and teardown |
 | [QUICKSTART.md](docs/QUICKSTART.md) | Local setup walkthrough with troubleshooting |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Connect an existing project to a running Quorum stack |
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Contribution guidelines, PR process |

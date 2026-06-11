@@ -27,6 +27,9 @@ describe('S-DEPLOY composition render', () => {
     for (const kind of [
       'Key', 'VPC', 'Subnet', 'SecurityGroup', 'Bucket', 'Table',
       'Instance', 'EIP', 'Group', 'Role', 'Schedule', 'Budget',
+      'Route', 'RouteTableAssociation', 'SubnetGroup', 'InstanceProfile',
+      'RolePolicy', 'EIPAssociation', 'BucketVersioning',
+      'BucketServerSideEncryptionConfiguration', 'BudgetAction',
     ]) {
       expect(kinds).toContain(kind)
     }
@@ -43,5 +46,62 @@ describe('S-DEPLOY composition render', () => {
     expect(schedules).toHaveLength(4)
     expect(schedules.filter((schedule) => schedule.spec.forProvider.state === 'DISABLED')).toHaveLength(2)
     expect(schedules.filter((schedule) => schedule.spec.forProvider.state === 'ENABLED')).toHaveLength(2)
+  }, 30000)
+
+  it('wires the public route, database network, instance identity, and elastic IP', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** Public IPv4 default route. */
+    const route = documents.find((document) => document.kind === 'Route')
+    /** RDS database instance. */
+    const database = documents.find((document) => (
+      document.apiVersion.startsWith('rds.') && document.kind === 'Instance'
+    ))
+    /** EC2 application instance. */
+    const application = documents.find((document) => (
+      document.apiVersion.startsWith('ec2.') && document.kind === 'Instance'
+    ))
+
+    expect(route.spec.forProvider.destinationCidrBlock).toBe('0.0.0.0/0')
+    expect(route.spec.forProvider.gatewayIdSelector.matchControllerRef).toBe(true)
+    expect(database.spec.forProvider.dbSubnetGroupNameSelector.matchLabels).toEqual({ 'quorum.io/database': 'prod' })
+    expect(database.spec.forProvider.vpcSecurityGroupIdSelector.matchLabels).toEqual({ 'quorum.io/security-group': 'database' })
+    expect(application.spec.forProvider.iamInstanceProfile).toBe('quorum-prod-instance')
+    expect(documents.filter((document) => document.kind === 'EIPAssociation')).toHaveLength(1)
+  }, 30000)
+
+  it('renders versioning and KMS encryption for every production bucket', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** S3 bucket versioning resources. */
+    const versioning = documents.filter((document) => document.kind === 'BucketVersioning')
+    /** S3 server-side encryption resources. */
+    const encryption = documents.filter((document) => (
+      document.kind === 'BucketServerSideEncryptionConfiguration'
+    ))
+
+    expect(versioning).toHaveLength(3)
+    expect(versioning.every((item) => item.spec.forProvider.versioningConfiguration.status === 'Enabled')).toBe(true)
+    expect(encryption).toHaveLength(3)
+    expect(encryption.every((item) => (
+      item.spec.forProvider.rule[0].applyServerSideEncryptionByDefault.sseAlgorithm === 'aws:kms'
+    ))).toBe(true)
+  }, 30000)
+
+  it('uses role selectors and an automatic RDS budget stop action', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** Serialized render used to detect forbidden placeholders. */
+    const serialized = JSON.stringify(documents)
+    /** EventBridge Scheduler resources. */
+    const schedules = documents.filter((document) => document.kind === 'Schedule')
+    /** Automatic AWS Budgets action. */
+    const action = documents.find((document) => document.kind === 'BudgetAction')
+
+    expect(serialized).not.toContain('000000000000')
+    expect(serialized).not.toContain('"pending"')
+    expect(schedules.every((schedule) => schedule.spec.forProvider.target.roleArnSelector)).toBe(true)
+    expect(action.spec.forProvider.approvalModel).toBe('AUTOMATIC')
+    expect(action.spec.forProvider.definition.ssmActionDefinition.actionSubType).toBe('STOP_RDS_INSTANCES')
   }, 30000)
 })

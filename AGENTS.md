@@ -266,6 +266,15 @@ graph TD
 - EC2 bootstrap restores derived snapshots, refreshes the RDS-managed credential atomically, and enables five systemd timers.
 - Operator resume/suspend scripts use AWS CLI and SSM directly, so routine demo control does not depend on the local Crossplane control plane.
 
+**AWS deployment operator workflow (2026-06-11):**
+- `./crossplane/deploy.sh validate` renders, provider-schema-validates, and runs all deployment tests without applying resources.
+- `docs/DEPLOYMENT-AWS.md` is the canonical operator runbook for image delivery, secret seeding, apply order, DNS, resume/suspend, cost controls, and teardown.
+
+**AWS composition and bootstrap completion (2026-06-11):**
+- The production render contains 44 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.
+- EC2 schedules invoke AWS-managed SSM Automation documents by the `Name=quorum-prod` tag; no generated instance ID or account ARN is hardcoded.
+- Fresh AL2023 bootstrap pins checksum-verified Docker Compose `v5.1.4`, shell-quotes secret values, logs in to GHCR with password-stdin, and applies the idempotent PostgreSQL schema before containers start.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)

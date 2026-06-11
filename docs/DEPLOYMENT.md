@@ -6,6 +6,7 @@
 > and the Vercel dashboard at <https://quorum-dashboard.ayansasmal.work>. Helm installs Crossplane core
 > only; the gateway is not deployed with Helm or `provider-helm`. See the
 > [current AWS deployment design](superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md).
+> The implemented operator workflow is documented in [DEPLOYMENT-AWS.md](DEPLOYMENT-AWS.md).
 
 ## Architecture: Two Parties, One Stack
 

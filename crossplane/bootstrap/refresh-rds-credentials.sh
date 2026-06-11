@@ -16,6 +16,10 @@ USER="$(jq -r '.username' <<<"${SECRET}")"
 PASSWORD="$(jq -r '.password' <<<"${SECRET}")"
 
 grep -v -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_PASSWORD)=' "${ENV_FILE}" >"${TMP}" || true
-printf 'POSTGRES_HOST=%s\nPOSTGRES_PORT=%s\nPOSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\n' \
-  "${HOST}" "${PORT}" "${USER}" "${PASSWORD}" >>"${TMP}"
+{
+  printf 'POSTGRES_HOST=%q\n' "${HOST}"
+  printf 'POSTGRES_PORT=%q\n' "${PORT}"
+  printf 'POSTGRES_USER=%q\n' "${USER}"
+  printf 'POSTGRES_PASSWORD=%q\n' "${PASSWORD}"
+} >>"${TMP}"
 install -o root -g root -m 0600 "${TMP}" "${ENV_FILE}"

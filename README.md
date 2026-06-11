@@ -278,6 +278,7 @@ A curated index of the docs in this repo. (The MCP server's own docs live in the
 | Doc | What's in it |
 |-----|--------------|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Helm chart, Crossplane IaC, LocalStack, production config |
+| [docs/DEPLOYMENT-AWS.md](docs/DEPLOYMENT-AWS.md) | Crossplane v2 AWS demo deployment and operator runbook |
 | [crossplane/README.md](crossplane/README.md) | Crossplane infrastructure composition |
 | [crossplane/COMPONENTS.md](crossplane/COMPONENTS.md) | Crossplane component reference |
 
