@@ -275,6 +275,10 @@ graph TD
 - Crossplane v2 namespaced managed resources use `aws.m.upbound.io/v1beta1` ProviderConfig
   `quorum-system/aws-prod`; generate `quorum-system/aws-creds-prod` key `creds` from the
   `quorum-prod` AWS CLI profile through stdin. Never store production access keys in repository YAML.
+- Runtime images `ghcr.io/ayansasmal/quorum-gateway:0.4.12` and
+  `ghcr.io/ayansasmal/graphiti-mcp:0.4.x` are public Linux ARM64 packages; EC2 must pull them
+  anonymously rather than storing a GitHub token. Upload bootstrap assets to
+  `s3://quorum-prod-deploy/bootstrap/current/` with `*.example` excluded.
 
 **AWS composition and bootstrap completion (2026-06-11):**
 - The production render contains 44 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.

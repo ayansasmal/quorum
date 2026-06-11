@@ -93,9 +93,15 @@ The following steps are operator-run and intentionally excluded from tests.
 3. Authenticate to GHCR and push the reviewed images:
 
    ```bash
+   gh auth refresh -h github.com -s write:packages
+   gh auth token | docker login ghcr.io --username ayansasmal --password-stdin
    docker push ghcr.io/ayansasmal/quorum-gateway:0.4.12
    docker push ghcr.io/ayansasmal/graphiti-mcp:0.4.x
    ```
+
+   Both runtime packages are public under the `ayansasmal` GHCR namespace, so EC2 pulls them without
+   a GitHub token. Public visibility changes pull access only; package ownership and publishing remain
+   controlled by the `ayansasmal` GitHub account.
 
 4. Create `quorum/prod/gateway` in AWS Secrets Manager from the local, gitignored `.env.prod`.
    Do not print the file or commit generated JSON. The secret contains application values only:
@@ -108,11 +114,13 @@ The following steps are operator-run and intentionally excluded from tests.
    ```bash
    aws s3 cp crossplane/bootstrap/ \
      s3://quorum-prod-deploy/bootstrap/current/ \
-     --recursive --region ap-southeast-2
+     --recursive --region ap-southeast-2 \
+     --exclude '*.example'
    ```
 
    The instance boots from this prefix (see [Updating The Bootstrap](#updating-the-bootstrap)).
    The deploy bucket has S3 versioning enabled, so overwriting `current/` retains prior revisions.
+   The production prefix contains 18 runtime files; credential and environment examples are excluded.
 
 6. Run:
 
