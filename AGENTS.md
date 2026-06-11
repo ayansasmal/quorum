@@ -421,3 +421,20 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 | [quorum-mcp/docs/journey-story-04-06-2026-mcp.md](../quorum-mcp/docs/journey-story-04-06-2026-mcp.md) | MCP integration journey stories — J-MCP-01 through J-MCP-06, all 54 tests passing against live gateway via InMemoryTransport |
 | [docs/e2e/journey-story-28-05-2026.md](docs/e2e/journey-story-28-05-2026.md) | Journey narratives for all 21 E2E journeys — product story, validated sub-scenarios, gap analysis (2026-05-28) |
 | [docs/e2e/GAP-ANALYSIS.md](docs/e2e/GAP-ANALYSIS.md) | 38 prioritised coverage gaps (P0–P6) — each with context, test type, exact code change, and effort estimate |
+
+---
+
+## AWS Demo Deployment Decisions (2026-06-11)
+
+- The single `prod` AWS environment is demo-purpose, not a highly available customer-facing production
+  service.
+- Accepted demo limitations: local Docker Desktop Crossplane availability, standalone Spot interruption
+  risk, one public EC2 subnet, Single-AZ RDS, disabled RDS deletion protection, and snapshot-lagged
+  FalkorDB recovery.
+- Crossplane AWS ProviderConfig credentials are already configured and working locally. Keep their values
+  outside Git.
+- RDS owns its master password in Secrets Manager. EC2 retrieves it at runtime through its IAM instance
+  profile; never copy it into Kubernetes, Vercel, Git, or `quorum/prod/gateway`.
+- Create and seed `quorum/prod/gateway` directly in AWS Secrets Manager before applying the production
+  XR. Crossplane does not own this secret; it grants EC2 read access to it.
+- No AWS deployment may be triggered without explicit user approval.

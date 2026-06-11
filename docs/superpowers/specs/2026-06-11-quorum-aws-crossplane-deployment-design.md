@@ -3,21 +3,21 @@
 **Status:** Approved design, implementation not started
 **Date:** 2026-06-11
 **Last revised:** 2026-06-11
-**Scope:** Production-only AWS backend infrastructure and gateway deployment
+**Scope:** Production-named, demo-purpose AWS backend infrastructure and gateway deployment
 **Dashboard:** Vercel at <https://quorum-dashboard.ayansasmal.work>
 
 ---
 
 ## 1. Executive Summary
 
-Quorum uses the local Docker Desktop Kubernetes cluster as a permanent Crossplane control plane.
+Quorum uses the local Docker Desktop Kubernetes cluster as its Crossplane control plane.
 Crossplane provisions the production AWS infrastructure, while a stateless spot EC2 instance runs the
 backend application stack with Docker Compose. The instance is fully disposable — it holds no durable
 state on its own disk. The two pieces of state that are expensive to rebuild live off-instance:
 **PostgreSQL (the source of truth) on managed RDS**, and **FalkorDB's derived graph/embeddings plus
 Caddy's TLS material as versioned snapshots in S3** that a replacement instance restores on boot. A
-replacement can therefore launch in any availability zone, pull the latest snapshot, and resume with no
-re-embedding and no Let's Encrypt re-issue.
+replacement can pull the latest snapshot and normally resume without a full re-embedding or Let's
+Encrypt re-issue.
 
 The dashboard is not part of the AWS workload. It lives in the separate
 [`ayansasmal/Quorum-dash`](https://github.com/ayansasmal/Quorum-dash) repository and deploys to Vercel.
@@ -62,6 +62,8 @@ As of June 11, 2026:
 - No AWS providers have been installed for this production design.
 - `provider-helm` is not installed.
 - No Crossplane XR, AWS managed resource, or Quorum Helm release has been applied.
+- Crossplane's AWS ProviderConfig credentials are already configured locally and verified to work. Their
+  values remain outside Git and are not managed by this design.
 - The dashboard repository has been extracted with history and linked to Vercel.
 - Dashboard production URL: <https://quorum-dashboard.ayansasmal.work>.
 - Vercel has a placeholder `QUORUM_GATEWAY_URL`; it will be replaced after the AWS gateway is online.
@@ -92,10 +94,35 @@ As of June 11, 2026:
 | 18 | Instance access | SSM Session Manager; no inbound SSH |
 | 19 | Recurring jobs | systemd timers launch one-shot Docker Compose services |
 | 20 | Deployment trigger | Implementation and offline validation only until explicitly approved |
+| 21 | Service level | Demo workload; brief downtime and manual recovery are acceptable |
+| 22 | Crossplane credentials | Existing local AWS ProviderConfig credentials are reused and remain outside Git |
 
 ---
 
-## 4. Architecture
+## 4. Demo Risk Acceptance
+
+This deployment is production-named because it has only one environment, but it is intended for a
+demonstration rather than a highly available production service. The following limitations are
+deliberately accepted:
+
+- The Crossplane control plane runs on a local Docker Desktop Kubernetes cluster. If that machine or
+  cluster is offline, reconciliation pauses until it returns.
+- A standalone Spot instance may be interrupted and may require Crossplane or manual intervention to
+  replace it. There is no Auto Scaling Group in the initial footprint.
+- FalkorDB may restore from a snapshot that is up to one snapshot interval old. PostgreSQL remains the
+  governed source of truth; full graph reconciliation is a manual recovery option for the demo.
+- RDS is Single-AZ with seven-day backups, `deletionProtection: false`, and no Crossplane orphan policy.
+  The operator accepts the increased deletion and availability risk for the demo.
+- The EC2 workload uses one public subnet. Cross-AZ compute failover is not a requirement.
+- Crossplane AWS credentials have already been configured and tested locally. Credential bootstrapping,
+  rotation, and migration to workload identity are outside this implementation.
+
+These are conscious cost and complexity trade-offs, not recommendations for a durable customer-facing
+production deployment.
+
+---
+
+## 5. Architecture
 
 ```mermaid
 flowchart TB
@@ -180,13 +207,14 @@ The AWS gateway remains the sole authentication and authorization authority:
 
 ---
 
-## 5. What Runs Where
+## 6. What Runs Where
 
 | Component | Location | Delivery mechanism |
 |-----------|----------|--------------------|
 | Crossplane core | Docker Desktop Kubernetes | Helm chart `crossplane-stable/crossplane` |
 | AWS providers and functions | Docker Desktop Kubernetes | Crossplane package resources |
-| VPC, EC2, RDS, IAM, S3, DynamoDB, Secrets, KMS, logs | AWS | Crossplane Composition |
+| VPC, EC2, RDS, IAM, S3, DynamoDB, KMS, logs | AWS | Crossplane Composition |
+| Gateway application secret | AWS Secrets Manager | Operator-created and seeded before the production XR |
 | Caddy | EC2 | Docker Compose |
 | Gateway | EC2 | Docker Compose, image from GHCR |
 | Graphiti | EC2 | Docker Compose, image from GHCR |
@@ -210,7 +238,7 @@ The AWS gateway remains the sole authentication and authorization authority:
 
 ---
 
-## 6. Crossplane API
+## 7. Crossplane API
 
 The environment is represented by one namespaced `QuorumEnvironment` XR backed by a cluster-scoped
 `XQuorumEnvironment` XRD.
@@ -288,7 +316,7 @@ The RDS password is not copied into this Secret.
 
 ---
 
-## 7. Crossplane Package Layout
+## 8. Crossplane Package Layout
 
 The production implementation will coexist with the existing LocalStack manifests:
 
@@ -333,9 +361,9 @@ accidentally targeting LocalStack.
 
 ---
 
-## 8. AWS Resources
+## 9. AWS Resources
 
-### 8.1 Network
+### 9.1 Network
 
 - VPC using the XR CIDR.
 - One public subnet for EC2.
@@ -350,7 +378,7 @@ accidentally targeting LocalStack.
 
 No NAT Gateway is required.
 
-### 8.2 Compute
+### 9.2 Compute
 
 - Graviton-compatible Amazon Linux 2023 AMI.
 - Spot instance using the requested instance type and maximum price.
@@ -361,10 +389,10 @@ No NAT Gateway is required.
 - Minimal `userData` that downloads the versioned bootstrap entrypoint from S3.
 - On boot, restores the latest FalkorDB and Caddy snapshot from S3 before the Compose stack starts.
 
-EC2 contains no durable governed knowledge and pins no data to its disk or availability zone. All
+EC2 contains no durable governed knowledge and pins no data to its disk. All
 expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 snapshot bucket.
 
-### 8.3 Database
+### 9.3 Database
 
 - RDS PostgreSQL 16.
 - Single-AZ `db.t4g.micro` initially.
@@ -376,8 +404,11 @@ expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 s
 - Final snapshot on controlled teardown.
 
 RDS is the durable source of truth. Redis and FalkorDB may be destroyed and rebuilt.
+For this demo, the operator explicitly accepts Single-AZ availability, disabled deletion protection,
+and Crossplane's normal delete lifecycle. A future durable production deployment must revisit those
+settings.
 
-### 8.4 Storage and index
+### 9.4 Storage and index
 
 - Versioned, encrypted S3 config bucket.
 - Versioned, encrypted S3 deploy bucket.
@@ -387,7 +418,7 @@ RDS is the durable source of truth. Redis and FalkorDB may be destroyed and rebu
 - DynamoDB `quorum-user-projects` table with the existing membership GSI.
 - No retired `quorum-configs` DynamoDB table.
 
-### 8.5 IAM
+### 9.5 IAM
 
 The EC2 instance role receives only the permissions required to:
 
@@ -406,7 +437,7 @@ GHCR authentication uses a read-only package token from Secrets Manager, not an 
 
 ---
 
-## 9. Secrets and OAuth
+## 10. Secrets and OAuth
 
 ### Application secret
 
@@ -421,6 +452,12 @@ GHCR authentication uses a read-only package token from Secrets Manager, not an 
 
 It does not contain the RDS password.
 
+The application secret is distinct from the RDS-managed database secret. The operator creates and seeds
+it directly in AWS Secrets Manager before applying the production XR. Crossplane does not own this
+secret; it only grants the EC2 instance role permission to read the known secret name. This keeps the
+application values out of Kubernetes etcd and makes the populated secret a compute bootstrap
+prerequisite.
+
 ### Database secret
 
 RDS creates and owns the master-user secret. At boot, the instance:
@@ -431,6 +468,10 @@ RDS creates and owns the master-user secret. At boot, the instance:
 4. creates root-owned PostgreSQL environment variables;
 5. applies `init-db.sql`;
 6. starts or recreates the gateway.
+
+The RDS password is never manually seeded into `quorum/prod/gateway`. EC2 retrieves the RDS-managed
+secret at runtime through its IAM instance profile, so the password never passes through Git,
+Crossplane manifests, the local Kubernetes API, or Vercel.
 
 ### GitHub OAuth values
 
@@ -454,7 +495,7 @@ followed by a production Vercel redeployment.
 
 ---
 
-## 10. EC2 Application Stack
+## 11. EC2 Application Stack
 
 `docker-compose.aws.yml` contains:
 
@@ -521,8 +562,8 @@ RDS; it only needs to be recent enough to avoid a costly re-embed.
 3. if no snapshot exists (first-ever boot), proceeds with empty volumes — FalkorDB starts clean and
    Caddy issues a fresh certificate.
 
-This makes the instance disposable in any AZ: the worst-case data loss is one snapshot interval of
-derived graph state, all of which is re-derivable from PostgreSQL.
+This makes the instance disposable within the demo topology: the worst-case snapshot lag is one
+snapshot interval of derived graph state, all of which remains re-derivable from PostgreSQL.
 
 ### RDS credential rotation
 
@@ -538,7 +579,7 @@ A 15-minute systemd timer:
 
 ---
 
-## 11. Deployment Workflow
+## 12. Deployment Workflow
 
 Implementation must keep preparation separate from execution.
 
@@ -573,12 +614,13 @@ Do not run these during implementation:
 
 1. Verify local Crossplane core.
 2. Install pinned AWS providers and composition functions.
-3. Configure the production AWS ProviderConfig.
+3. Verify the already-configured production AWS ProviderConfig and credentials.
 4. Build and push arm64 gateway and Graphiti images.
-5. Seed the application secret.
-6. Apply XRD and Composition.
-7. Apply `environments/prod.yaml`.
-8. Wait for the AWS resources and output Secret.
+5. Apply the XRD and Composition definitions without creating the production XR.
+6. Create `quorum/prod/gateway` and seed its application values directly in AWS Secrets Manager.
+7. Apply `environments/prod.yaml` only after the application secret has a current value.
+8. Wait for the AWS resources and output Secret. RDS independently creates its managed master-user
+   secret, which EC2 discovers through IAM at runtime.
 9. Once a domain is acquired, create the Route 53 record (or equivalent) pointing `<gateway-domain>` at the EIP.
 10. Wait for Caddy TLS and verify gateway health.
 11. Update the GitHub OAuth App callback.
@@ -587,7 +629,7 @@ Do not run these during implementation:
 
 ---
 
-## 12. Observability and Operations
+## 13. Observability and Operations
 
 - Docker `awslogs` driver sends gateway, Graphiti, Caddy, and job output to CloudWatch.
 - CloudWatch alarms cover EC2 status checks, disk pressure, and RDS storage/CPU/connections.
@@ -607,7 +649,7 @@ Recommended initial schedules:
 
 ---
 
-## 13. Teardown and Retention
+## 14. Teardown and Retention
 
 | Resource | Controlled teardown behavior |
 |----------|-----------------------------|
@@ -628,14 +670,15 @@ Deleting the XR must never imply deleting Vercel or the dashboard repository.
 
 ---
 
-## 14. Implementation Deliverables
+## 15. Implementation Deliverables
 
 The implementation phase must produce:
 
 1. Crossplane v2 XRD and namespaced XR schema.
 2. Flat pipeline Composition with pinned providers and functions.
-3. Production ProviderConfig template with no committed credentials.
-4. AWS network, compute, IAM, RDS, S3, DynamoDB, KMS, Secrets Manager, and CloudWatch resources.
+3. Production ProviderConfig reference compatible with the existing working local credentials, with no
+   credential values committed.
+4. AWS network, compute, IAM, RDS, S3, DynamoDB, KMS, and CloudWatch resources.
 5. EC2 bootstrap scripts and versioned S3 objects.
 6. Backend-only Docker Compose stack.
 7. Caddy gateway configuration.
@@ -648,7 +691,7 @@ The implementation phase must produce:
 
 ---
 
-## 15. Success Criteria
+## 16. Success Criteria
 
 ### Implementation readiness
 
@@ -659,6 +702,8 @@ The implementation phase must produce:
 - No Helm release manifest exists for the AWS gateway.
 - No production secret value is committed.
 - No deployment command runs as part of tests or validation.
+- The externally managed application secret exists with a current value before the production XR creates
+  compute.
 
 ### Future deployment readiness
 
@@ -669,14 +714,15 @@ The implementation phase must produce:
 - The gateway serves trusted HTTPS.
 - Vercel proxies authenticated dashboard traffic to the gateway.
 - GitHub OAuth redirects back to `https://quorum-dashboard.ayansasmal.work`.
-- A replacement spot instance restores the latest FalkorDB and Caddy snapshot from S3 on boot.
+- A replacement spot instance restores the latest FalkorDB and Caddy snapshot from S3 on boot when the
+  local Crossplane control plane is available or the operator replaces it manually.
 - Replacing the spot instance loses no governed knowledge — PostgreSQL is unaffected and FalkorDB's
   derived index is restored from snapshot (or, worst case, re-derivable from PostgreSQL).
 - A replacement instance reuses the existing TLS certificate without triggering a Let's Encrypt re-issue.
 
 ---
 
-## 16. Deferred Upgrades
+## 17. Deferred Upgrades
 
 The following are not part of the first production footprint:
 
@@ -688,5 +734,9 @@ The following are not part of the first production footprint:
 - `provider-helm`.
 - Kubernetes application deployment.
 - multi-region failover.
+- Auto Scaling Group or other AWS-native automatic Spot replacement.
+- A continuously available Crossplane control plane.
+- RDS deletion protection and Crossplane orphan-on-delete lifecycle.
+- Automated post-restore FalkorDB reconciliation from PostgreSQL.
 
 Each may be introduced later if availability, scale, or organizational requirements justify its cost.
