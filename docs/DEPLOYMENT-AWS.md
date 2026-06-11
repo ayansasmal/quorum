@@ -72,7 +72,16 @@ The following steps are operator-run and intentionally excluded from tests.
    separately. Bootstrap writes values as shell-escaped assignments and authenticates to GHCR with
    `--password-stdin`.
 
-4. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under an immutable version.
+4. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under the live prefix:
+
+   ```bash
+   aws s3 cp crossplane/bootstrap/ \
+     s3://quorum-prod-deploy/bootstrap/current/ \
+     --recursive --region ap-southeast-2
+   ```
+
+   The instance boots from this prefix (see [Updating The Bootstrap](#updating-the-bootstrap)).
+   The deploy bucket has S3 versioning enabled, so overwriting `current/` retains prior revisions.
 
 5. Run:
 
@@ -136,6 +145,37 @@ checksum-verified ARM64 Docker Compose `v5.1.4` plugin. The bootstrap applies `i
 `ON_ERROR_STOP` before starting containers.
 
 The application secret must never contain `POSTGRES_PASSWORD`.
+
+## Updating The Bootstrap
+
+The instance's `userData` is a minimal stub: it pulls `ec2-userdata.sh` from
+`s3://quorum-prod-deploy/bootstrap/current/` and execs it. That orchestrator then downloads the rest
+of the bundle (`start.sh`, snapshot scripts, `docker-compose.aws.yml`, `init-db.sql`, systemd units)
+from the same prefix and runs `start.sh`. Because the scripts live in S3, you can change them and
+re-run on the box without rebuilding or replacing the instance:
+
+1. Edit the script under `crossplane/bootstrap/`, then re-run `./crossplane/deploy.sh validate`.
+2. Re-upload the prefix:
+
+   ```bash
+   aws s3 cp crossplane/bootstrap/ \
+     s3://quorum-prod-deploy/bootstrap/current/ \
+     --recursive --region ap-southeast-2
+   ```
+
+3. Re-run on the instance over SSM (no SSH; the box has no inbound port 22):
+
+   ```bash
+   aws ssm send-command \
+     --region ap-southeast-2 \
+     --document-name AWS-RunShellScript \
+     --targets Key=tag:Name,Values=quorum-prod \
+     --parameters 'commands=["/opt/quorum/ec2-userdata.sh"]'
+   ```
+
+   Re-running is safe: every bootstrap step is idempotent. To restart only the stack without
+   re-fetching the bundle, run `/opt/quorum/start.sh` instead. `userData` itself runs only at first
+   launch, so editing the stub requires reapplying the XR; editing the S3 scripts does not.
 
 ## Cost Controls
 

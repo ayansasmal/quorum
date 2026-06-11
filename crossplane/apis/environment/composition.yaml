@@ -502,6 +502,21 @@ spec:
                   ami: resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
                   instanceType: t4g.large
                   iamInstanceProfile: quorum-prod-instance
+                  # Minimal boot stub: the real bootstrap lives in S3 so scripts can be
+                  # updated and re-run on the instance without rebuilding it. Update flow:
+                  # re-upload crossplane/bootstrap/ to s3://quorum-prod-deploy/bootstrap/current/,
+                  # then re-run this stub (or /opt/quorum/start.sh) on the box via SSM.
+                  userData: |
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    export AWS_REGION=ap-southeast-2
+                    export DEPLOY_BUCKET=quorum-prod-deploy
+                    export BOOTSTRAP_VERSION=current
+                    command -v aws >/dev/null 2>&1 || dnf install -y awscli-2
+                    install -d -m 0755 /opt/quorum
+                    aws s3 cp "s3://${DEPLOY_BUCKET}/bootstrap/${BOOTSTRAP_VERSION}/ec2-userdata.sh" /opt/quorum/ec2-userdata.sh --region "${AWS_REGION}"
+                    chmod +x /opt/quorum/ec2-userdata.sh
+                    exec /opt/quorum/ec2-userdata.sh
                   subnetIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/tier: public }

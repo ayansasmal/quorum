@@ -70,6 +70,24 @@ describe('S-DEPLOY composition render', () => {
     expect(documents.filter((document) => document.kind === 'EIPAssociation')).toHaveLength(1)
   }, 30000)
 
+  it('boots the instance from an S3-hosted bootstrap, not an inline blob', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** EC2 application instance. */
+    const application = documents.find((document) => (
+      document.apiVersion.startsWith('ec2.') && document.kind === 'Instance'
+    ))
+    /** Boot stub passed to the instance. */
+    const userData = application.spec.forProvider.userData
+
+    // The stub fetches the orchestrator from the deploy bucket at boot, so bootstrap
+    // scripts can be updated and re-run without rebuilding the instance.
+    expect(userData).toContain('s3://${DEPLOY_BUCKET}/bootstrap/${BOOTSTRAP_VERSION}/ec2-userdata.sh')
+    expect(userData).toContain('exec /opt/quorum/ec2-userdata.sh')
+    // No full script embedded as a base64 blob — that would couple updates to a rebuild.
+    expect(application.spec.forProvider.userDataBase64).toBeUndefined()
+  }, 30000)
+
   it('renders versioning and KMS encryption for every production bucket', () => {
     /** Rendered production resources. */
     const documents = render()
