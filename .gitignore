@@ -1,5 +1,9 @@
 node_modules/
 .env
+# Any environment-specific secret file (.env.prod, .env.local, …) — never commit.
+# Keep the checked-in template (.env.example) tracked.
+.env.*
+!.env.example
 dist/
 coverage/
 *.log
