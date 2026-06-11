@@ -4,6 +4,13 @@ Deep-dive reference for every Crossplane component in this project.
 For quick-start instructions see [README.md](README.md).
 For the `crossplane.sh` and `sync.sh` scripts see the root of this directory.
 
+> **LocalStack reference:** Versions, ElastiCache resources, Kubernetes connection Secrets, IRSA, and
+> gateway Deployment guidance in this document describe the legacy local/EKS-oriented manifests.
+> The approved production design uses Crossplane `v2.3.2`, RDS-managed credentials, a stateless EC2
+> Docker Compose backend, and a Vercel dashboard. Helm installs Crossplane core only. Use the
+> [AWS deployment design](../docs/superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md)
+> as the production source of truth.
+
 ---
 
 ## Table of Contents

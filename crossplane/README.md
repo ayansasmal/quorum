@@ -2,6 +2,13 @@
 
 Crossplane manages all Quorum infrastructure — the only IaC tool in this project. Provisions S3 (project configs), DynamoDB (membership + config cache), RDS PostgreSQL (audit pipeline + version store), and Redis via ElastiCache (gateway cache). Requires Crossplane ≥ v1.14 and the relevant Upbound AWS provider packages.
 
+> **Scope notice (June 11, 2026):** This document describes the existing LocalStack reference
+> manifests. It is not the approved production topology. Production uses Crossplane core `v2.3.2` in
+> Docker Desktop Kubernetes to provision AWS, then EC2 bootstrap plus Docker Compose to run the backend.
+> Helm installs Crossplane core only; `provider-helm` and an application Helm release are not used.
+> The dashboard runs independently on Vercel. See the
+> [current AWS deployment design](../docs/superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md).
+
 ## Folder Structure
 
 ```

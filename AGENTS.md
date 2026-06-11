@@ -243,6 +243,13 @@ graph TD
 - The application secret contains JWT, OAuth, OpenAI, and GHCR values only. It must never duplicate the RDS password.
 - A systemd credential-refresh timer detects RDS secret rotation, atomically replaces the DB variables, and recreates the gateway container after a successful health check.
 
+**AWS control-plane and dashboard deployment decision (2026-06-11):**
+- Docker Desktop Kubernetes is the permanent local Crossplane control plane; Crossplane core `v2.3.2` is installed with Helm.
+- Helm is only used to install Crossplane core. The AWS gateway is not a Helm release, and `provider-helm` is not required.
+- Crossplane provisions AWS resources; EC2 `userData` and S3 bootstrap assets start a backend-only Docker Compose stack containing Caddy, gateway, Graphiti, FalkorDB, Redis, and one-shot jobs.
+- The dashboard is maintained in `https://github.com/ayansasmal/Quorum-dash`, deployed by Vercel at `https://quorum-dashboard.ayansasmal.work`, and is not built or run on EC2.
+- Vercel forwards Quorum JWT and `X-Quorum-Project` headers to the AWS gateway through `QUORUM_GATEWAY_URL`; the gateway remains the sole authorization authority.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)

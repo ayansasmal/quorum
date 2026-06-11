@@ -1,5 +1,12 @@
 # Quorum — Deployment Guide
 
+> **Production architecture notice (June 11, 2026):** The Helm/EKS sections below remain useful for
+> optional Kubernetes deployments, but they are not the approved AWS production path. Production uses a
+> local Docker Desktop Crossplane `v2.3.2` control plane, a stateless EC2 Docker Compose backend with RDS,
+> and the Vercel dashboard at <https://quorum-dashboard.ayansasmal.work>. Helm installs Crossplane core
+> only; the gateway is not deployed with Helm or `provider-helm`. See the
+> [current AWS deployment design](superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md).
+
 ## Architecture: Two Parties, One Stack
 
 Quorum has a clear split between who runs what:
