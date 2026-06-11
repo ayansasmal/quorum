@@ -35,7 +35,7 @@ spec:
     intervalMinutes: 60
     restoreOnBoot: true
   database:
-    identifier: terraform-20260611200930242900000002
+    identifier: quorum-prod
     engineVersion: "16"
     instanceClass: db.t4g.micro
     allocatedStorageGiB: 20

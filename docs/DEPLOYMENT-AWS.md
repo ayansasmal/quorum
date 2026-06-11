@@ -17,6 +17,9 @@ runs ShellCheck and Bash syntax checks, and validates Docker Compose. It does no
 or mutate AWS.
 
 The `apply` and `destroy` paths require an explicit subcommand and typed `yes` confirmation.
+`apply` is successful only after the XR is ready, the current bootstrap bundle is uploaded,
+the bundle completes over SSM, and the gateway answers its local health check. `destroy` is
+successful only after the XR and every managed AWS resource have disappeared.
 
 ## Prerequisites
 
@@ -116,19 +119,13 @@ The following steps are operator-run and intentionally excluded from tests.
    runtime settings. The public GHCR images require no GitHub credential. RDS owns its master
    password separately. Bootstrap writes values as shell-escaped assignments.
 
-   Existing RDS instances created before the stable `quorum-prod` external name was applied may
-   retain a generated identifier. Add that non-secret value as `DB_INSTANCE_ID` in the application
-   secret:
+   The application secret does not control the RDS resource identifier. Production bootstrap uses
+   the canonical `quorum-prod` identifier, matching `spec.database.identifier`, schedules, and budget
+   actions. An explicit operator override may use `QUORUM_DB_INSTANCE_ID`, but stale
+   `DB_INSTANCE_ID` values in the application secret are ignored.
 
-   ```bash
-   aws rds describe-db-instances --region ap-southeast-2 \
-     --query 'DBInstances[].DBInstanceIdentifier' --output table
-   ```
-
-   Set `spec.database.identifier` to the same value. The naming convention for a fresh deployment is
-   `quorum-prod`.
-
-5. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under the live prefix:
+5. The apply command uploads the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under
+   the live prefix after Crossplane reports the infrastructure ready:
 
    ```bash
    aws s3 cp crossplane/bootstrap/ \
@@ -151,7 +148,9 @@ The following steps are operator-run and intentionally excluded from tests.
    `Healthy` and for the namespaced `ProviderConfig` and `XQuorumEnvironment` CRDs to be
    established before applying the ProviderConfig, composition, and composite resource. This prevents the
    "no matches for kind ProviderConfig" race on a cold cluster. The first provider pull can take
-   several minutes, so the `kubectl wait` steps may sit for a while — that is expected.
+   several minutes, so the `kubectl wait` steps may sit for a while. After the XR is ready, the command
+   uploads the current bootstrap, waits for EC2 to register with SSM, runs bootstrap, prints the SSM
+   output, and verifies `http://127.0.0.1:3001/health` from the instance.
 
 7. Watch readiness:
 
@@ -315,5 +314,7 @@ Take a final snapshot, confirm the retained RDS/S3 data requirements, then run:
 ./crossplane/deploy.sh destroy
 ```
 
-The destroy command removes the XR only after typed confirmation. Review final snapshots, versioned
-S3 objects, Secrets Manager secrets, the Elastic IP, and the Vercel DNS record separately.
+The destroy command removes all versions from the deploy bucket before deleting the XR, then waits
+up to 40 minutes for Kubernetes finalizers and AWS deletion to remove every managed resource. It
+prints the remaining resource names while waiting and exits non-zero with status diagnostics on
+timeout. The externally managed `quorum/prod/gateway` secret and Vercel DNS record are retained.

@@ -22,7 +22,7 @@ set -a
 # shellcheck disable=SC1091
 source /etc/quorum/quorum.env
 set +a
-: "${DB_INSTANCE_ID:=quorum-prod}"
+DB_INSTANCE_ID="${QUORUM_DB_INSTANCE_ID:-quorum-prod}"
 export DB_INSTANCE_ID
 /opt/quorum/refresh-rds-credentials.sh
 set -a

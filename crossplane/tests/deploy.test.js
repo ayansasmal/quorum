@@ -10,6 +10,9 @@ const source = readFileSync('crossplane/deploy.sh', 'utf8')
 /** Production AWS ProviderConfig manifest source. */
 const providerConfig = readFileSync('crossplane/providers/providerconfig-aws-prod.yaml', 'utf8')
 
+/** Canonical production environment manifest source. */
+const productionEnvironment = readFileSync('crossplane/environments/prod.yaml', 'utf8')
+
 describe('S-DEPLOY deployment gate', () => {
   it('defaults to validate', () => {
     expect(source).toContain('COMMAND="${1:-validate}"')
@@ -41,8 +44,40 @@ describe('S-DEPLOY deployment gate', () => {
     expect(source).toContain('Managed resources')
     expect(source).toContain('Non-ready details')
     expect(source).toContain('Recent warnings')
-    expect(source).toContain('kubectl get managed -n "${namespace}" -o json')
+    expect(source).toContain('kubectl get managed -n "${NAMESPACE}" -o json')
     expect(source).toContain('any(.status.conditions[]?; .type == "Ready" and .status == "True")')
-    expect(source).toContain('kubectl get events -n "${namespace}"')
+    expect(source).toContain('kubectl get events -n "${NAMESPACE}"')
+  })
+
+  it('completes application bootstrap after infrastructure reconciliation', () => {
+    const applyBlock = source.slice(source.indexOf('  apply)'), source.indexOf('  status)'))
+    const environmentApply = applyBlock.indexOf('environments/prod.yaml')
+    const environmentWait = applyBlock.indexOf('kubectl wait --for=condition=Ready')
+    const bootstrapUpload = applyBlock.indexOf('upload_bootstrap')
+    const bootstrapRun = applyBlock.indexOf('bootstrap_application')
+
+    expect(environmentApply).toBeGreaterThan(-1)
+    expect(environmentWait).toBeGreaterThan(environmentApply)
+    expect(bootstrapUpload).toBeGreaterThan(environmentWait)
+    expect(bootstrapRun).toBeGreaterThan(bootstrapUpload)
+    expect(source).toContain('aws ssm send-command')
+    expect(source).toContain('aws ssm wait command-executed')
+    expect(source).toContain('aws ssm get-command-invocation')
+    expect(source).toContain('curl --fail --silent --show-error')
+  })
+
+  it('uses a stable RDS identifier for clean rebuilds', () => {
+    expect(productionEnvironment).toContain('identifier: quorum-prod')
+    expect(productionEnvironment).not.toContain('identifier: terraform-')
+  })
+
+  it('makes destroy idempotent, empties versioned artifacts, and waits for deletion', () => {
+    expect(source).toContain('delete_deploy_bucket_versions')
+    expect(source).toContain('aws s3api list-object-versions')
+    expect(source).toContain('aws s3api delete-objects')
+    expect(source).toContain('kubectl delete --ignore-not-found')
+    expect(source).toContain('wait_for_managed_deletion')
+    expect(source).toContain('kubectl wait --for=delete')
+    expect(source).toContain('remaining managed resources')
   })
 })

@@ -21,7 +21,7 @@ crossplane/
 ├── bootstrap/                                # EC2 Compose bundle, scripts, and systemd units
 ├── ops/                                      # Operator resume and suspend scripts
 ├── tests/                                    # Offline Vitest, render, schema, shell, Compose checks
-├── deploy.sh                                 # Validate by default; apply/destroy are gated
+├── deploy.sh                                 # Gated validate/apply/destroy with bootstrap and deletion waits
 ├── crossplane.sh                              # Script: setup / start / status / cleanup
 ├── provider/
 │   ├── provider-family-aws.yaml               # Pins provider-family-aws; applies runtimeConfigRef

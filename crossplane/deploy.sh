@@ -11,6 +11,11 @@ echo "[quorum] $(date '+%Y-%m-%dT%H:%M:%S%z') start $(basename "${BASH_SOURCE[0]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMAND="${1:-validate}"
+NAMESPACE="quorum-system"
+ENVIRONMENT="quorum-prod"
+AWS_REGION="ap-southeast-2"
+DEPLOY_BUCKET="quorum-prod-deploy"
+BOOTSTRAP_VERSION="current"
 
 validate() {
   cd "${ROOT}/.."
@@ -30,28 +35,196 @@ confirm() {
   [[ "${answer}" == yes ]] || { echo "aborted"; exit 1; }
 }
 
+# Waits for the composite and returns a published status field.
+get_environment_status() {
+  local field="$1"
+  kubectl get xquorumenvironment "${ENVIRONMENT}" -n "${NAMESPACE}" \
+    -o "jsonpath={.status.${field}}"
+}
+
+# Uploads the reviewed runtime bundle after the deploy bucket is ready.
+upload_bootstrap() {
+  echo "uploading bootstrap/${BOOTSTRAP_VERSION} to s3://${DEPLOY_BUCKET}..."
+  aws s3 cp "${ROOT}/bootstrap/" \
+    "s3://${DEPLOY_BUCKET}/bootstrap/${BOOTSTRAP_VERSION}/" \
+    --recursive \
+    --region "${AWS_REGION}" \
+    --exclude '*.example'
+}
+
+# Waits until the instance is registered as an online SSM managed node.
+wait_for_ssm() {
+  local instance_id="$1"
+  local attempt
+
+  echo "waiting for ${instance_id} to register with SSM..."
+  for attempt in {1..60}; do
+    if [[ "$(aws ssm describe-instance-information \
+      --region "${AWS_REGION}" \
+      --filters "Key=InstanceIds,Values=${instance_id}" \
+      --query 'InstanceInformationList[0].PingStatus' \
+      --output text 2>/dev/null)" == "Online" ]]; then
+      return
+    fi
+    sleep 10
+  done
+
+  echo "instance ${instance_id} did not become SSM Online within 10 minutes" >&2
+  exit 1
+}
+
+# Runs commands through SSM, prints their output, and fails on a non-success status.
+run_ssm_commands() {
+  local instance_id="$1"
+  local comment="$2"
+  shift 2
+  local parameters command_id invocation_status
+
+  parameters="$(printf '%s\n' "$@" | jq -Rsc 'split("\n")[:-1] | {commands: .}')"
+  command_id="$(
+    aws ssm send-command \
+      --region "${AWS_REGION}" \
+      --instance-ids "${instance_id}" \
+      --document-name AWS-RunShellScript \
+      --comment "${comment}" \
+      --parameters "${parameters}" \
+      --query 'Command.CommandId' \
+      --output text
+  )"
+
+  aws ssm wait command-executed \
+    --region "${AWS_REGION}" \
+    --command-id "${command_id}" \
+    --instance-id "${instance_id}" || true
+
+  invocation_status="$(
+    aws ssm get-command-invocation \
+      --region "${AWS_REGION}" \
+      --command-id "${command_id}" \
+      --instance-id "${instance_id}" \
+      --query Status \
+      --output text
+  )"
+  aws ssm get-command-invocation \
+    --region "${AWS_REGION}" \
+    --command-id "${command_id}" \
+    --instance-id "${instance_id}" \
+    --query '{Status:Status,StandardOutput:StandardOutputContent,StandardError:StandardErrorContent}' \
+    --output json
+
+  if [[ "${invocation_status}" != "Success" ]]; then
+    echo "SSM command ${command_id} finished with ${invocation_status}" >&2
+    exit 1
+  fi
+}
+
+# Re-downloads and executes the exact bundle uploaded by this deployment.
+bootstrap_application() {
+  local instance_id
+  instance_id="$(get_environment_status instanceId)"
+  [[ -n "${instance_id}" ]] || { echo "XR did not publish an EC2 instance ID" >&2; exit 1; }
+
+  wait_for_ssm "${instance_id}"
+  run_ssm_commands "${instance_id}" "Quorum production bootstrap" \
+    "set -euo pipefail" \
+    "export AWS_REGION=${AWS_REGION}" \
+    "export DEPLOY_BUCKET=${DEPLOY_BUCKET}" \
+    "export BOOTSTRAP_VERSION=${BOOTSTRAP_VERSION}" \
+    "install -d -m 0755 /opt/quorum" \
+    "aws s3 cp s3://${DEPLOY_BUCKET}/bootstrap/${BOOTSTRAP_VERSION}/ec2-userdata.sh /opt/quorum/ec2-userdata.sh --region ${AWS_REGION}" \
+    "chmod +x /opt/quorum/ec2-userdata.sh" \
+    "/opt/quorum/ec2-userdata.sh"
+
+  echo "checking gateway health on the instance..."
+  run_ssm_commands "${instance_id}" "Quorum production health check" \
+    "set -euo pipefail" \
+    "for attempt in \$(seq 1 30); do curl --fail --silent --show-error http://127.0.0.1:3001/health && exit 0; sleep 10; done" \
+    "docker compose -f /opt/quorum/docker-compose.aws.yml ps" \
+    "exit 1"
+}
+
+# Empties every version so Crossplane can delete the versioned deploy bucket.
+delete_deploy_bucket_versions() {
+  local objects delete_payload
+
+  if ! aws s3api head-bucket --bucket "${DEPLOY_BUCKET}" --region "${AWS_REGION}" 2>/dev/null; then
+    return
+  fi
+
+  echo "removing versioned objects from s3://${DEPLOY_BUCKET}..."
+  while true; do
+    objects="$(
+      aws s3api list-object-versions \
+        --bucket "${DEPLOY_BUCKET}" \
+        --region "${AWS_REGION}" \
+        --output json |
+        jq '[.Versions[]?, .DeleteMarkers[]?] | map({Key, VersionId})'
+    )"
+    [[ "$(jq 'length' <<<"${objects}")" -gt 0 ]] || break
+    delete_payload="$(jq -cn --argjson objects "${objects}" '{Objects: $objects, Quiet: true}')"
+    aws s3api delete-objects \
+      --bucket "${DEPLOY_BUCKET}" \
+      --region "${AWS_REGION}" \
+      --delete "${delete_payload}" >/dev/null
+  done
+}
+
+# Waits for Kubernetes finalizers and AWS deletions to finish, not merely start.
+wait_for_managed_deletion() {
+  local attempt managed_json remaining
+
+  kubectl wait --for=delete \
+    "xquorumenvironment/${ENVIRONMENT}" \
+    -n "${NAMESPACE}" \
+    --timeout=120s 2>/dev/null || true
+
+  echo "waiting for Crossplane to delete all managed AWS resources..."
+  for attempt in {1..240}; do
+    managed_json="$(kubectl get managed -n "${NAMESPACE}" -o json)"
+    remaining="$(jq '.items | length' <<<"${managed_json}")"
+    if [[ "${remaining}" -eq 0 ]]; then
+      echo "all managed AWS resources have been deleted"
+      return
+    fi
+
+    if (( attempt % 6 == 1 )); then
+      echo "${remaining} remaining managed resources:"
+      jq -r '.items[] | "\(.kind)/\(.metadata.name)"' <<<"${managed_json}"
+    fi
+    sleep 10
+  done
+
+  echo "timed out waiting 40 minutes for managed resource deletion" >&2
+  status
+  exit 1
+}
+
 # Reports aggregate health, published connection outputs, and actionable resource failures.
 status() {
-  local namespace="quorum-system"
-  local environment="quorum-prod"
   local managed_json
 
-  managed_json="$(kubectl get managed -n "${namespace}" -o json)"
+  managed_json="$(kubectl get managed -n "${NAMESPACE}" -o json)"
 
   printf '\n=== Composite environment ===\n'
-  kubectl get xquorumenvironment "${environment}" -n "${namespace}" -o wide
+  if ! kubectl get xquorumenvironment "${ENVIRONMENT}" -n "${NAMESPACE}" -o wide; then
+    echo "No active ${ENVIRONMENT} composite. Managed resources may still be deleting."
+  fi
 
   printf '\n=== Published outputs ===\n'
-  kubectl get xquorumenvironment "${environment}" -n "${namespace}" -o json |
+  if kubectl get xquorumenvironment "${ENVIRONMENT}" -n "${NAMESPACE}" -o json 2>/dev/null |
     jq -r '
-      [
-        ["ELASTIC_IP", (.status.elasticIp // "pending")],
-        ["INSTANCE_ID", (.status.instanceId // "pending")],
-        ["RDS_ENDPOINT", (.status.rdsEndpoint // "pending")]
-      ] |
-      .[] | @tsv
-    ' |
-    column -t
+        [
+          ["ELASTIC_IP", (.status.elasticIp // "pending")],
+          ["INSTANCE_ID", (.status.instanceId // "pending")],
+          ["RDS_ENDPOINT", (.status.rdsEndpoint // "pending")]
+        ] |
+        .[] | @tsv
+      ' |
+    column -t; then
+    :
+  else
+    echo "No outputs: the composite does not exist."
+  fi
 
   printf '\n=== Managed resources ===\n'
   jq -r '
@@ -92,7 +265,7 @@ status() {
     column -t -s $'\t'
 
   printf '\n=== Recent warnings ===\n'
-  kubectl get events -n "${namespace}" \
+  kubectl get events -n "${NAMESPACE}" \
     --field-selector type=Warning \
     --sort-by=.lastTimestamp |
     tail -20
@@ -121,13 +294,23 @@ case "${COMMAND}" in
     kubectl wait --for=condition=Established xrd --all --timeout=120s
     kubectl apply -f "${ROOT}/apis/environment/composition.yaml"
     kubectl apply -f "${ROOT}/environments/prod.yaml"
+    echo "waiting for ${ENVIRONMENT} infrastructure to become ready..."
+    kubectl wait --for=condition=Ready \
+      "xquorumenvironment/${ENVIRONMENT}" \
+      -n "${NAMESPACE}" \
+      --timeout=2400s
+    upload_bootstrap
+    bootstrap_application
+    echo "production infrastructure and application are ready"
     ;;
   status)
     status
     ;;
   destroy)
     confirm "delete"
-    kubectl delete -f "${ROOT}/environments/prod.yaml"
+    delete_deploy_bucket_versions
+    kubectl delete --ignore-not-found -f "${ROOT}/environments/prod.yaml"
+    wait_for_managed_deletion
     ;;
   *) echo "usage: deploy.sh [validate|apply|status|destroy]" >&2; exit 2 ;;
 esac

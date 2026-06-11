@@ -291,8 +291,10 @@ graph TD
 **AWS production reconciliation fixes (2026-06-12):**
 - `spec.compute.amiId` is a required literal `ami-...` value. The namespaced Upbound `Instance` CRD does not resolve an SSM AMI alias, so resolve the public parameter before updating the canonical XR.
 - Provider AWS `v2.5.0` uses combined `SecurityGroupRule` resources for the four production rules; the split ingress/egress resources failed with `Missing Resource Identity After Read`.
-- `spec.database.identifier` is the single RDS identifier used by the managed resource, bootstrap, RDS schedules, and budget action. Legacy RDS instances may keep a generated identifier.
-- Bootstrap loads the application secret before resolving `DB_INSTANCE_ID`, creates `quorum_audit` when absent, and then applies the idempotent schema.
+- `spec.database.identifier` is the single RDS identifier used by the managed resource, bootstrap, RDS schedules, and budget action. Fresh production deployments use the stable `quorum-prod` identifier.
+- Bootstrap loads the application secret before resolving the canonical RDS identifier, ignores stale `DB_INSTANCE_ID` secret values, creates `quorum_audit` when absent, and then applies the idempotent schema.
+- `crossplane/deploy.sh apply` is complete only after XR readiness, bootstrap upload, successful SSM execution, and the instance-local gateway health check.
+- `crossplane/deploy.sh destroy` empties every deploy-bucket object version, requests XR deletion, and waits until all namespaced managed resources are actually gone.
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 

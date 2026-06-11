@@ -101,7 +101,9 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
 
     expect(sourcePosition).toBeGreaterThan(-1)
     expect(sourcePosition).toBeLessThan(refreshPosition)
-    expect(start.indexOf(': "${DB_INSTANCE_ID:=quorum-prod}"')).toBeGreaterThan(sourcePosition)
+    expect(start.indexOf('DB_INSTANCE_ID="${QUORUM_DB_INSTANCE_ID:-quorum-prod}"')).toBeGreaterThan(
+      sourcePosition,
+    )
   })
 
   it('creates the application database before applying its schema', () => {
