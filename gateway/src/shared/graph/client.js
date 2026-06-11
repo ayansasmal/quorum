@@ -8,9 +8,14 @@
  * deletes) is enforced at this layer: BLOCKED_METHODS is exported so the
  * constitutional test suite can verify the block is in place.
  *
- * Gateway mode: when QUORUM_GATEWAY_URL is set, Graphiti calls are proxied
- * through the gateway (/graphiti/*) instead of calling Graphiti directly.
- * The gateway injects the project claim as group_id automatically.
+ * ── Intentional divergence from the canonical quorum-mcp copy ──
+ * This is the gateway's vendored copy. It runs INSIDE the gateway and reaches
+ * Graphiti DIRECTLY on the trusted internal network — it never proxies through
+ * the gateway's own /graphiti/* route (that route exists only for the external
+ * MCP server). Consequently this copy deliberately omits two things the
+ * canonical copy has: (1) the structured `log` import — the gateway has no
+ * equivalent logger module; (2) the gateway-client JWT attach used by the MCP
+ * in proxy mode. Keep these omissions when syncing; do not re-add them here.
  *
  * MCP session protocol (streamable-http transport):
  *   1. POST /mcp with method="initialize" → server returns Mcp-Session-Id header
@@ -21,7 +26,6 @@
 import { randomUUID } from 'crypto'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
-const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
 
 // NOTE: The gateway's shared Graphiti client calls Graphiti DIRECTLY (it does
 // not proxy through itself). RediSearch — used internally by FalkorDB for
@@ -49,7 +53,7 @@ export function normalizeGroupId(id) {
 
 /**
  * Dedicated Graphiti group ID for audit episodes.
- * Kept separate from GROUP_ID so audit records never appear in
+ * Kept separate from project group_ids so audit records never appear in
  * normal knowledge searches (searchNodes / searchFacts).
  *
  * @type {string}
@@ -142,8 +146,14 @@ async function initSession(endpoint, authHeaders = {}) {
         clientInfo:      { name: 'quorum', version: '1.0' },
       },
     }),
+    signal: AbortSignal.timeout(30_000),
   })
 
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new GraphitiConnectionError(
+      `Graphiti session init failed (${res.status}): ${body}`)
+  }
   const sessionId = res.headers.get('mcp-session-id')
   if (!sessionId) throw new GraphitiConnectionError('Graphiti MCP did not return a session ID')
   _sessionId = sessionId
@@ -191,21 +201,16 @@ async function callGraphiti(tool, params, maxRetries = 3) {
     throw new Error(`ConstitutionalViolation[NO_HARD_DELETE]: Graphiti method '${tool}' is blocked`)
   }
 
-  const { baseUrl, useGateway } = graphitiTarget()
+  const { baseUrl } = graphitiTarget()
   const endpoint = `${baseUrl}/mcp`
 
-  // In gateway mode, include Authorization header from the gateway client
-  let authHeaders = {}
-  if (useGateway) {
-    try {
-      const { getGatewayClient } = await import('../gateway/client.js')
-      const gwClient = getGatewayClient()
-      if (gwClient) {
-        const { token } = await gwClient._getToken()
-        authHeaders = { Authorization: `Bearer ${token}` }
-      }
-    } catch { /* gateway client not available — fall through */ }
-  }
+  // The gateway reaches Graphiti directly on the trusted internal network and
+  // attaches no Authorization header. (A previous revision tried to import a
+  // gateway-client module that does not exist in this package and swallowed the
+  // resulting module-not-found error in an empty catch — that dead branch is
+  // removed. Project isolation is enforced by the explicit group_id passed to
+  // every call, not by a token here.)
+  const authHeaders = {}
 
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -238,6 +243,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
           method:  'tools/call',
           params:  { name: tool, arguments: params },
         }),
+        signal: AbortSignal.timeout(30_000),
       })
 
       if (!response.ok) {
@@ -274,10 +280,11 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  * Store a new knowledge episode in Graphiti.
  * @param {string} content
  * @param {{ key: string, source: string, entityType?: string, tags?: string[] }} metadata
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addEpisode(content, metadata, groupId = GROUP_ID) {
+export async function addEpisode(content, metadata, groupId) {
+  if (!groupId) throw new Error('addEpisode: groupId is required')
   // NOTE: do NOT pass uuid to add_memory. In Graphiti 0.29+, providing uuid
   // means "retrieve existing episode with this UUID" — if the node doesn't
   // exist in FalkorDB (e.g. after a volume wipe), add_episode raises
@@ -305,10 +312,11 @@ export async function addEpisode(content, metadata, groupId = GROUP_ID) {
  * @param {string} newContent
  * @param {string} oldEpisodeId
  * @param {{ key: string, source: string, entityType?: string, tags?: string[], reason?: string }} metadata
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId = GROUP_ID) {
+export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId) {
+  if (!groupId) throw new Error('addSupersedingEpisode: groupId is required')
   // Same reason as addEpisode — do not pass uuid; normalize group_id.
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
@@ -325,10 +333,11 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, 
  * Walk the SUPERSEDES edges from an episode back to the root, returning the
  * full organic evolution chain as an ordered array (newest first).
  * @param {string} episodeId
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<Array<{ episode_id: string, metadata: unknown }>>}
  */
-export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
+export async function getEvolutionChain(episodeId, groupId) {
+  if (!groupId) throw new Error('getEvolutionChain: groupId is required')
   const result = await callGraphiti('search_memory_facts', {
     query:     `supersedes evolution chain for ${episodeId}`,
     group_ids: [normalizeGroupId(groupId)],
@@ -387,10 +396,13 @@ export async function searchFacts(query, options = {}) {
  * pass group_ids here, the value must be run through normalizeGroupId() to
  * avoid the RediSearch hyphen-as-NOT issue (see searchNodes).
  *
- * @param {string} [groupId]
+ * @param {string} groupId - project isolation namespace (required for call-site
+ *   symmetry with the other graph functions; isolation itself is enforced at
+ *   the PostgreSQL q_project_id layer, so group_ids is not forwarded here).
  * @returns {Promise<{ episodes: Array<unknown> }>}
  */
-export async function getEpisodes(groupId = GROUP_ID) {
+export async function getEpisodes(groupId) {
+  if (!groupId) throw new Error('getEpisodes: groupId is required')
   return callGraphiti('get_episodes', {})
 }
 
@@ -399,9 +411,10 @@ export async function getEpisodes(groupId = GROUP_ID) {
  * Never calls Graphiti delete methods — constitutional rule enforced.
  * @param {string} episodeId
  * @param {{ key: string, reason: string, author: string }} meta
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  */
-export async function deleteEpisodeSoft(episodeId, meta, groupId = GROUP_ID) {
+export async function deleteEpisodeSoft(episodeId, meta, groupId) {
+  if (!groupId) throw new Error('deleteEpisodeSoft: groupId is required')
   // NOTE: do NOT pass uuid to add_memory. In Graphiti 0.29+, providing uuid
   // triggers the "retrieve existing episode" path which raises
   // NodeNotFoundError when the episode doesn't exist in FalkorDB

@@ -22,7 +22,7 @@
 
 import { test, expect } from '@playwright/test'
 
-const { describe, beforeAll } = test
+const { describe, beforeAll, afterAll } = test
 import axios from 'axios'
 import { api }            from '../helpers/api.js'
 import { tokens }         from '../helpers/jwt.js'

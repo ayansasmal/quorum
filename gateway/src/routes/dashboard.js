@@ -542,12 +542,17 @@ router.get('/knowledge/:topic/:key', async (req, res, next) => {
     // For older entries where summary is empty, fall back to Graphiti node search.
     // Two search strategies are tried because hyphens in key names are treated as NOT
     // operators in RediSearch — "quoted terms" bypass that interpretation.
-    // group_ids are omitted intentionally (hyphenated project IDs break RediSearch);
-    // project isolation is enforced by the PostgreSQL WHERE clause above.
+    // The fallback is scoped to the caller's project group_id. The PostgreSQL WHERE
+    // clause above only proves the entry EXISTS in this project — an unscoped
+    // Graphiti search could surface content from a DIFFERENT project's node that
+    // happens to share the same topic:key (cross-project read leak). searchNodes()
+    // normalizes the group_id (hyphen → underscore) internally, so hyphenated
+    // project IDs are handled correctly.
     let content = row.summary || null
     if (!content) {
+      const groupId = req.user.project
       const runSearch = async (query) => {
-        const result = await searchNodes(query, { limit: 5 }).catch(() => null)
+        const result = await searchNodes(query, { groupIds: [groupId], limit: 5 }).catch(() => null)
         const nodes  = result?.nodes ?? []
         return nodes.find((n) => (n.name ?? '').includes(key)) ?? nodes[0] ?? null
       }
