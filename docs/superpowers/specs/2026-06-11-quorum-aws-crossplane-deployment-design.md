@@ -13,8 +13,9 @@
 Quorum uses the local Docker Desktop Kubernetes cluster as its Crossplane control plane.
 Crossplane provisions the production AWS infrastructure, while a stateless on-demand EC2 instance runs the
 backend application stack with Docker Compose. To keep the demo cheap, the instance and its RDS database
-are stopped and started on a schedule (EventBridge Scheduler), with an AWS Budgets action as a spend
-ceiling — see [§13](#13-observability-operations-and-cost-control). The instance is
+are stopped on a schedule (EventBridge Scheduler) and brought back up on demand by the operator during
+the build phase, with an AWS Budgets action as a spend ceiling — see
+[§13](#13-observability-operations-and-cost-control). The instance is
 fully disposable — it holds no durable state on its own disk. The two pieces of state that are expensive
 to rebuild live off-instance:
 **PostgreSQL (the source of truth) on managed RDS**, and **FalkorDB's derived graph/embeddings plus
@@ -82,7 +83,7 @@ As of June 11, 2026:
 | 3 | Crossplane core | Pin `v2.3.2` |
 | 4 | Crossplane installation | Helm installs Crossplane core only |
 | 5 | Application deployment | EC2 bootstrap plus Docker Compose |
-| 6 | Compute | Single stateless Graviton on-demand EC2 instance, stopped/started on a schedule for cost control |
+| 6 | Compute | Single stateless Graviton on-demand EC2 instance; auto-stopped daily for cost control and resumed on demand |
 | 7 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
 | 8 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
 | 9 | Dashboard | Separate GitHub repository deployed to Vercel |
@@ -98,7 +99,7 @@ As of June 11, 2026:
 | 19 | Deployment trigger | Implementation and offline validation only until explicitly approved |
 | 20 | Service level | Demo workload; brief downtime and manual recovery are acceptable |
 | 21 | Crossplane credentials | Existing local AWS ProviderConfig credentials are reused and remain outside Git |
-| 22 | Cost control | Scheduled EventBridge stop/start of EC2 + RDS (weeknights and weekends off), with an AWS Budgets action as an absolute spend ceiling; AWS-native and independent of the local Crossplane control plane |
+| 22 | Cost control | Daily EventBridge auto-stop of EC2 + RDS at 10:00 and 23:00 Sydney (scheduled auto-start disabled for the build phase — resume on demand via scripts), plus on-demand resume/suspend scripts and an AWS Budget (email alert at ~60 AUD, hard stop action at ~90 AUD); AWS-native and independent of the local Crossplane control plane |
 
 ---
 
@@ -112,10 +113,11 @@ deliberately accepted:
   cluster is offline, reconciliation pauses until it returns.
 - The instance is a single standalone on-demand EC2 instance with no Auto Scaling Group. If it fails an
   instance status check, Crossplane or manual intervention replaces it; there is no automatic failover.
-- The stack is deliberately offline outside its scheduled window (stopped weeknights and weekends by the
-  EventBridge schedule). The demo is expected to be available only during scheduled hours or after a
-  manual start. A scheduled start is best-effort; if a `StartInstances` call fails, the operator starts
-  the instance manually.
+- During the build phase the stack is offline by default: scheduled auto-start is disabled, so the demo
+  is available only after the operator brings it up with `quorum-resume.sh`. The scheduled auto-stop runs
+  every day at 10:00 and 23:00 (Sydney) as a cost safety net, so any manual resume — weekday, weekend, or
+  after-hours — is automatically stopped at the next 10:00 or 23:00 and never runs unattended for long.
+  Clock-based resume can be re-enabled later by flipping `schedule.autoStart.enabled`.
 - RDS is stopped on the same schedule. AWS automatically restarts a stopped RDS instance after seven
   days. The operator accepts this: the schedule's daily start normally pre-empts it, and a stray
   auto-restart only costs idle RDS hours until the next scheduled stop.
@@ -163,7 +165,7 @@ flowchart TB
         APP_SECRET["Secrets Manager<br/>quorum/prod/gateway"]
         KMS["KMS CMK"]
         LOGS["CloudWatch Logs"]
-        SCHED["EventBridge Scheduler<br/>stop/start cron"]
+        SCHED["EventBridge Scheduler<br/>daily auto-stop (start disabled)"]
         BUDGET["AWS Budgets<br/>spend-ceiling action"]
 
         subgraph VPC["VPC"]
@@ -206,8 +208,8 @@ flowchart TB
     KMS -.-> S3_CONFIG
     KMS -.-> S3_DEPLOY
     KMS -.-> S3_SNAP
-    SCHED -.->|"StopInstances / StartInstances"| EC2
-    SCHED -.->|"StopDBInstance / StartDBInstance"| RDS
+    SCHED -.->|"daily StopInstances"| EC2
+    SCHED -.->|"daily StopDBInstance"| RDS
     BUDGET -.->|"stop on spend ceiling"| EC2
     BUDGET -.->|"stop on spend ceiling"| RDS
 ```
@@ -272,14 +274,17 @@ spec:
     rootVolumeGiB: 30
     arch: arm64
   schedule:
-    enabled: true
     timezone: Australia/Sydney
-    startCron: "cron(0 8 ? * MON-FRI *)"    # 08:00 weekdays - start RDS then EC2
-    stopCron: "cron(0 19 ? * MON-FRI *)"    # 19:00 weekdays - snapshot, then stop EC2 and RDS
-    weekendsOff: true                       # remain stopped all weekend (no Sat/Sun start)
+    autoStop:
+      enabled: true                           # cost safety net - runs every day, never leaves the stack up
+      cron: "cron(0 10,23 * * ? *)"           # 10:00 and 23:00 DAILY (incl. weekends) - snapshot, then stop EC2 and RDS
+    autoStart:
+      enabled: false                          # DISABLED for the build phase - bring the stack up on demand
+      cron: "cron(0 5,16 ? * MON-FRI *)"      # retained but inactive; weekday windows for when clock resume is restored
   budget:
-    monthlyLimitUSD: 120
-    actionThresholdPercent: 90              # at 90% of the monthly limit, stop EC2 + RDS as a hard ceiling
+    monthlyLimitUSD: 40                     # ~60 AUD - the alert target; expected spend sits near here
+    alertThresholdPercent: 100              # email at 100% of the limit (~60 AUD) - notify, do not stop
+    actionThresholdPercent: 150             # hard stop EC2 + RDS only at ~90 AUD, well above normal spend
     notifyEmail: operator@example.com
   snapshot:
     bucketSuffix: snapshots             # versioned S3 bucket for FalkorDB + Caddy state
@@ -343,6 +348,9 @@ crossplane/
     composition.yaml
   environments/
     prod.yaml
+  ops/
+    quorum-resume.sh           # operator-run from laptop: start RDS then EC2, poll gateway health
+    quorum-suspend.sh          # operator-run from laptop: snapshot via SSM, then stop EC2 + RDS
   providers/
     providers.yaml
     functions.yaml
@@ -370,6 +378,10 @@ crossplane/
       quorum-recheck.timer
     init-db.sql
 ```
+
+The `bootstrap/` assets run *on the instance* (delivered via S3 and `userData`); the `ops/` scripts run
+*from the operator's laptop* with the AWS CLI and never get installed on the instance — that separation
+keeps the on-demand suspend/resume controls independent of the running stack.
 
 The existing lowercase singular directories (`provider/`, `rds/`, `redis/`, and so on) remain the
 LocalStack reference until a later cleanup. Production files use explicit `aws-prod` names to avoid
@@ -405,7 +417,7 @@ No NAT Gateway is required.
 - SSM agent and `AmazonSSMManagedInstanceCore`.
 - Minimal `userData` that downloads the versioned bootstrap entrypoint from S3.
 - On boot, restores the latest FalkorDB and Caddy snapshot from S3 before the Compose stack starts. The
-  same boot path runs on a scheduled morning start as on a fresh replacement.
+  same boot path runs on an on-demand resume as on a fresh replacement.
 
 EC2 contains no durable governed knowledge and pins no data to its disk. All
 expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 snapshot bucket.
@@ -463,18 +475,28 @@ GHCR authentication uses a read-only package token from Secrets Manager, not an 
 These resources implement the scheduled stop/start and the budget ceiling. They are all AWS-native and
 keep running whether or not the local Crossplane control plane is online; Crossplane only creates them.
 
-- **EventBridge Scheduler — stop schedule.** Fires on `schedule.stopCron`. Uses the universal target to
-  call `ec2:StopInstances` on the instance and `rds:StopDBInstance` on the database. The gateway is
-  drained by the OS shutdown; the FalkorDB/Caddy snapshot runs just before stop (see [§13](#13-observability-operations-and-cost-control)).
-- **EventBridge Scheduler — start schedule.** Fires on `schedule.startCron`. Calls `rds:StartDBInstance`
-  first, then `ec2:StartInstances` (with a short delay so the database is reachable when the gateway
-  boots). With `weekendsOff: true`, both schedules use a `MON-FRI` cron so Saturday and Sunday stay off.
+- **EventBridge Scheduler — stop schedule.** Enabled (`schedule.autoStop.enabled: true`). Fires on
+  `schedule.autoStop.cron` (default 10:00 and 23:00 **every day, including weekends** — a single
+  comma-list cron covers both times). Uses the universal target to call `ec2:StopInstances` on the
+  instance and `rds:StopDBInstance` on the database. The gateway is drained by the OS shutdown; the
+  FalkorDB/Caddy snapshot runs just before stop (see [§13](#13-observability-operations-and-cost-control)).
+  This is the cost safety net — it always runs, regardless of how or when the stack was started, so no
+  manual resume is ever left running past the next 10:00 or 23:00.
+- **EventBridge Scheduler — start schedule.** Created but **disabled for the build phase**
+  (`schedule.autoStart.enabled: false`), so the schedule object exists in a `DISABLED` state and never
+  fires. Its `schedule.autoStart.cron` (default 05:00 and 16:00 on weekdays) and `rds:StartDBInstance`
+  → delay → `ec2:StartInstances` ordering are retained for when clock-based resume is re-enabled. While
+  disabled, the operator brings the stack up on demand with `quorum-resume.sh`
+  (see [§13](#13-observability-operations-and-cost-control)).
 - **Scheduler execution role.** An IAM role assumed by EventBridge Scheduler, scoped to
   `ec2:StopInstances`/`ec2:StartInstances` and `rds:StopDBInstance`/`rds:StartDBInstance` on the two
   specific resource ARNs. No Lambda is involved.
-- **AWS Budget + budget action.** A monthly cost budget at `budget.monthlyLimitUSD`. At
-  `budget.actionThresholdPercent`, a budget action stops the EC2 instance and the RDS instance as a hard
-  spend ceiling, independent of the time-of-day schedule, and emails `budget.notifyEmail`.
+- **AWS Budget + budget action.** A monthly cost budget at `budget.monthlyLimitUSD` (~60 AUD, the alert
+  target that expected spend sits near). At `budget.alertThresholdPercent` it emails `budget.notifyEmail`
+  — notify only, no stop. At the higher `budget.actionThresholdPercent` (~90 AUD, above normal spend) a
+  budget action stops the EC2 instance and the RDS instance as a hard ceiling, independent of the
+  time-of-day schedule. The gap between the two thresholds keeps an ordinary month from being
+  force-stopped while still capping a runaway bill.
 - **Budget action role.** An IAM role the AWS Budgets service assumes to perform the stop action, scoped
   to the same two resource ARNs.
 
@@ -705,22 +727,24 @@ These are in-instance systemd timers (they only run while the instance is up):
 | FalkorDB + Caddy snapshot | `snapshot-save.sh` | Every 60 minutes |
 | RDS credential refresh | bootstrap script | Every 15 minutes |
 
-### Scheduled suspend and resume
+### Scheduled suspend (auto-stop)
 
-The single largest demo cost is paying for compute and database hours the demo is not using. The stack is
-therefore stopped overnight and on weekends and started again each weekday morning. Stopping is the EC2
-"stop" operation: an EBS-backed instance keeps its root volume while compute billing pauses, and the
-disposable-instance design already starts cleanly from a stop via snapshot-restore-on-boot.
+The single largest demo cost is paying for compute and database hours the demo is not using. During the
+build phase only the **auto-stop** half of the schedule runs: it stops the stack every day at 10:00 and
+23:00 as a cost safety net, while **auto-start is disabled** — the operator brings the stack up on demand instead
+(see *On-demand suspend and resume* below). Stopping is the EC2 "stop" operation: an EBS-backed instance
+keeps its root volume while compute billing pauses, and the disposable-instance design already starts
+cleanly from a stop via snapshot-restore-on-boot.
 
 The mechanism is **AWS-native and independent of the local Crossplane control plane** — it keeps working
-when the laptop running Docker Desktop Kubernetes is off. Two **EventBridge Scheduler** schedules
-(defined in [§9.6](#96-cost-control-resources)) drive it through a universal target and a scoped IAM
-role; no Lambda is involved:
+when the laptop running Docker Desktop Kubernetes is off. An **EventBridge Scheduler** schedule
+(defined in [§9.6](#96-cost-control-resources)) drives it through a universal target and a scoped IAM
+role; no Lambda is involved. A comma-list cron covers both daily stop times:
 
-| Schedule | Trigger | Action |
-|----------|---------|--------|
-| Stop | `schedule.stopCron` (default 19:00 Mon–Fri, Sydney) | `ec2:StopInstances` + `rds:StopDBInstance` |
-| Start | `schedule.startCron` (default 08:00 Mon–Fri, Sydney) | `rds:StartDBInstance`, then `ec2:StartInstances` |
+| Schedule | State | Trigger | Action |
+|----------|-------|---------|--------|
+| Stop | Enabled | `schedule.autoStop.cron` (default `cron(0 10,23 * * ? *)` — 10:00 + 23:00 daily, Sydney) | `ec2:StopInstances` + `rds:StopDBInstance` |
+| Start | Disabled (build phase) | `schedule.autoStart.cron` (default `cron(0 5,16 ? * MON-FRI *)`, Sydney) | `rds:StartDBInstance`, then `ec2:StartInstances` — created but inactive |
 
 Ordering and interactions:
 
@@ -728,22 +752,48 @@ Ordering and interactions:
    most a scheduled stop can lose is one snapshot interval of *derived* graph state, which is
    re-derivable from PostgreSQL. (The implementation may additionally trigger a final snapshot in the
    instance's shutdown path for tighter freshness.)
-2. **Start RDS before EC2.** The gateway's boot health check needs the database reachable, so the start
-   schedule wakes RDS first and the instance a short delay later.
-3. **Manual override.** Outside the schedule, an operator can start the stack on demand with
-   `aws rds start-db-instance` followed by `aws ec2 start-instances` (or one stop pair to shut it down
-   early). A scheduled start is best-effort; if it fails, the manual start is the fallback.
-4. **RDS seven-day auto-restart.** AWS auto-starts a stopped RDS instance after seven days. The weekday
-   start schedule normally pre-empts this; a stray auto-restart only adds idle RDS hours until the next
-   scheduled stop.
+2. **Auto-stop, manual start.** With auto-start disabled, the stack only runs when the operator resumes
+   it — but the 10:00 and 23:00 stops fire **every day**, so any resume (weekday, weekend, or
+   after-hours) is automatically stopped at the next stop time and never runs unattended for more than a
+   few hours. The operator's longest unattended exposure is one stop-to-stop gap.
+3. **Re-enabling clock resume.** When the build phase ends, flipping `schedule.autoStart.enabled` to
+   `true` restores the two-window weekday behaviour (start RDS first, then EC2 a short delay later so the
+   gateway's boot health check finds the database reachable).
+4. **RDS seven-day auto-restart.** AWS auto-starts a stopped RDS instance after seven days. With
+   auto-start disabled this is the one path that can wake RDS on its own; it only adds idle RDS hours
+   until the next daily stop, and a manual resume normally pre-empts it.
+
+### On-demand suspend and resume
+
+With scheduled auto-start disabled, resuming the stack is entirely on demand — this is the primary way it
+comes up during the build phase. Two operator-run scripts give that manual control:
+
+| Script | Action |
+|--------|--------|
+| `quorum-resume.sh` | `rds:StartDBInstance`, wait for available, then `ec2:StartInstances`; poll gateway health |
+| `quorum-suspend.sh` | trigger a final FalkorDB/Caddy snapshot (via SSM), then `ec2:StopInstances` + `rds:StopDBInstance` |
+
+The scripts run from the operator's machine with their own AWS credentials and use only the AWS CLI — they
+do not depend on the local Crossplane control plane and need nothing installed on the instance beyond the
+SSM agent. They are idempotent: resuming an already-running stack or suspending an already-stopped one is a
+no-op. Because scheduled auto-start is disabled during the build phase, `quorum-resume.sh` is the normal
+way the stack comes up — not just a fallback.
 
 ### Budget backstop
 
-Independently of the time-of-day schedule, an **AWS Budget** (monthly limit `budget.monthlyLimitUSD`)
-with a **budget action** acts as an absolute spend ceiling. At `budget.actionThresholdPercent` of the
-limit, the budget action stops the EC2 and RDS instances and emails `budget.notifyEmail`. This protects
-against a schedule failing to fire (for example a left-running instance after a manual start) turning
-into an unbounded bill. The schedule controls *normal* cost; the budget caps *worst-case* cost.
+Independently of the daily auto-stop, an **AWS Budget** (monthly limit `budget.monthlyLimitUSD`,
+~60 AUD) provides two-stage protection. With manual resume the operator controls how many hours the stack
+runs, but a normal working month lands near that limit, so the two thresholds are deliberately split:
+
+| Threshold | At | Effect |
+|-----------|----|--------|
+| Alert | `budget.alertThresholdPercent` (100% ≈ 60 AUD) | Email `budget.notifyEmail` — no stop |
+| Action | `budget.actionThresholdPercent` (150% ≈ 90 AUD) | Stop EC2 + RDS as a hard ceiling |
+
+The alert lands at normal monthly spend so the operator simply sees "you've used your budget"; the stop
+action sits well above it, so an ordinary month is never force-stopped, but a runaway bill — for example
+an instance left running after a manual `quorum-resume.sh` — is still capped. The schedule controls
+*normal* cost; the alert *informs*; the action caps *worst-case* cost.
 
 ---
 
@@ -788,9 +838,11 @@ The implementation phase must produce:
 10. FalkorDB and Caddy snapshot save/restore scripts and their systemd timer.
 11. EventBridge Scheduler stop/start schedules, the AWS Budget plus budget action, and their scoped
     scheduler and budget IAM roles.
-12. Offline manifest rendering and script tests.
-13. Updated operator documentation.
-14. A deployment script whose mutating operations require an explicit `apply` command.
+12. Operator-run `quorum-resume.sh` and `quorum-suspend.sh` on-demand control scripts (AWS CLI only,
+    idempotent, no control-plane dependency).
+13. Offline manifest rendering and script tests.
+14. Updated operator documentation.
+15. A deployment script whose mutating operations require an explicit `apply` command.
 
 ---
 
@@ -822,12 +874,16 @@ The implementation phase must produce:
 - Replacing the instance loses no governed knowledge — PostgreSQL is unaffected and FalkorDB's
   derived index is restored from snapshot (or, worst case, re-derivable from PostgreSQL).
 - A replacement instance reuses the existing TLS certificate without triggering a Let's Encrypt re-issue.
-- The EventBridge stop schedule stops both EC2 and RDS, and the start schedule brings them back (RDS
-  first, then EC2) with the gateway healthy after a scheduled morning start.
-- A scheduled or manual stop loses no governed knowledge — the morning start reuses the same EBS volume,
-  and a snapshot bounds any derived-state loss to one snapshot interval.
-- The AWS Budget action stops EC2 and RDS when the monthly spend ceiling is reached, independent of the
-  time-of-day schedule.
+- The EventBridge auto-stop schedule stops both EC2 and RDS at 10:00 and 23:00 daily, and the auto-start
+  schedule is created in a `DISABLED` state so it never fires during the build phase; enabling it makes a
+  scheduled start bring them back (RDS first, then EC2) with the gateway healthy.
+- A scheduled or manual stop loses no governed knowledge — the next resume reuses the same EBS volume (or
+  restores from S3 on a replacement), and a snapshot bounds any derived-state loss to one snapshot interval.
+- The AWS Budget emails the operator at the ~60 AUD alert threshold without stopping anything, and the
+  budget action stops EC2 and RDS only at the higher ~90 AUD ceiling, independent of the time-of-day
+  schedule.
+- `quorum-resume.sh` brings the stack up (RDS then EC2, gateway healthy) and `quorum-suspend.sh` snapshots
+  and stops it on demand, both idempotently, whenever the operator needs the stack up during the build phase.
 - Both the schedule and the budget action operate with the local Crossplane control plane offline.
 
 ---
