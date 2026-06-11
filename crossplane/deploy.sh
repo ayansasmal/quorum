@@ -37,8 +37,19 @@ case "${COMMAND}" in
     confirm "create or update"
     kubectl apply -f "${ROOT}/providers/providers.yaml"
     kubectl apply -f "${ROOT}/providers/functions.yaml"
+    # The sub-providers pull in provider-family-aws, which installs the
+    # ProviderConfig CRD. Wait for that to settle before applying resources that
+    # depend on its CRDs, otherwise apply races ahead of CRD installation.
+    echo "waiting for providers and functions to become healthy (first pull can take minutes)..."
+    kubectl wait --for=condition=Healthy provider.pkg.crossplane.io --all --timeout=600s
+    kubectl wait --for=condition=Healthy function.pkg.crossplane.io --all --timeout=300s
+    kubectl wait --for=condition=Established crd/providerconfigs.aws.upbound.io --timeout=120s
     kubectl apply -f "${ROOT}/providers/providerconfig-aws-prod.yaml"
+    # Applying the XRD generates the XQuorumEnvironment CRD asynchronously; wait
+    # for it to be established before applying the composite resource.
     kubectl apply -f "${ROOT}/apis/environment/definition.yaml"
+    echo "waiting for the composite resource definition to be established..."
+    kubectl wait --for=condition=Established xrd --all --timeout=120s
     kubectl apply -f "${ROOT}/apis/environment/composition.yaml"
     kubectl create namespace quorum-system --dry-run=client -o yaml | kubectl apply -f -
     kubectl apply -f "${ROOT}/environments/prod.yaml"

@@ -93,6 +93,12 @@ The following steps are operator-run and intentionally excluded from tests.
    ./crossplane/deploy.sh apply
    ```
 
+   `apply` installs the provider family and function, then **waits** for them to report
+   `Healthy` and for the `ProviderConfig` and `XQuorumEnvironment` CRDs to be established before
+   applying the `ProviderConfig`, composition, and composite resource. This prevents the
+   "no matches for kind ProviderConfig" race on a cold cluster. The first provider pull can take
+   several minutes, so the `kubectl wait` steps may sit for a while — that is expected.
+
 6. Watch readiness:
 
    ```bash
