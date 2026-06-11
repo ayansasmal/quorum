@@ -48,9 +48,9 @@ Vercel
   -> serves the dashboard and proxies authenticated requests to the gateway
 ```
 
-Helm does **not** deploy the Quorum gateway in this architecture. `provider-helm` is not required.
-The existing `helm/quorum` chart remains available for optional Kubernetes deployments, but it is not
-part of this AWS production path.
+> **Considered:** Crossplane's `provider-helm` could deploy the gateway into Kubernetes, and the
+> repository's `helm/quorum` chart still supports optional Kubernetes deployments. This design runs the
+> backend on EC2 via Docker Compose instead, so Helm's only role is installing Crossplane core.
 
 No AWS resources are to be created until the implementation has been reviewed and an explicit deployment
 request is made.
@@ -83,25 +83,24 @@ As of June 11, 2026:
 | 2 | Control plane | Local Docker Desktop Kubernetes |
 | 3 | Crossplane core | Pin `v2.3.2` |
 | 4 | Crossplane installation | Helm installs Crossplane core only |
-| 5 | Application deployment | EC2 bootstrap plus Docker Compose; no application Helm release |
-| 6 | Helm provider | Do not install `provider-helm` for this topology |
-| 7 | Compute | Single stateless Graviton on-demand EC2 instance (on-demand, not Spot, so it can be reliably stopped/started on a schedule) |
-| 8 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
-| 9 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
-| 10 | Dashboard | Separate GitHub repository deployed to Vercel |
-| 11 | Gateway exposure | Public HTTPS domain pointing to the EC2 Elastic IP |
-| 12 | TLS | Caddy on EC2 obtains and renews a trusted ACME certificate; cert/account state is snapshotted to S3 so replacement avoids re-issue |
-| 13 | DNS | Route 53 hosted zone for the gateway domain once a domain is acquired; a placeholder domain is used until then |
-| 14 | Images | Gateway and Graphiti images in GHCR; no dashboard image in AWS |
-| 15 | AWS authentication | EC2 instance profile; no static AWS credentials on EC2 |
-| 16 | Database credentials | RDS generates and manages the master password in Secrets Manager |
-| 17 | Application secrets | AWS Secrets Manager secret containing JWT, OAuth, GHCR, and OpenAI values |
-| 18 | Instance access | SSM Session Manager; no inbound SSH |
-| 19 | Recurring jobs | systemd timers launch one-shot Docker Compose services |
-| 20 | Deployment trigger | Implementation and offline validation only until explicitly approved |
-| 21 | Service level | Demo workload; brief downtime and manual recovery are acceptable |
-| 22 | Crossplane credentials | Existing local AWS ProviderConfig credentials are reused and remain outside Git |
-| 23 | Cost control | Scheduled EventBridge stop/start of EC2 + RDS (weeknights and weekends off), with an AWS Budgets action as an absolute spend ceiling; AWS-native and independent of the local Crossplane control plane |
+| 5 | Application deployment | EC2 bootstrap plus Docker Compose |
+| 6 | Compute | Single stateless Graviton on-demand EC2 instance (on-demand, not Spot, so it can be reliably stopped/started on a schedule) |
+| 7 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
+| 8 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
+| 9 | Dashboard | Separate GitHub repository deployed to Vercel |
+| 10 | Gateway exposure | Public HTTPS domain pointing to the EC2 Elastic IP |
+| 11 | TLS | Caddy on EC2 obtains and renews a trusted ACME certificate; cert/account state is snapshotted to S3 so replacement avoids re-issue |
+| 12 | DNS | Route 53 hosted zone for the gateway domain once a domain is acquired; a placeholder domain is used until then |
+| 13 | Images | Gateway and Graphiti images in GHCR |
+| 14 | AWS authentication | EC2 instance profile; no static AWS credentials on EC2 |
+| 15 | Database credentials | RDS generates and manages the master password in Secrets Manager |
+| 16 | Application secrets | AWS Secrets Manager secret containing JWT, OAuth, GHCR, and OpenAI values |
+| 17 | Instance access | SSM Session Manager; no inbound SSH |
+| 18 | Recurring jobs | systemd timers launch one-shot Docker Compose services |
+| 19 | Deployment trigger | Implementation and offline validation only until explicitly approved |
+| 20 | Service level | Demo workload; brief downtime and manual recovery are acceptable |
+| 21 | Crossplane credentials | Existing local AWS ProviderConfig credentials are reused and remain outside Git |
+| 22 | Cost control | Scheduled EventBridge stop/start of EC2 + RDS (weeknights and weekends off), with an AWS Budgets action as an absolute spend ceiling; AWS-native and independent of the local Crossplane control plane |
 
 ---
 
@@ -248,14 +247,8 @@ The AWS gateway remains the sole authentication and authorization authority:
 
 ### Explicit exclusions
 
-- No EKS.
-- No application Helm release.
-- No `provider-helm`.
-- No dashboard container on EC2.
-- No dashboard image in GHCR for this deployment.
-- No ALB or ACM.
-- No mandatory Route 53 hosted zone.
-- No ElastiCache or Neptune in the first production footprint.
+- No dashboard container or image on EC2 / in GHCR — the dashboard runs only on Vercel.
+- No mandatory Route 53 hosted zone — a placeholder domain is used until one is acquired.
 - No database password in Git, XR manifests, Kubernetes Secrets, or the application secret.
 
 ---
