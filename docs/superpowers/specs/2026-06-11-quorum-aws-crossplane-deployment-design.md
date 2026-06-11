@@ -14,9 +14,7 @@ Quorum uses the local Docker Desktop Kubernetes cluster as its Crossplane contro
 Crossplane provisions the production AWS infrastructure, while a stateless on-demand EC2 instance runs the
 backend application stack with Docker Compose. To keep the demo cheap, the instance and its RDS database
 are stopped and started on a schedule (EventBridge Scheduler), with an AWS Budgets action as a spend
-ceiling — see [§13](#13-observability-operations-and-cost-control). On-demand capacity (rather than Spot)
-is what makes that schedule reliable: a stopped on-demand instance restarts on demand at the scheduled
-time, whereas a stopped Spot instance can only be restarted by EC2 when capacity frees up. The instance is
+ceiling — see [§13](#13-observability-operations-and-cost-control). The instance is
 fully disposable — it holds no durable state on its own disk. The two pieces of state that are expensive
 to rebuild live off-instance:
 **PostgreSQL (the source of truth) on managed RDS**, and **FalkorDB's derived graph/embeddings plus
@@ -84,7 +82,7 @@ As of June 11, 2026:
 | 3 | Crossplane core | Pin `v2.3.2` |
 | 4 | Crossplane installation | Helm installs Crossplane core only |
 | 5 | Application deployment | EC2 bootstrap plus Docker Compose |
-| 6 | Compute | Single stateless Graviton on-demand EC2 instance (on-demand, not Spot, so it can be reliably stopped/started on a schedule) |
+| 6 | Compute | Single stateless Graviton on-demand EC2 instance, stopped/started on a schedule for cost control |
 | 7 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
 | 8 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
 | 9 | Dashboard | Separate GitHub repository deployed to Vercel |
@@ -245,12 +243,6 @@ The AWS gateway remains the sole authentication and authorization authority:
 | FalkorDB + Caddy snapshot | EC2 | systemd timer running `snapshot-save.sh` to S3 |
 | Dashboard | Vercel | Git integration from `Quorum-dash` |
 
-### Explicit exclusions
-
-- No dashboard container or image on EC2 / in GHCR — the dashboard runs only on Vercel.
-- No mandatory Route 53 hosted zone — a placeholder domain is used until one is acquired.
-- No database password in Git, XR manifests, Kubernetes Secrets, or the application secret.
-
 ---
 
 ## 7. Crossplane API
@@ -276,7 +268,7 @@ spec:
     vpcCidr: 10.20.0.0/16
   compute:
     instanceType: t4g.large
-    capacityType: on-demand           # on-demand (not spot) so the instance can be stopped/started on a schedule
+    capacityType: on-demand           # so the instance can be stopped/started on a schedule
     rootVolumeGiB: 30
     arch: arm64
   schedule:
@@ -405,9 +397,7 @@ No NAT Gateway is required.
 ### 9.2 Compute
 
 - Graviton-compatible Amazon Linux 2023 AMI.
-- On-demand instance of the requested instance type — chosen over Spot specifically so it can be stopped
-  and started on a schedule (a stopped Spot instance can only be restarted by EC2 when capacity is
-  available, which would make the scheduled morning start unreliable).
+- On-demand instance of the requested instance type.
 - Instance profile attached before boot.
 - Elastic IP and association.
 - Disposable encrypted gp3 root volume (EBS-backed, so a stop preserves the volume while compute billing
@@ -419,6 +409,11 @@ No NAT Gateway is required.
 
 EC2 contains no durable governed knowledge and pins no data to its disk. All
 expensive-to-rebuild state lives in RDS (source of truth) and the versioned S3 snapshot bucket.
+
+> **Considered:** Spot would lower compute cost further, but a stopped Spot instance can only be
+> restarted by EC2 when capacity frees up, which would make the scheduled start unreliable. On-demand is
+> chosen so the stop/start schedule is deterministic — and the schedule already brings cost down to
+> roughly Spot levels.
 
 ### 9.3 Database
 
@@ -568,8 +563,6 @@ followed by a production Vercel redeployment.
 - `decay-job`
 - `archive-job`
 - `recheck-job`
-
-It does not contain the dashboard.
 
 Caddy:
 
@@ -852,7 +845,6 @@ The following are not part of the first production footprint:
 - Kubernetes application deployment.
 - multi-region failover.
 - Auto Scaling Group or other AWS-native automatic instance replacement.
-- Spot capacity (rejected here because it cannot be reliably stopped/started on a schedule).
 - Idle/wake-on-request (scale-to-zero) — starting the stack on the first inbound request rather than on a
   fixed clock schedule.
 - A continuously available Crossplane control plane.
