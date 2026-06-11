@@ -4,9 +4,9 @@
 
 **Goal:** Provision a single-instance, cost-controlled AWS deployment of the Quorum backend (gateway + Graphiti + FalkorDB + Redis + Caddy) using a local Crossplane v2 control plane, with RDS PostgreSQL as the durable source of truth and a versioned S3 snapshot of derived state — all authored and validated offline, with every AWS-mutating action gated behind explicit operator approval.
 
-**Architecture:** One Crossplane v2 namespaced XR (`QuorumEnvironment`) rendered by one flat pipeline `Composition` provisions VPC + a public-subnet Graviton EC2 (Amazon Linux 2023, arm64) running `docker-compose.aws.yml`, an RDS PostgreSQL 16 instance, three versioned S3 buckets, a DynamoDB membership table, a KMS key, CloudWatch logs, and AWS-native cost controls (EventBridge Scheduler daily auto-stop, disabled auto-start, AWS Budget + action). The EC2 box is disposable: PostgreSQL (RDS) holds all governed knowledge; FalkorDB's derived graph/embeddings and Caddy's TLS material are snapshotted to S3 and restored on boot. DNS lives in Vercel (`quorum-gateway.ayansasmal.work` → EIP); Caddy issues TLS via ACME HTTP-01. The dashboard is **not** in AWS (separate Vercel deploy).
+**Architecture:** One Crossplane v2 namespaced XR (`XQuorumEnvironment`) rendered by one flat pipeline `Composition` provisions VPC + a public-subnet Graviton EC2 (Amazon Linux 2023, arm64) running `docker-compose.aws.yml`, an RDS PostgreSQL 16 instance, three versioned S3 buckets, a DynamoDB membership table, a KMS key, CloudWatch logs, and AWS-native cost controls (EventBridge Scheduler daily auto-stop, disabled auto-start, AWS Budget + SSM Automation action). The EC2 box is disposable: PostgreSQL (RDS) holds all governed knowledge; FalkorDB's derived graph/embeddings and Caddy's TLS material are snapshotted to S3 and restored on boot. DNS lives in Vercel (`quorum-gateway.ayansasmal.work` → EIP); Caddy issues TLS via ACME HTTP-01. The dashboard is **not** in AWS (separate Vercel deploy).
 
-**Tech Stack:** Crossplane v2.3.2 (core, local Docker Desktop K8s) · crossplane CLI v2.x (`crossplane render`) · Upbound provider-family-aws v2 line (ec2, rds, s3, iam, dynamodb, kms, cloudwatchlogs, **scheduler v2.5.0**, **budgets v2.3.0**) · `function-patch-and-transform` · Docker Compose v2 · Caddy 2 · systemd · AWS CLI v2 · Node 24 / vitest + ajv · shellcheck · Amazon Linux 2023 (arm64).
+**Tech Stack:** Crossplane v2.3.2 (core and CLI, local Docker Desktop K8s) · `crossplane composition render` + `crossplane resource validate` · namespaced Upbound provider-family-aws v2 managed resources (ec2, rds, s3, iam, dynamodb, kms, cloudwatchlogs, scheduler, budgets, ssm) · `function-patch-and-transform` v0.10.6 · Docker Compose v2 · Caddy 2 · systemd · AWS CLI v2 · Node 24 / vitest + ajv · shellcheck · Amazon Linux 2023 (arm64).
 
 ---
 
@@ -17,11 +17,12 @@
    ```
    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
    ```
-3. **Never run an AWS-mutating command.** This entire plan is authored and validated **offline**. The only commands you run create no AWS resources: `crossplane render`, `helm template`, `shellcheck`, `bash -n`, `docker compose config`, `npx vitest`, `ajv`, `docker buildx build` (no `--push`). Anything that applies providers/XRDs/XRs, seeds Secrets Manager, pushes images, or edits DNS is the operator's job after handoff — the deploy script (M7) refuses to mutate without an explicit `apply` argument.
+3. **Never run an AWS-mutating command.** This entire plan is authored and validated **offline**. The only commands you run create no AWS resources: `crossplane composition render`, `crossplane resource validate`, `helm template`, `shellcheck`, `bash -n`, `docker compose config`, `npx vitest`, `ajv`, `docker buildx build` (no `--push`). Anything that applies providers/XRDs/XRs, seeds Secrets Manager, pushes images, or edits DNS is the operator's job after handoff — the deploy script (M7) refuses to mutate without an explicit `apply` argument.
 4. **Do not touch the existing LocalStack manifests** under `crossplane/provider/`, `crossplane/rds/`, `crossplane/redis/`, etc. New production files live under the new `crossplane/apis/`, `crossplane/environments/`, `crossplane/providers/`, `crossplane/bootstrap/`, `crossplane/ops/` directories and use explicit `aws-prod` names.
 5. **No secret values in git.** `quorum/.env.prod` already exists, is gitignored, and holds real operator secrets — never read it into a committed file, never `cat` it into output, never reference its values. The seed step consumes it locally only.
 6. **JSDoc/comments:** add a top-of-file comment block to every script and a `# E2E:`/purpose comment to non-obvious manifests, matching the density of the existing repo files you read.
-7. **Verify provider field names against the installed CRDs, never from memory.** Crossplane provider CRD schemas are version-specific. When a task says "validate with `crossplane render`", a render failure that complains about an unknown field means the field name/shape is wrong for the pinned provider version — fix it against the rendered error, do not guess again.
+7. **Verify provider field names against downloaded provider CRDs, never from memory.** Crossplane provider CRD schemas are version-specific. `crossplane composition render` executes the function pipeline; it does not prove managed-resource fields are valid. Pipe the full render through `crossplane resource validate --error-on-missing-schemas` and fix every unknown or missing field against the pinned provider schema.
+8. **Use one kind throughout.** The XRD defines `XQuorumEnvironment`, so the canonical XR and the Composition both use `kind: XQuorumEnvironment`. A v2 namespaced XR composes namespaced managed resources; use provider API groups ending in `.m.upbound.io`.
 
 ---
 
@@ -54,7 +55,7 @@ quorum/crossplane/
     systemd/                     # 11 unit/timer files (see M4)
   deploy.sh                      # gated: render/validate by default; mutate only on `apply`
   tests/
-    render.test.js               # crossplane render smoke + resource assertions
+    render.test.js               # composition render smoke + resource assertions
     xrd-schema.test.js           # ajv: XR schema accepts valid / rejects invalid
     bootstrap.test.js            # shellcheck + bash -n over bootstrap/ops scripts
     compose.test.js              # docker compose config valid + no dashboard/localstack
@@ -78,8 +79,11 @@ The existing lowercase singular dirs (`provider/`, `rds/`, …) stay as the Loca
 
 Run: `crossplane version --client`
 Expected: a client version is printed. Then:
-Run: `crossplane render --help | head -1`
-Expected: help text for `render` (not "unknown command"). If the installed CLI only has `crossplane beta render`, note that and use `crossplane beta render` everywhere this plan says `crossplane render`. Record the working command in `docs/DEPLOYMENT-AWS.md` later.
+Run: `crossplane composition render --help | head -1`
+Expected: help text for `composition render` (not "unknown command"). Record the working command in `docs/DEPLOYMENT-AWS.md` later.
+
+Run: `crossplane resource validate --help | head -1`
+Expected: help text for offline schema validation.
 
 - [ ] **Step 2: Confirm Docker + buildx + compose are present**
 
@@ -295,10 +299,10 @@ kind: Function
 metadata:
   name: function-patch-and-transform
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.8.2
+  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.10.6
 ```
 
-> **Verify:** confirm `function-patch-and-transform` v0.8.2 is the latest stable on the Upbound Marketplace; bump if newer. `crossplane render` requires this function to be installed locally OR supplied via `--function` — see M3.
+> **Verify:** confirm `function-patch-and-transform` v0.10.6 is the latest stable on the Upbound Marketplace. `crossplane composition render` runs the function image locally from this manifest — see M3.
 
 - [ ] **Step 2: YAML-validate + commit**
 
@@ -368,9 +372,9 @@ git commit -m "feat(deploy): add production providerconfig without localstack ov
 
 Create `crossplane/apis/environment/definition.yaml`:
 ```yaml
-# Crossplane v2 XRD. Cluster-scoped composite XQuorumEnvironment defines the
-# namespaced XR QuorumEnvironment. v2 uses apiextensions.crossplane.io/v2 and
-# scope: Namespaced; claims are deprecated — the namespaced XR is used directly.
+# Crossplane v2 XRD. XQuorumEnvironment is itself the namespaced XR API.
+# v2 uses apiextensions.crossplane.io/v2 and scope: Namespaced; claims are
+# deprecated and no separate QuorumEnvironment claim kind exists.
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
@@ -519,7 +523,7 @@ Create `crossplane/environments/prod.yaml`:
 # quorum/prod/gateway is seeded in Secrets Manager. domainName confirmed; DNS
 # is a Vercel-managed A record (quorum-gateway → EIP), so manageRoute53 stays false.
 apiVersion: platform.quorum.dev/v1alpha1
-kind: QuorumEnvironment
+kind: XQuorumEnvironment
 metadata:
   name: quorum-prod
   namespace: quorum-system
@@ -668,16 +672,16 @@ git commit -m "test(deploy): validate xr against xrd schema with ajv, reject bad
 
 ---
 
-## Milestone M3 — The Composition (rendered offline with `crossplane render`)
+## Milestone M3 — The Composition (rendered and schema-validated offline)
 
-**Goal:** author the single pipeline `Composition` that turns one `QuorumEnvironment` XR into the full AWS resource graph, and validate it renders offline. Build it **incrementally** — add a resource group, render, assert, commit — so a render error is always localized to the last group added.
+**Goal:** author the single pipeline `Composition` that turns one `XQuorumEnvironment` XR into the full AWS resource graph, and validate it offline. Build it **incrementally** — add a resource group, render, schema-validate, assert, commit — so a failure is always localized to the last group added.
 
 ### Task M3.0: Render scaffold + smoke test
 
 **Files:**
 - Create: `crossplane/apis/environment/composition.yaml` (skeleton)
 - Create: `crossplane/tests/render.test.js`
-- Create: `crossplane/tests/render.sh` (helper that invokes `crossplane render` with the pinned function)
+- Create: `crossplane/tests/render.sh` (helper that invokes `crossplane composition render` with the pinned function)
 
 - [ ] **Step 1: Write the Composition skeleton (pipeline mode, no resources yet)**
 
@@ -722,10 +726,10 @@ XR="${ROOT}/environments/prod.yaml"
 COMPOSITION="${ROOT}/apis/environment/composition.yaml"
 FUNCTIONS="${ROOT}/providers/functions.yaml"
 
-# `crossplane render <xr> <composition> <functions>` resolves the function image
+# `crossplane composition render <xr> <composition> <functions>` resolves the function image
 # from functions.yaml and runs it locally in Docker. If your CLI predates the
 # GA command, replace `render` with `beta render`.
-crossplane render "${XR}" "${COMPOSITION}" "${FUNCTIONS}"
+crossplane composition render "${XR}" "${COMPOSITION}" "${FUNCTIONS}" --include-full-xr
 ```
 
 Run: `chmod +x crossplane/tests/render.sh`
@@ -769,7 +773,7 @@ describe('S-DEPLOY composition render', () => {
 - [ ] **Step 4: Render once to prove the toolchain works**
 
 Run: `bash crossplane/tests/render.sh`
-Expected: exits 0. With an empty `resources: []` the output is just the XR echoed with an empty status, or an empty render — no error. If it errors pulling the function image, run `docker pull xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.8.2` first (operator may need to approve network egress).
+Expected: exits 0. With an empty `resources: []` the output is just the XR echoed with an empty status, or an empty render — no error. If it errors pulling the function image, run `docker pull xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.10.6` first (operator may need to approve network egress).
 
 - [ ] **Step 5: Run the smoke test + commit**
 
@@ -790,11 +794,11 @@ For each group below, follow the **same five steps**:
 4. **Run:** `npx vitest run crossplane/tests/render.test.js` → PASS.
 5. **Commit** with `feat(deploy): compose <group> resources`.
 
-> **Field-accuracy rule:** author each `base.spec.forProvider` against the **installed provider CRD**, not memory. After adding a group, if `crossplane render` complains about an unknown/var required field, fix it from the error. Use the existing `crossplane/rds/instance.yaml` as the proven shape for the RDS `Instance` base.
+> **Field-accuracy rule:** author each `base.spec.forProvider` against the pinned provider CRD, not memory. After adding a group, pipe the render output into `crossplane resource validate`; render alone does not detect unknown managed-resource fields. Use namespaced provider APIs such as `ec2.aws.m.upbound.io/v1beta1`.
 
 The groups, in dependency order:
 
-- [ ] **M3.1 — KMS.** `kms.aws.upbound.io/v1beta1` `Key` (+ `Alias`), `region` from `spec.region`, rotation enabled, deletion window = AWS minimum. Every encrypted resource references this key. Assert kind `Key` renders. Commit.
+- [ ] **M3.1 — KMS.** `kms.aws.m.upbound.io/v1beta1` `Key` (+ `Alias`), `region` from `spec.region`, rotation enabled, deletion window = AWS minimum. Every encrypted resource references this key. Assert kind `Key` renders. Commit.
 
 - [ ] **M3.2 — Network.** `VPC` (cidr from `spec.network.vpcCidr`), 1 public `Subnet`, 2 private `Subnet`s in different AZs, `InternetGateway`, public `RouteTable` + `Route` (0.0.0.0/0 → IGW) + `RouteTableAssociation`, `DBSubnetGroup` over the two private subnets. Patches wire subnet IDs via matchController refs or `crossplane.io/external-name`. Assert `VPC`, `Subnet`, `InternetGateway`, `RouteTable` render. Commit.
 
@@ -807,19 +811,19 @@ The groups, in dependency order:
 
   Assert 3 `Role`s + 1 `InstanceProfile` render. Add a render assertion that the instance role policy contains **no** `ec2:StopInstances`. Commit.
 
-- [ ] **M3.5 — Storage + index.** Three `s3.aws.upbound.io` `Bucket`s (config, deploy, snapshot) each with `BucketVersioning` enabled and `BucketServerSideEncryptionConfiguration` referencing the KMS key; snapshot bucket gets a `BucketLifecycleConfiguration` expiring noncurrent versions after 14 days. DynamoDB `Table` `quorum-user-projects` with the membership GSI (mirror the existing local table's key schema). Assert 3 `Bucket`s + `Table` render. Commit.
+- [ ] **M3.5 — Storage + index.** Three `s3.aws.m.upbound.io` `Bucket`s (config, deploy, snapshot) each with `BucketVersioning` enabled and `BucketServerSideEncryptionConfiguration` referencing the KMS key; snapshot bucket gets a `BucketLifecycleConfiguration` expiring noncurrent versions after 14 days. DynamoDB `Table` `quorum-user-projects` with the membership GSI (mirror the existing local table's key schema). Assert 3 `Bucket`s + `Table` render. Commit.
 
-- [ ] **M3.6 — RDS.** `rds.aws.upbound.io/v1beta1` `Instance`: engine `postgres`, `engineVersion` from spec, `instanceClass` from spec, `allocatedStorage` from spec, `username` from spec, `manageMasterUserPassword: true`, `dbSubnetGroupNameSelector` → the DB subnet group, `vpcSecurityGroupIdSelector` → DB SG, `storageEncrypted: true` + `kmsKeyId` → env key, `publiclyAccessible: false`, `backupRetentionPeriod` from spec, `finalSnapshotIdentifier` set, `skipFinalSnapshot: false`. Use `crossplane/rds/instance.yaml` as the base shape. Assert rds `Instance` renders with `manageMasterUserPassword: true`. Commit.
+- [ ] **M3.6 — RDS.** `rds.aws.m.upbound.io/v1beta1` `Instance`: engine `postgres`, `engineVersion` from spec, `instanceClass` from spec, `allocatedStorage` from spec, `username` from spec, `manageMasterUserPassword: true`, `dbSubnetGroupNameSelector` → the DB subnet group, `vpcSecurityGroupIdSelector` → DB SG, `storageEncrypted: true` + `kmsKeyId` → env key, `publiclyAccessible: false`, `backupRetentionPeriod` from spec, `finalSnapshotIdentifier` set, `skipFinalSnapshot: false`. Use `crossplane/rds/instance.yaml` as the base shape, translated to the namespaced API. Assert rds `Instance` renders with `manageMasterUserPassword: true`. Commit.
 
 - [ ] **M3.7 — Compute.** `ec2 Instance`: arm64 AL2023 AMI via SSM public parameter or a pinned AMI map for ap-southeast-2, `instanceType` from spec, `iamInstanceProfile` → instance profile, `subnetId` → public subnet, `vpcSecurityGroupIds` → app SG, root `gp3` `ebsBlockDevice` sized from `spec.compute.rootVolumeGiB` + `encrypted: true` + KMS key, `userData` = base64 of `bootstrap/ec2-userdata.sh` templated with the deploy bucket name. `EIP` + `EIPAssociation` to the instance. `cloudwatchlogs Group` for the stack. Assert ec2 `Instance`, `EIP`, log `Group` render. Commit.
 
-- [ ] **M3.8 — Cost control: schedules.** `scheduler.aws.upbound.io` `Schedule` ×2:
-  - **stop** — `scheduleExpression` from `spec.schedule.autoStop.cron`, `scheduleExpressionTimezone` from `spec.schedule.timezone`, `state: ENABLED`, flexible window off, **universal target** ARN `arn:aws:scheduler:::aws-sdk:ec2:stopInstances` with input `{"InstanceIds":["<id>"]}` and a second `Schedule` (or a second target pattern) for `rds:stopDBInstance`. Role ARN → scheduler role.
-  - **start** — same shape from `spec.schedule.autoStart.cron`, but `state` patched from `spec.schedule.autoStart.enabled` (false → `DISABLED`). Use a `map` transform: `true→ENABLED`, `false→DISABLED`.
+- [ ] **M3.8 — Cost control: schedules.** `scheduler.aws.m.upbound.io` `Schedule` ×4:
+  - **EC2 stop + RDS stop** — two schedules using `spec.schedule.autoStop.cron`, `scheduleExpressionTimezone` from `spec.schedule.timezone`, `state: ENABLED`, flexible window off, and the matching AWS SDK universal target. Role ARN → scheduler role.
+  - **EC2 start + RDS start** — two schedules using `spec.schedule.autoStart.cron`, with `state` patched from `spec.schedule.autoStart.enabled` (false → `DISABLED`). Use a `map` transform: `true→ENABLED`, `false→DISABLED`.
 
-  Assert two `Schedule`s render; assert the start schedule has `state: DISABLED` given the canonical XR. Commit.
+  Assert four `Schedule`s render; assert both start schedules have `state: DISABLED` given the canonical XR. Commit.
 
-- [ ] **M3.9 — Cost control: budget.** `budgets.aws.upbound.io` `Budget` (monthly cost, `limitAmount` from `spec.budget.monthlyLimitUSD`, currency USD, a notification at `alertThresholdPercent` emailing `notifyEmail`). `BudgetAction` stopping EC2 + RDS at `actionThresholdPercent`, `executionRoleArn` → budget action role. Assert `Budget` + `BudgetAction` render; assert alert threshold 100 and action threshold 150 from the canonical XR. Commit.
+- [ ] **M3.9 — Cost control: budget.** `budgets.aws.m.upbound.io` `Budget` (monthly cost, `limitAmount` from `spec.budget.monthlyLimitUSD`, currency USD, a notification at `alertThresholdPercent` emailing `notifyEmail`). Add an `ssm.aws.m.upbound.io` Automation document that stops the environment's tagged EC2 instance and RDS database, then configure `BudgetAction` at `actionThresholdPercent` to execute that SSM action through the budget action role. AWS Budgets does not directly invoke EC2/RDS stop APIs. Assert `Budget`, `BudgetAction`, and the Automation document render; assert alert threshold 100 and action threshold 150 from the canonical XR. Commit.
 
 ### Task M3.10: Connection secret (operator-visible outputs)
 
@@ -1228,7 +1232,7 @@ Expected: build succeeds (the pinned `GRAPHITI_SHA` sparse-clone completes).
 #!/usr/bin/env bash
 # Gated deployment entrypoint for the Quorum AWS stack.
 #
-#   ./deploy.sh validate     (default) render + lint everything, touch no AWS
+#   ./deploy.sh validate     (default) render + schema-validate + lint, touch no AWS
 #   ./deploy.sh apply        MUTATING: install providers, apply xrd/composition/xr
 #   ./deploy.sh status       read-only: show XR + managed resource readiness
 #   ./deploy.sh destroy      MUTATING: delete the XR (gated by a typed confirmation)

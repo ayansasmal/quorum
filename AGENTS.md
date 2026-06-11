@@ -250,6 +250,12 @@ graph TD
 - The dashboard is maintained in `https://github.com/ayansasmal/Quorum-dash`, deployed by Vercel at `https://quorum-dashboard.ayansasmal.work`, and is not built or run on EC2.
 - Vercel forwards Quorum JWT and `X-Quorum-Project` headers to the AWS gateway through `QUORUM_GATEWAY_URL`; the gateway remains the sole authorization authority.
 
+**AWS Crossplane implementation-plan correction (2026-06-11):**
+- Crossplane core and CLI are pinned to `v2.3.2`; offline checks use `crossplane composition render` followed by `crossplane resource validate --error-on-missing-schemas`.
+- The v2 namespaced API uses `XQuorumEnvironment` consistently for the XRD, XR, and Composition, and composes namespaced Upbound managed resources (`*.aws.m.upbound.io`).
+- EventBridge cost control renders four schedules: EC2/RDS stop and EC2/RDS start. Both start schedules are disabled in the canonical production XR.
+- AWS Budgets cannot call EC2/RDS stop APIs directly; the budget action executes an SSM Automation document through a scoped budget-action role.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)
