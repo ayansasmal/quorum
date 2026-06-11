@@ -87,9 +87,9 @@ As of June 11, 2026:
 | 7 | Durable database | RDS PostgreSQL; the source of truth must survive EC2 replacement |
 | 8 | Disposable services | Redis is fully disposable; FalkorDB's derived state is snapshotted to versioned S3 and restored on boot |
 | 9 | Dashboard | Separate GitHub repository deployed to Vercel |
-| 10 | Gateway exposure | Public HTTPS domain pointing to the EC2 Elastic IP |
-| 11 | TLS | Caddy on EC2 obtains and renews a trusted ACME certificate; cert/account state is snapshotted to S3 so replacement avoids re-issue |
-| 12 | DNS | Route 53 hosted zone for the gateway domain once a domain is acquired; a placeholder domain is used until then |
+| 10 | Gateway exposure | Public HTTPS at `quorum-gateway.ayansasmal.work`, pointing to the EC2 Elastic IP |
+| 11 | TLS | Caddy on EC2 obtains and renews a trusted Let's Encrypt certificate via the ACME HTTP-01 challenge; cert/account state is snapshotted to S3 so replacement avoids re-issue |
+| 12 | DNS | Vercel-managed DNS for `ayansasmal.work`: a single A record (`quorum-gateway`) points at the EC2 Elastic IP. No Route 53 / AWS DNS — Vercel hosts the record but does not proxy traffic |
 | 13 | Images | Gateway and Graphiti images in GHCR |
 | 14 | AWS authentication | EC2 instance profile; no static AWS credentials on EC2 |
 | 15 | Database credentials | RDS generates and manages the master password in Secrets Manager |
@@ -264,7 +264,7 @@ spec:
       name: xquorumenvironment
   environment: prod
   region: ap-southeast-2
-  domainName: <gateway-domain>          # placeholder until a domain is acquired; becomes a Route 53 record
+  domainName: quorum-gateway.ayansasmal.work   # confirmed; DNS A record managed in Vercel, points at the EIP
   dashboardUrl: https://quorum-dashboard.ayansasmal.work
   network:
     vpcCidr: 10.20.0.0/16
@@ -308,8 +308,9 @@ spec:
     mode: acme
     acmeEmail: operator@example.com
   dns:
-    manageRoute53: false                # flip to true once a domain is acquired and a hosted zone exists
-    hostedZoneId: ""                    # Route 53 hosted zone for <gateway-domain>
+    provider: vercel-external           # DNS for ayansasmal.work lives in Vercel; AWS manages no DNS
+    manageRoute53: false                # AWS DNS is never used for this stack
+    hostedZoneId: ""                    # unused
   images:
     registry: ghcr.io/ayansasmal
     gatewayTag: "0.4.12"
@@ -317,11 +318,14 @@ spec:
     applySchema: true
 ```
 
-`domainName` and `acmeEmail` remain operator inputs. The gateway domain is a deliberate placeholder
-(`<gateway-domain>`) — no domain has been acquired yet. The intended DNS path is a **Route 53 record**
-for the Elastic IP once a domain exists: at that point `domainName` is filled in, `dns.manageRoute53`
-flips to `true`, and `dns.hostedZoneId` is set. The placeholder does not block authoring or rendering
-the manifests; only the deploy-time DNS and TLS steps depend on a real domain.
+`domainName` and `acmeEmail` remain operator inputs. The gateway domain is **confirmed** as
+`quorum-gateway.ayansasmal.work`. DNS for `ayansasmal.work` is hosted in **Vercel**, not AWS: the
+operator adds a single **A record** (`quorum-gateway` → the Elastic IP) in the Vercel dashboard. Vercel
+serves the record but does not proxy the traffic, so the connection reaches Caddy directly and Caddy's
+ACME HTTP-01 challenge succeeds. AWS manages no DNS — there is no Route 53 hosted zone, no ACM
+certificate, and `dns.manageRoute53` stays `false`. The only deploy-time coupling is that the A record
+must point at the EIP before Caddy can complete its first certificate issuance; until then the manifests
+still render and validate.
 
 The Composition creates a `quorum-prod-connection` Secret in `quorum-system` for operator-visible,
 non-credential outputs:
@@ -553,18 +557,24 @@ Crossplane manifests, the local Kubernetes API, or Vercel.
 
 ### GitHub OAuth values
 
-After the gateway domain is selected:
+The gateway domain is confirmed, so these are final:
 
 ```env
 DASHBOARD_URL=https://quorum-dashboard.ayansasmal.work
-GITHUB_CALLBACK_URL=https://<gateway-domain>/oauth/callback
-QUORUM_GATEWAY_URL=https://<gateway-domain>
+GITHUB_CALLBACK_URL=https://quorum-gateway.ayansasmal.work/oauth/callback
+QUORUM_GATEWAY_URL=https://quorum-gateway.ayansasmal.work
 ```
 
 GitHub OAuth App settings:
 
 - Homepage URL: `https://quorum-dashboard.ayansasmal.work`
-- Authorization callback URL: `https://<gateway-domain>/oauth/callback`
+- Authorization callback URL: `https://quorum-gateway.ayansasmal.work/oauth/callback`
+
+The single callback path `/oauth/callback` is served by the gateway (`gateway/src/routes/mcp-oauth.js`)
+and handles both the dashboard JWT flow and the MCP OAuth authorization-code flow. The `redirect_uri`
+sent to GitHub is derived from `QUORUM_GATEWAY_URL`, so that value must equal the registered callback's
+origin exactly. These values can be entered in the GitHub OAuth App now; only the Vercel A record needs
+the real EIP before the first login will succeed end-to-end.
 
 The GitHub OAuth client secret remains in AWS Secrets Manager. It is never stored in Vercel.
 
@@ -661,11 +671,14 @@ Implementation must keep preparation separate from execution.
 
 ### Hard prerequisites before a real deployment
 
-A **registered domain is required** before the stack can be deployed end-to-end: Caddy's ACME TLS
-issuance and the GitHub OAuth callback both need a real `domainName`. While `domainName` is the
-`<gateway-domain>` placeholder, manifests still render and validate, but the TLS and OAuth steps
-(workflow items 9–11) cannot complete. The other prerequisite is the seeded `quorum/prod/gateway`
-application secret (workflow item 6). Neither blocks authoring or offline validation.
+The domain is already owned: `ayansasmal.work` is registered and its DNS is hosted in Vercel. The only
+deploy-time DNS action is pointing the **`quorum-gateway` A record at the EC2 Elastic IP** once the EIP
+exists (workflow item 9) — a placeholder record (`quorum-gateway` → `127.0.0.1`) is already in place and
+gets edited to the real IP. Caddy's ACME HTTP-01 issuance and the GitHub OAuth callback both then resolve
+against `https://quorum-gateway.ayansasmal.work`. The GitHub OAuth App can be configured with the final
+callback URL ahead of time; it only starts working once the A record carries the real EIP. The other
+prerequisite is the seeded `quorum/prod/gateway` application secret (workflow item 6). Neither blocks
+authoring or offline validation.
 
 ### Safe implementation and validation commands
 
@@ -689,7 +702,7 @@ Do not run these during implementation:
 - applying the XRD, Composition, or production XR;
 - seeding AWS Secrets Manager;
 - pushing production images;
-- creating or changing DNS;
+- editing the Vercel `quorum-gateway` A record to the real EIP;
 - changing the GitHub OAuth callback;
 - replacing Vercel's gateway placeholder;
 - destroying any AWS resource.
@@ -705,7 +718,7 @@ Do not run these during implementation:
 7. Apply `environments/prod.yaml` only after the application secret has a current value.
 8. Wait for the AWS resources and output Secret. RDS independently creates its managed master-user
    secret, which EC2 discovers through IAM at runtime.
-9. Once a domain is acquired, create the Route 53 record (or equivalent) pointing `<gateway-domain>` at the EIP.
+9. Edit the Vercel `quorum-gateway` A record (currently `127.0.0.1`) to the provisioned Elastic IP.
 10. Wait for Caddy TLS and verify gateway health.
 11. Update the GitHub OAuth App callback.
 12. Replace Vercel `QUORUM_GATEWAY_URL` and redeploy production.
