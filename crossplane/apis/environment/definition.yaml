@@ -1,0 +1,158 @@
+# Crossplane v2 namespaced API for one Quorum AWS environment.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xquorumenvironments.platform.quorum.dev
+spec:
+  scope: Namespaced
+  group: platform.quorum.dev
+  names:
+    kind: XQuorumEnvironment
+    plural: xquorumenvironments
+  defaultCompositionRef:
+    name: xquorumenvironment
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - environment
+                - region
+                - domainName
+                - network
+                - compute
+                - schedule
+                - budget
+                - snapshot
+                - database
+                - llm
+                - tls
+                - dns
+                - images
+              properties:
+                environment:
+                  type: string
+                  enum: [prod]
+                region:
+                  type: string
+                  enum: [ap-southeast-2]
+                domainName:
+                  type: string
+                  pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+                dashboardUrl:
+                  type: string
+                  pattern: '^https://'
+                network:
+                  type: object
+                  required: [vpcCidr]
+                  properties:
+                    vpcCidr:
+                      type: string
+                      pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+                compute:
+                  type: object
+                  required: [instanceType, capacityType, rootVolumeGiB, arch]
+                  properties:
+                    instanceType: { type: string }
+                    capacityType: { type: string, enum: [on-demand] }
+                    rootVolumeGiB: { type: integer, minimum: 20, maximum: 200 }
+                    arch: { type: string, enum: [arm64] }
+                schedule:
+                  type: object
+                  required: [timezone, autoStop, autoStart]
+                  properties:
+                    timezone: { type: string }
+                    autoStop:
+                      type: object
+                      required: [enabled, cron]
+                      properties:
+                        enabled: { type: boolean }
+                        cron: { type: string }
+                    autoStart:
+                      type: object
+                      required: [enabled, cron]
+                      properties:
+                        enabled: { type: boolean }
+                        cron: { type: string }
+                budget:
+                  type: object
+                  required:
+                    - monthlyLimitUSD
+                    - alertThresholdPercent
+                    - actionThresholdPercent
+                    - notifyEmail
+                  properties:
+                    monthlyLimitUSD: { type: number, minimum: 1 }
+                    alertThresholdPercent: { type: integer, minimum: 1, maximum: 1000 }
+                    actionThresholdPercent: { type: integer, minimum: 1, maximum: 1000 }
+                    notifyEmail:
+                      type: string
+                      pattern: '^[^@]+@[^@]+\.[^@]+$'
+                snapshot:
+                  type: object
+                  required: [bucketSuffix, intervalMinutes, restoreOnBoot]
+                  properties:
+                    bucketSuffix: { type: string }
+                    intervalMinutes: { type: integer, minimum: 5 }
+                    restoreOnBoot: { type: boolean }
+                database:
+                  type: object
+                  required:
+                    - engineVersion
+                    - instanceClass
+                    - allocatedStorageGiB
+                    - masterUsername
+                    - manageMasterUserPassword
+                  properties:
+                    engineVersion: { type: string }
+                    instanceClass: { type: string }
+                    allocatedStorageGiB: { type: integer, minimum: 20 }
+                    masterUsername: { type: string }
+                    manageMasterUserPassword: { type: boolean, enum: [true] }
+                    multiAz: { type: boolean }
+                    deletionProtection: { type: boolean }
+                    backupRetentionDays: { type: integer, minimum: 0, maximum: 35 }
+                llm:
+                  type: object
+                  required: [provider, model, embedModel, embedDim]
+                  properties:
+                    provider: { type: string }
+                    model: { type: string }
+                    embedModel: { type: string }
+                    embedDim: { type: integer, minimum: 1 }
+                tls:
+                  type: object
+                  required: [mode, acmeEmail]
+                  properties:
+                    mode: { type: string, enum: [acme] }
+                    acmeEmail:
+                      type: string
+                      pattern: '^[^@]+@[^@]+\.[^@]+$'
+                dns:
+                  type: object
+                  required: [provider, manageRoute53]
+                  properties:
+                    provider: { type: string, enum: [vercel-external] }
+                    manageRoute53: { type: boolean, enum: [false] }
+                    hostedZoneId: { type: string }
+                images:
+                  type: object
+                  required: [registry, gatewayTag, graphitiTag, applySchema]
+                  properties:
+                    registry: { type: string }
+                    gatewayTag: { type: string }
+                    graphitiTag: { type: string }
+                    applySchema: { type: boolean }
+            status:
+              type: object
+              properties:
+                elasticIp: { type: string }
+                instanceId: { type: string }
+                rdsEndpoint: { type: string }
+                snapshotBucket: { type: string }

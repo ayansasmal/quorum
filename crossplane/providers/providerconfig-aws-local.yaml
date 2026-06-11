@@ -1,0 +1,24 @@
+# LocalStack reference ProviderConfig retained beside the production variant.
+apiVersion: aws.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: aws-local
+spec:
+  s3_use_path_style: true
+  skip_credentials_validation: true
+  skip_metadata_api_check: true
+  skip_region_validation: true
+  endpoint:
+    source: Custom
+    hostnameImmutable: true
+    signingRegion: us-east-1
+    url:
+      type: Static
+      static: "http://host.docker.internal:4566"
+    services: [s3, sts, dynamodb, rds, elasticache]
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: aws-creds
+      key: credentials

@@ -1,0 +1,71 @@
+# Production AWS provider-family subpackages. Applied only by deploy.sh apply.
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-ec2
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-ec2:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-rds
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-rds:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-s3
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-s3:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-iam
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-iam:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-dynamodb
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-dynamodb:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-kms
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-kms:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-cloudwatchlogs
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-cloudwatchlogs:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-ssm
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-ssm:v2.5.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-scheduler
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-scheduler:v2.3.0
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-budgets
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws-budgets:v2.3.0

@@ -1,0 +1,61 @@
+# Canonical production XR. Contains no secret values.
+apiVersion: platform.quorum.dev/v1alpha1
+kind: XQuorumEnvironment
+metadata:
+  name: quorum-prod
+  namespace: quorum-system
+spec:
+  environment: prod
+  region: ap-southeast-2
+  domainName: quorum-gateway.ayansasmal.work
+  dashboardUrl: https://quorum-dashboard.ayansasmal.work
+  network:
+    vpcCidr: 10.20.0.0/16
+  compute:
+    instanceType: t4g.large
+    capacityType: on-demand
+    rootVolumeGiB: 30
+    arch: arm64
+  schedule:
+    timezone: Australia/Sydney
+    autoStop:
+      enabled: true
+      cron: "cron(0 10,23 * * ? *)"
+    autoStart:
+      enabled: false
+      cron: "cron(0 5,16 ? * MON-FRI *)"
+  budget:
+    monthlyLimitUSD: 40
+    alertThresholdPercent: 100
+    actionThresholdPercent: 150
+    notifyEmail: ayandelhi@gmail.com
+  snapshot:
+    bucketSuffix: snapshots
+    intervalMinutes: 60
+    restoreOnBoot: true
+  database:
+    engineVersion: "16"
+    instanceClass: db.t4g.micro
+    allocatedStorageGiB: 20
+    masterUsername: quorum
+    manageMasterUserPassword: true
+    multiAz: false
+    deletionProtection: false
+    backupRetentionDays: 7
+  llm:
+    provider: openai
+    model: gpt-4o-mini
+    embedModel: text-embedding-3-small
+    embedDim: 1536
+  tls:
+    mode: acme
+    acmeEmail: ayandelhi@gmail.com
+  dns:
+    provider: vercel-external
+    manageRoute53: false
+    hostedZoneId: ""
+  images:
+    registry: ghcr.io/ayansasmal
+    gatewayTag: "0.4.12"
+    graphitiTag: "0.4.x"
+    applySchema: true

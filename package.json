@@ -26,6 +26,7 @@
     "dev:gateway": "npm run dev --workspace=gateway",
     "start:gateway": "npm run start --workspace=gateway",
     "test": "vitest run",
+    "test:deploy": "vitest run crossplane/tests",
     "test:watch": "vitest",
     "test:gateway": "vitest run tests/gateway",
     "test:coverage": "vitest run --coverage",
@@ -62,10 +63,12 @@
     "@commitlint/config-conventional": "^21.0.0",
     "@playwright/test": "^1.50.0",
     "@vitest/coverage-v8": "4.1.2",
+    "ajv": "^8.17.1",
     "axios": "^1.7.9",
     "commit-and-tag-version": "^12.7.3",
     "husky": "^9.1.7",
     "jsonwebtoken": "^9.0.2",
+    "js-yaml": "^4.1.0",
     "vitest": "4.1.2"
   },
   "overrides": {

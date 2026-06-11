@@ -1,0 +1,7 @@
+# Composition function used for the flat production resource graph.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.10.6

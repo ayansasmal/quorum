@@ -36,6 +36,8 @@ crossplane/credentials/aws-creds-secret.yaml
 
 # Infrastructure tooling state — never go in git
 .terraform/
+.crossplane-cache/
+.docker-config/
 
 # Quorum session state (project-local, per-engineer)
 .quorum-session

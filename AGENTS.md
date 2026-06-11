@@ -256,6 +256,11 @@ graph TD
 - EventBridge cost control renders four schedules: EC2/RDS stop and EC2/RDS start. Both start schedules are disabled in the canonical production XR.
 - AWS Budgets cannot call EC2/RDS stop APIs directly; the budget action executes an SSM Automation document through a scoped budget-action role.
 
+**AWS Crossplane implementation harness (2026-06-11):**
+- Production deployment checks run through `npm run test:deploy`.
+- The harness uses Vitest for XRD/XR schema tests and invokes `bash -n` plus ShellCheck for every production shell script.
+- The canonical API is `platform.quorum.dev/v1alpha1`, kind `XQuorumEnvironment`, scoped to the `quorum-system` namespace.
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)
