@@ -240,7 +240,7 @@ graph TD
 **AWS RDS credential decision (2026-06-11):**
 - RDS generates and manages the master-user password in AWS Secrets Manager; no database password is supplied through Git, XR manifests, the application secret, or local Kubernetes etcd.
 - EC2 uses its instance profile to discover the RDS endpoint and `MasterUserSecret.SecretArn`, then fetches the current credential secret into a root-owned `.env`.
-- The application secret contains JWT, OAuth, OpenAI, and GHCR values only. It must never duplicate the RDS password.
+- The application secret contains JWT, OAuth, OpenAI, runtime metadata, and internal service URLs. Public GHCR images require no token. It must never duplicate the RDS password.
 - A systemd credential-refresh timer detects RDS secret rotation, atomically replaces the DB variables, and recreates the gateway container after a successful health check.
 
 **AWS control-plane and dashboard deployment decision (2026-06-11):**
@@ -284,9 +284,15 @@ graph TD
   ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
 
 **AWS composition and bootstrap completion (2026-06-11):**
-- The production render contains 44 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.
+- The production render contains 45 managed resources plus the XR, including explicit route/association, RDS subnet/security wiring, EC2 instance profile/EIP association, S3 versioning/KMS encryption, scoped role policies, and an automatic RDS budget stop action.
 - EC2 schedules invoke AWS-managed SSM Automation documents by the `Name=quorum-prod` tag; no generated instance ID or account ARN is hardcoded.
-- Fresh AL2023 bootstrap pins checksum-verified Docker Compose `v5.1.4`, shell-quotes secret values, logs in to GHCR with password-stdin, and applies the idempotent PostgreSQL schema before containers start.
+- Fresh AL2023 bootstrap pins checksum-verified Docker Compose `v5.1.4`, shell-quotes secret values, pulls the public GHCR images anonymously, and applies the idempotent PostgreSQL schema before containers start.
+
+**AWS production reconciliation fixes (2026-06-12):**
+- `spec.compute.amiId` is a required literal `ami-...` value. The namespaced Upbound `Instance` CRD does not resolve an SSM AMI alias, so resolve the public parameter before updating the canonical XR.
+- Provider AWS `v2.5.0` uses combined `SecurityGroupRule` resources for the four production rules; the split ingress/egress resources failed with `Missing Resource Identity After Read`.
+- `spec.database.identifier` is the single RDS identifier used by the managed resource, bootstrap, RDS schedules, and budget action. Legacy RDS instances may keep a generated identifier.
+- Bootstrap loads the application secret before resolving `DB_INSTANCE_ID`, creates `quorum_audit` when absent, and then applies the idempotent schema.
 
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 

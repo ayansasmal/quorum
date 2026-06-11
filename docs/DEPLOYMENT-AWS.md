@@ -52,6 +52,13 @@ The XR publishes `status.elasticIp`, `status.instanceId`, and `status.rdsEndpoin
 resources reconcile. `./crossplane/deploy.sh status` shows the XR, those outputs, every managed
 resource, current non-ready condition messages, and the 20 most recent warning events.
 
+The EC2 resource uses the literal Sydney ARM64 Amazon Linux 2023 AMI ID from
+`spec.compute.amiId`. The Upbound `Instance` resource does not resolve the
+`resolve:ssm:/aws/service/ami-amazon-linux-latest/...` convention; resolve the AWS public SSM
+parameter before changing the XR, then commit the resulting `ami-...` value. Security group rules
+use the combined `SecurityGroupRule` kind because the split ingress/egress resources in provider
+`v2.5.0` can fail observation with `Missing Resource Identity After Read`.
+
 ## Operator Deployment Order
 
 The following steps are operator-run and intentionally excluded from tests.
@@ -105,9 +112,21 @@ The following steps are operator-run and intentionally excluded from tests.
 
 4. Create `quorum/prod/gateway` in AWS Secrets Manager from the local, gitignored `.env.prod`.
    Do not print the file or commit generated JSON. The secret contains application values only:
-   JWT, GitHub OAuth, OpenAI, and `GHCR_USERNAME` / `GHCR_TOKEN`. RDS owns its master password
-   separately. Bootstrap writes values as shell-escaped assignments and authenticates to GHCR with
-   `--password-stdin`.
+   JWT, GitHub OAuth, OpenAI, runtime image tags, internal service URLs, and other non-database
+   runtime settings. The public GHCR images require no GitHub credential. RDS owns its master
+   password separately. Bootstrap writes values as shell-escaped assignments.
+
+   Existing RDS instances created before the stable `quorum-prod` external name was applied may
+   retain a generated identifier. Add that non-secret value as `DB_INSTANCE_ID` in the application
+   secret:
+
+   ```bash
+   aws rds describe-db-instances --region ap-southeast-2 \
+     --query 'DBInstances[].DBInstanceIdentifier' --output table
+   ```
+
+   Set `spec.database.identifier` to the same value. The naming convention for a fresh deployment is
+   `quorum-prod`.
 
 5. Upload the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under the live prefix:
 
@@ -173,7 +192,7 @@ Scheduled auto-start is disabled. Export the resource identifiers, then resume o
 
 ```bash
 export AWS_REGION=ap-southeast-2
-export DB_INSTANCE_ID=quorum-prod
+export DB_INSTANCE_ID=<value returned by aws rds describe-db-instances>
 export EC2_INSTANCE_ID=$(kubectl get xquorumenvironment quorum-prod -n quorum-system -o jsonpath='{.status.instanceId}')
 export GATEWAY_URL=https://quorum-gateway.ayansasmal.work
 ./crossplane/ops/quorum-resume.sh
@@ -212,10 +231,11 @@ RDS generates the master credential in AWS Secrets Manager. The EC2 instance pro
 endpoint and managed-secret ARN, then writes database variables to `/etc/quorum/quorum.env` with mode
 `0600`. `quorum-credential-refresh.timer` repeats this every 15 minutes so password rotation does not
 require a redeploy. On first boot, AL2023 installs Docker, `jq`, PostgreSQL client tools, and the
-checksum-verified ARM64 Docker Compose `v5.1.4` plugin. The bootstrap applies `init-db.sql` with
-`ON_ERROR_STOP` before starting containers.
+checksum-verified ARM64 Docker Compose `v5.1.4` plugin. The bootstrap creates `quorum_audit` when
+missing, then applies `init-db.sql` with `ON_ERROR_STOP` before starting containers.
 
-The application secret must never contain `POSTGRES_PASSWORD`.
+The application secret must never contain `POSTGRES_PASSWORD`. `DB_INSTANCE_ID` is an AWS resource
+identifier, not a credential.
 
 ## Updating The Bootstrap
 
@@ -281,8 +301,8 @@ logs take over.
 - AWS Budgets automatic action: stop the RDS instance at the configured action threshold.
 
 EC2 schedules call the AWS-managed `AWS-StopEC2Instance` and `AWS-StartEC2Instance` Automation
-documents using the stable `Name=quorum-prod` tag. RDS schedules use the stable `quorum-prod`
-database identifier.
+documents using the stable `Name=quorum-prod` tag. RDS schedules and the budget action use
+`spec.database.identifier`, which must match the actual DB identifier.
 
 AWS Budgets does not constrain OpenAI organization spend. Configure the OpenAI usage limit separately.
 

@@ -90,4 +90,31 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
       start.indexOf('docker compose -f /opt/quorum/docker-compose.aws.yml up -d'),
     )
   })
+
+  it('loads static runtime configuration before refreshing RDS credentials', () => {
+    /** Production stack startup source under test. */
+    const start = readFileSync('crossplane/bootstrap/start.sh', 'utf8')
+    /** First load of the application secret-backed environment file. */
+    const sourcePosition = start.indexOf('source /etc/quorum/quorum.env')
+    /** RDS credential refresh that requires DB_INSTANCE_ID. */
+    const refreshPosition = start.indexOf('/opt/quorum/refresh-rds-credentials.sh')
+
+    expect(sourcePosition).toBeGreaterThan(-1)
+    expect(sourcePosition).toBeLessThan(refreshPosition)
+    expect(start.indexOf(': "${DB_INSTANCE_ID:=quorum-prod}"')).toBeGreaterThan(sourcePosition)
+  })
+
+  it('creates the application database before applying its schema', () => {
+    /** Production stack startup source under test. */
+    const start = readFileSync('crossplane/bootstrap/start.sh', 'utf8')
+    /** Idempotent database creation command. */
+    const createPosition = start.indexOf('createdb')
+    /** Schema application command. */
+    const schemaPosition = start.indexOf('--file /opt/quorum/init-db.sql')
+
+    expect(start).toContain('FROM pg_database')
+    expect(start).toContain('^[a-zA-Z_][a-zA-Z0-9_]*$')
+    expect(createPosition).toBeGreaterThan(-1)
+    expect(createPosition).toBeLessThan(schemaPosition)
+  })
 })

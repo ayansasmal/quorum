@@ -160,14 +160,15 @@ spec:
           - name: app-http-ingress
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
-              kind: SecurityGroupIngressRule
+              kind: SecurityGroupRule
               spec:
                 forProvider:
                   region: ap-southeast-2
-                  cidrIpv4: 0.0.0.0/0
+                  type: ingress
+                  cidrBlocks: [0.0.0.0/0]
                   fromPort: 80
                   toPort: 80
-                  ipProtocol: tcp
+                  protocol: tcp
                   securityGroupIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/security-group: app }
@@ -175,14 +176,15 @@ spec:
           - name: app-https-ingress
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
-              kind: SecurityGroupIngressRule
+              kind: SecurityGroupRule
               spec:
                 forProvider:
                   region: ap-southeast-2
-                  cidrIpv4: 0.0.0.0/0
+                  type: ingress
+                  cidrBlocks: [0.0.0.0/0]
                   fromPort: 443
                   toPort: 443
-                  ipProtocol: tcp
+                  protocol: tcp
                   securityGroupIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/security-group: app }
@@ -190,12 +192,15 @@ spec:
           - name: app-egress
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
-              kind: SecurityGroupEgressRule
+              kind: SecurityGroupRule
               spec:
                 forProvider:
                   region: ap-southeast-2
-                  cidrIpv4: 0.0.0.0/0
-                  ipProtocol: "-1"
+                  type: egress
+                  cidrBlocks: [0.0.0.0/0]
+                  fromPort: 0
+                  toPort: 0
+                  protocol: "-1"
                   securityGroupIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/security-group: app }
@@ -217,17 +222,18 @@ spec:
           - name: database-ingress
             base:
               apiVersion: ec2.aws.m.upbound.io/v1beta1
-              kind: SecurityGroupIngressRule
+              kind: SecurityGroupRule
               spec:
                 forProvider:
                   region: ap-southeast-2
+                  type: ingress
                   fromPort: 5432
                   toPort: 5432
-                  ipProtocol: tcp
+                  protocol: tcp
                   securityGroupIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/security-group: database }
-                  referencedSecurityGroupIdSelector:
+                  sourceSecurityGroupIdSelector:
                     matchControllerRef: true
                     matchLabels: { quorum.io/security-group: app }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
@@ -399,6 +405,7 @@ spec:
                   finalSnapshotIdentifier: quorum-prod-final
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
             patches:
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.identifier", toFieldPath: "metadata.annotations[crossplane.io/external-name]" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.engineVersion", toFieldPath: "spec.forProvider.engineVersion" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.instanceClass", toFieldPath: "spec.forProvider.instanceClass" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.allocatedStorageGiB", toFieldPath: "spec.forProvider.allocatedStorage" }
@@ -512,7 +519,7 @@ spec:
               spec:
                 forProvider:
                   region: ap-southeast-2
-                  ami: resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+                  ami: ami-00000000000000000
                   instanceType: t4g.large
                   iamInstanceProfile: quorum-prod-instance
                   # Minimal boot stub: the real bootstrap lives in S3 so scripts can be
@@ -543,6 +550,7 @@ spec:
                   tags: { Name: quorum-prod, Environment: prod }
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
             patches:
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.compute.amiId", toFieldPath: "spec.forProvider.ami" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.compute.instanceType", toFieldPath: "spec.forProvider.instanceType" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.compute.rootVolumeGiB", toFieldPath: "spec.forProvider.rootBlockDevice.volumeSize" }
               # Surface the instance ID for ops scripts (EC2_INSTANCE_ID) and SSM targeting.
@@ -616,6 +624,15 @@ spec:
                       matchLabels: { quorum.io/role: scheduler }
                     input: '{"DbInstanceIdentifier":"quorum-prod"}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+            patches:
+              - type: CombineFromComposite
+                toFieldPath: spec.forProvider.target.input
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: spec.database.identifier
+                  string:
+                    fmt: '{"DbInstanceIdentifier":"%s"}'
           - name: ec2-start-schedule
             base:
               <<: *stopSchedule
@@ -650,6 +667,15 @@ spec:
                       matchLabels: { quorum.io/role: scheduler }
                     input: '{"DbInstanceIdentifier":"quorum-prod"}'
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
+            patches:
+              - type: CombineFromComposite
+                toFieldPath: spec.forProvider.target.input
+                combine:
+                  strategy: string
+                  variables:
+                    - fromFieldPath: spec.database.identifier
+                  string:
+                    fmt: '{"DbInstanceIdentifier":"%s"}'
           - name: monthly-budget
             base:
               apiVersion: budgets.aws.m.upbound.io/v1beta1
@@ -708,3 +734,4 @@ spec:
             patches:
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.actionThresholdPercent", toFieldPath: "spec.forProvider.actionThreshold.actionThresholdValue" }
               - { type: FromCompositeFieldPath, fromFieldPath: "spec.budget.notifyEmail", toFieldPath: "spec.forProvider.subscriber[0].address" }
+              - { type: FromCompositeFieldPath, fromFieldPath: "spec.database.identifier", toFieldPath: "spec.forProvider.definition.ssmActionDefinition.instanceIds[0]" }

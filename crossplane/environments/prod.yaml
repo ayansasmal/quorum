@@ -16,6 +16,7 @@ spec:
     capacityType: on-demand
     rootVolumeGiB: 30
     arch: arm64
+    amiId: ami-07f95dfb1e3d841ce
   schedule:
     timezone: Australia/Sydney
     autoStop:
@@ -34,6 +35,7 @@ spec:
     intervalMinutes: 60
     restoreOnBoot: true
   database:
+    identifier: terraform-20260611200930242900000002
     engineVersion: "16"
     instanceClass: db.t4g.micro
     allocatedStorageGiB: 20

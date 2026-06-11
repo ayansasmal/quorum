@@ -40,6 +40,8 @@ describe('S-DEPLOY XRD input schema', () => {
     ['region', (spec) => { spec.region = 'us-east-1' }],
     ['architecture', (spec) => { spec.compute.arch = 'x86_64' }],
     ['capacity type', (spec) => { spec.compute.capacityType = 'spot' }],
+    ['AMI ID', (spec) => { spec.compute.amiId = 'resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-arm64' }],
+    ['database identifier', (spec) => { spec.database.identifier = 'Invalid Identifier' }],
     ['email', (spec) => { spec.budget.notifyEmail = 'invalid' }],
   ])('rejects an invalid %s', (_name, mutate) => {
     const validate = ajv.compile(specSchema())

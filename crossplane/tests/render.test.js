@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
 
 /** Cached render output so the composition function runs once per test file. */
@@ -29,7 +30,7 @@ describe('S-DEPLOY composition render', () => {
       'Instance', 'EIP', 'Group', 'Role', 'Schedule', 'Budget',
       'Route', 'RouteTableAssociation', 'SubnetGroup', 'InstanceProfile',
       'RolePolicy', 'RolePolicyAttachment', 'EIPAssociation', 'BucketVersioning',
-      'BucketServerSideEncryptionConfiguration', 'BudgetAction',
+      'BucketServerSideEncryptionConfiguration', 'BudgetAction', 'SecurityGroupRule',
     ]) {
       expect(kinds).toContain(kind)
     }
@@ -68,6 +69,30 @@ describe('S-DEPLOY composition render', () => {
     expect(database.spec.forProvider.vpcSecurityGroupIdSelector.matchLabels).toEqual({ 'quorum.io/security-group': 'database' })
     expect(application.spec.forProvider.iamInstanceProfile).toBe('quorum-prod-instance')
     expect(documents.filter((document) => document.kind === 'EIPAssociation')).toHaveLength(1)
+  }, 30000)
+
+  it('uses the explicit production AMI and provider-compatible security group rules', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** Canonical production environment input. */
+    const environment = yaml.load(readFileSync('crossplane/environments/prod.yaml', 'utf8'))
+    /** EC2 application instance. */
+    const application = documents.find((document) => (
+      document.apiVersion.startsWith('ec2.') && document.kind === 'Instance'
+    ))
+    /** Combined security group rule resources supported by provider-aws v2.5.0. */
+    const rules = documents.filter((document) => document.kind === 'SecurityGroupRule')
+
+    expect(application.spec.forProvider.ami).toBe(environment.spec.compute.amiId)
+    expect(application.spec.forProvider.ami).toMatch(/^ami-[0-9a-f]+$/)
+    expect(rules).toHaveLength(4)
+    expect(documents.some((document) => document.kind === 'SecurityGroupIngressRule')).toBe(false)
+    expect(documents.some((document) => document.kind === 'SecurityGroupEgressRule')).toBe(false)
+    expect(rules.filter((rule) => rule.spec.forProvider.type === 'ingress')).toHaveLength(3)
+    expect(rules.filter((rule) => rule.spec.forProvider.type === 'egress')).toHaveLength(1)
+    expect(rules.find((rule) => rule.spec.forProvider.fromPort === 5432)
+      .spec.forProvider.sourceSecurityGroupIdSelector.matchLabels)
+      .toEqual({ 'quorum.io/security-group': 'app' })
   }, 30000)
 
   it('boots the instance from an S3-hosted bootstrap, not an inline blob', () => {
@@ -121,5 +146,31 @@ describe('S-DEPLOY composition render', () => {
     expect(schedules.every((schedule) => schedule.spec.forProvider.target.roleArnSelector)).toBe(true)
     expect(action.spec.forProvider.approvalModel).toBe('AUTOMATIC')
     expect(action.spec.forProvider.definition.ssmActionDefinition.actionSubType).toBe('STOP_RDS_INSTANCES')
+  }, 30000)
+
+  it('targets the configured RDS identifier everywhere', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** Canonical production environment input. */
+    const environment = yaml.load(readFileSync('crossplane/environments/prod.yaml', 'utf8'))
+    /** Environment-specific RDS identifier. */
+    const identifier = environment.spec.database.identifier
+    /** RDS database instance. */
+    const database = documents.find((document) => (
+      document.apiVersion.startsWith('rds.') && document.kind === 'Instance'
+    ))
+    /** RDS EventBridge schedules. */
+    const schedules = documents.filter((document) => (
+      document.kind === 'Schedule' && document.spec.forProvider.target.arn.includes('rds:')
+    ))
+    /** Automatic RDS budget stop action. */
+    const action = documents.find((document) => document.kind === 'BudgetAction')
+
+    expect(database.metadata.annotations['crossplane.io/external-name']).toBe(identifier)
+    expect(schedules).toHaveLength(2)
+    expect(schedules.every((schedule) => (
+      JSON.parse(schedule.spec.forProvider.target.input).DbInstanceIdentifier === identifier
+    ))).toBe(true)
+    expect(action.spec.forProvider.definition.ssmActionDefinition.instanceIds).toEqual([identifier])
   }, 30000)
 })
