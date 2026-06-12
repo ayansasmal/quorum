@@ -47,4 +47,19 @@ describe('S-DEPLOY production compose stack', () => {
     expect(services).not.toContain('localstack')
     expect(services.some((service) => service.includes('dashboard'))).toBe(false)
   })
+
+  it('mounts the AWS RDS CA bundle into every gateway-based service', () => {
+    /** Normalized production Compose services. */
+    const services = composeConfig().services
+    /** Gateway image services that connect to PostgreSQL. */
+    const gatewayServices = ['gateway', 'decay-job', 'archive-job', 'recheck-job']
+
+    for (const service of gatewayServices) {
+      expect(services[service].volumes).toContainEqual(expect.objectContaining({
+        source: '/etc/quorum/rds-global-bundle.pem',
+        target: '/etc/quorum/rds-global-bundle.pem',
+        read_only: true,
+      }))
+    }
+  })
 })

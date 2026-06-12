@@ -135,7 +135,11 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
   it('enables TLS for gateway connections to RDS', () => {
     /** RDS credential refresh source under test. */
     const refresh = readFileSync('crossplane/bootstrap/refresh-rds-credentials.sh', 'utf8')
+    /** Production stack startup source under test. */
+    const start = readFileSync('crossplane/bootstrap/start.sh', 'utf8')
 
     expect(refresh).toContain("printf 'POSTGRES_SSL=true")
+    expect(refresh).toContain("printf 'NODE_EXTRA_CA_CERTS=/etc/quorum/rds-global-bundle.pem")
+    expect(start).toContain('https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem')
   })
 })

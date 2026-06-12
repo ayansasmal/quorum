@@ -12,6 +12,9 @@ echo "[quorum] $(date '+%Y-%m-%dT%H:%M:%S%z') start $(basename "${BASH_SOURCE[0]
 : "${AWS_REGION:?}" "${APP_SECRET_ID:=quorum/prod/gateway}"
 install -d -o root -g root -m 0700 /etc/quorum
 install -d -o root -g root -m 0755 /opt/quorum
+curl -fsSLo /etc/quorum/rds-global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+chmod 0644 /etc/quorum/rds-global-bundle.pem
 
 SECRET="$(aws secretsmanager get-secret-value --secret-id "${APP_SECRET_ID}" --region "${AWS_REGION}" --query SecretString --output text)"
 jq -r 'to_entries[] | "\(.key)=\(.value | @sh)"' <<<"${SECRET}" > /etc/quorum/quorum.env.tmp

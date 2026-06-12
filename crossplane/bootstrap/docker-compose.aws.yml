@@ -22,6 +22,8 @@ services:
     image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
     restart: unless-stopped
     env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    volumes:
+      - /etc/quorum/rds-global-bundle.pem:/etc/quorum/rds-global-bundle.pem:ro
     depends_on: [falkordb, redis, graphiti]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit([200,503].includes(r.status)?0:1)).catch(()=>process.exit(1))"]
@@ -56,16 +58,22 @@ services:
     image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
     profiles: [jobs]
     env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    volumes:
+      - /etc/quorum/rds-global-bundle.pem:/etc/quorum/rds-global-bundle.pem:ro
     command: ["npm", "run", "job:decay"]
   archive-job:
     image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
     profiles: [jobs]
     env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    volumes:
+      - /etc/quorum/rds-global-bundle.pem:/etc/quorum/rds-global-bundle.pem:ro
     command: ["npm", "run", "job:archive"]
   recheck-job:
     image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
     profiles: [jobs]
     env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
+    volumes:
+      - /etc/quorum/rds-global-bundle.pem:/etc/quorum/rds-global-bundle.pem:ro
     command: ["npm", "run", "job:recheck"]
 volumes:
   caddy_data:
