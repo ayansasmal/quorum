@@ -147,7 +147,7 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
     /** RDS credential refresh source under test. */
     const refresh = readFileSync('crossplane/bootstrap/refresh-rds-credentials.sh', 'utf8')
 
-    expect(refresh).toContain("PASSWORD_QUOTED=\"$(jq -Rn --arg value \"${PASSWORD}\" '$value | @sh')\"")
+    expect(refresh).toContain("PASSWORD_QUOTED=\"$(jq -Rrn --arg value \"${PASSWORD}\" '$value | @sh')\"")
     expect(refresh).toContain("printf 'POSTGRES_PASSWORD=%s")
     expect(refresh).not.toContain("printf 'POSTGRES_PASSWORD=%q")
   })

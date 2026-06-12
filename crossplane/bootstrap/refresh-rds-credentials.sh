@@ -21,7 +21,7 @@ SECRET_ARN="$(jq -r '.DBInstances[0].MasterUserSecret.SecretArn' <<<"${DESCRIPTI
 SECRET="$(aws secretsmanager get-secret-value --secret-id "${SECRET_ARN}" --region "${AWS_REGION}" --query SecretString --output text)"
 USER="$(jq -r '.username' <<<"${SECRET}")"
 PASSWORD="$(jq -r '.password' <<<"${SECRET}")"
-PASSWORD_QUOTED="$(jq -Rn --arg value "${PASSWORD}" '$value | @sh')"
+PASSWORD_QUOTED="$(jq -Rrn --arg value "${PASSWORD}" '$value | @sh')"
 
 grep -v -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_SSL|NODE_EXTRA_CA_CERTS)=' "${ENV_FILE}" >"${TMP}" || true
 {
