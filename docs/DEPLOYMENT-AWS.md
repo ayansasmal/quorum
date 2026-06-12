@@ -237,6 +237,8 @@ images, and then run `docker logout ghcr.io`. The token must not include `repo`,
 RDS generates the master credential in AWS Secrets Manager. The EC2 instance profile reads the RDS
 endpoint and managed-secret ARN, then writes database variables to `/etc/quorum/quorum.env` with mode
 `0600`, including `POSTGRES_SSL=true` so the gateway uses encrypted RDS connections.
+The generated password is serialized with single-quoted env-file syntax so special characters are
+interpreted identically by Bash and Docker Compose.
 Bootstrap downloads AWS's global RDS CA bundle from
 `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`, mounts it read-only into
 gateway-based containers, and sets `NODE_EXTRA_CA_CERTS` so certificate verification remains enabled.

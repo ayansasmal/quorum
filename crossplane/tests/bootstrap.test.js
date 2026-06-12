@@ -142,4 +142,13 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
     expect(refresh).toContain("printf 'NODE_EXTRA_CA_CERTS=/etc/quorum/rds-global-bundle.pem")
     expect(start).toContain('https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem')
   })
+
+  it('quotes the generated RDS password for both Bash and Docker Compose', () => {
+    /** RDS credential refresh source under test. */
+    const refresh = readFileSync('crossplane/bootstrap/refresh-rds-credentials.sh', 'utf8')
+
+    expect(refresh).toContain("PASSWORD_QUOTED=\"$(jq -Rn --arg value \"${PASSWORD}\" '$value | @sh')\"")
+    expect(refresh).toContain("printf 'POSTGRES_PASSWORD=%s")
+    expect(refresh).not.toContain("printf 'POSTGRES_PASSWORD=%q")
+  })
 })

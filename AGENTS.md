@@ -299,6 +299,7 @@ graph TD
 - `crossplane/deploy.sh apply` is complete only after XR readiness, bootstrap upload, successful SSM execution, and the instance-local gateway health check.
 - SSM execution uses explicit status polling for up to 10 minutes; the AWS CLI `command-executed` waiter is shorter than the gateway health retry window.
 - RDS credential refresh writes `POSTGRES_SSL=true`; production gateway connections must remain encrypted.
+- RDS passwords must be serialized with `jq @sh`, not Bash `%q`; `/etc/quorum/quorum.env` is consumed by both Bash and Docker Compose, whose backslash escaping rules differ.
 - Bootstrap downloads the AWS global RDS CA bundle, mounts it read-only into every gateway-image service, and sets `NODE_EXTRA_CA_CERTS`; do not disable certificate verification to make RDS TLS work.
 - `crossplane/deploy.sh destroy` empties every deploy-bucket object version, requests XR deletion, and waits until all namespaced managed resources are actually gone.
 - RDS teardown keeps one rolling final snapshot named `quorum-prod-final`; after typed confirmation, destroy deletes the previous snapshot before XR deletion so the current RDS instance can create its replacement without `DBSnapshotAlreadyExists`.
