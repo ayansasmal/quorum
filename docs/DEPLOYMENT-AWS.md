@@ -119,6 +119,16 @@ The following steps are operator-run and intentionally excluded from tests.
    runtime settings. The public GHCR images require no GitHub credential. RDS owns its master
    password separately. Bootstrap writes values as shell-escaped assignments.
 
+   > **Image tags are consumed only from this secret, not from the XR.** `start.sh` expands the
+   > entire secret into `/etc/quorum/quorum.env`, and `docker-compose.aws.yml` reads
+   > `IMAGE_REGISTRY`, `GATEWAY_TAG`, and `GRAPHITI_TAG` from there — these three keys must be
+   > present in the secret. The XR's `spec.images.*` block is required by the XRD schema but is
+   > **not wired into the Composition**; editing `gatewayTag`/`graphitiTag` in `prod.yaml` and
+   > reapplying changes nothing on the box. A missing tag key surfaces as an unhelpful
+   > `image: ghcr.io/ayansasmal/quorum-gateway:` pull failure at boot. Note `graphitiTag: "0.4.x"`
+   > is a **floating** tag — re-bootstrapping a box can pull a different graphiti build; pin a
+   > concrete tag if reproducibility matters.
+
    The application secret does not control the RDS resource identifier. Production bootstrap uses
    the canonical `quorum-prod` identifier, matching `spec.database.identifier`, schedules, and budget
    actions. An explicit operator override may use `QUORUM_DB_INSTANCE_ID`, but stale
@@ -179,8 +189,29 @@ The following steps are operator-run and intentionally excluded from tests.
    ```
 
 9. In Vercel DNS, replace the placeholder A record for `quorum-gateway.ayansasmal.work` with that EIP.
+   Every `destroy`/`apply` cycle allocates a **new** EIP, so this record is stale after any rebuild —
+   confirm it resolves before expecting TLS: `dig +short quorum-gateway.ayansasmal.work`.
 
-10. Wait for Caddy to complete ACME HTTP-01 issuance on ports 80 and 443.
+10. Wait for Caddy to complete ACME issuance (HTTP-01 / TLS-ALPN-01) on ports 80 and 443.
+
+    > **If the instance booted before DNS was correct, Caddy will not issue until its ACME backoff
+    > expires.** Caddy attempts issuance on startup; while the A record still points elsewhere (e.g.
+    > the placeholder), Let's Encrypt returns `no valid A records found` and Caddy enters an
+    > exponential backoff that outlives the DNS fix. The handshake then fails with
+    > `tlsv1 alert internal error` / no peer certificate. Force an immediate retry by restarting the
+    > Caddy container over SSM (the container is named `quorum-caddy-1`; there is no inbound SSH):
+    >
+    > ```bash
+    > aws ssm send-command --region ap-southeast-2 \
+    >   --document-name AWS-RunShellScript \
+    >   --targets Key=tag:Name,Values=quorum-prod \
+    >   --parameters 'commands=["docker restart quorum-caddy-1"]'
+    > ```
+    >
+    > Inspect issuance progress with
+    > `docker logs --tail 60 quorum-caddy-1 2>&1 | grep -iE "acme|certificate|obtain"`; success ends
+    > with `certificate obtained successfully`. This only applies to a fresh `apply` with a new EIP —
+    > **resume does not change the IP** (see [Resume And Suspend](#resume-and-suspend)).
 
 11. Set the Vercel dashboard environment variable:
 
@@ -188,7 +219,43 @@ The following steps are operator-run and intentionally excluded from tests.
     QUORUM_GATEWAY_URL=https://quorum-gateway.ayansasmal.work
     ```
 
-12. Set the GitHub OAuth callback to the production gateway callback URL.
+    > Create it as a **plain** (non-sensitive) variable — the gateway URL is
+    > public, and `vercel env add` (≥ v54.x) has been observed silently storing
+    > an empty value when it defaults the var to *encrypted*, which leaves the
+    > edge proxy pointed at nothing (`502 DNS_HOSTNAME_NOT_FOUND` on every
+    > gateway path). After changing it, **redeploy** (`vercel --prod`) — env
+    > changes do not apply to an already-built deployment.
+
+12. Align the GitHub OAuth callback URL across **all three** places — they must
+    be byte-identical, and the demo uses the single shared callback route
+    `/oauth/callback` (handled in `routes/mcp-oauth.js`, **not**
+    `/auth/github/callback`):
+
+    | Where | Value |
+    |-------|-------|
+    | GitHub OAuth App → Authorization callback URL | `https://quorum-gateway.ayansasmal.work/oauth/callback` |
+    | `GITHUB_CALLBACK_URL` in secret `quorum/prod/gateway` | `https://quorum-gateway.ayansasmal.work/oauth/callback` |
+    | Gateway route (code) | already `/oauth/callback` — no change |
+
+    The gateway only reads `GITHUB_CALLBACK_URL` from `/etc/quorum/quorum.env`,
+    which `start.sh` regenerates from the secret **at container start**. After
+    editing the secret, reload it — a bare `docker restart` is not enough:
+
+    ```bash
+    # AWS_REGION must be exported: start.sh fails fast on `: "${AWS_REGION:?}"`
+    # before it can fetch the secret, and an SSM shell has no boot environment.
+    aws ssm send-command --region ap-southeast-2 \
+      --document-name AWS-RunShellScript \
+      --targets Key=tag:Name,Values=quorum-prod \
+      --parameters 'commands=["export AWS_REGION=ap-southeast-2","/opt/quorum/start.sh"]'
+    ```
+
+    or use the helper: `AWS_REGION=ap-southeast-2 ./crossplane/ops/quorum-restart.sh full`.
+
+    Verify the round-trip: the `redirect_uri` emitted by
+    `curl -sI https://quorum-gateway.ayansasmal.work/auth/github` must point at
+    `/oauth/callback`, and `GET /oauth/callback` must return **400** (route
+    present), not **404**.
 
 13. Verify `https://quorum-gateway.ayansasmal.work/health`.
 
@@ -215,6 +282,38 @@ Suspend manually:
 Suspend requests a final S3 snapshot over SSM before stopping EC2 and RDS. The EventBridge schedules
 also stop both resources daily at 10:00 and 23:00 Australia/Sydney. To restore scheduled starts,
 set `spec.schedule.autoStart.enabled: true`, review the two start schedules, and reapply the XR.
+
+**The public IP is stable across suspend/resume.** Suspend and resume only `stop`/`start` the existing
+EC2 instance — they do not replace it. An Elastic IP stays associated with a stopped instance, so the
+instance ID and the EIP (`status.elasticIp`) are unchanged on resume, the Vercel A record stays valid,
+and Caddy reuses the certificate persisted in its `/data/caddy` volume. **Resume therefore requires no
+DNS change and no Caddy restart.** A new EIP — and the DNS update plus possible Caddy restart in
+[step 9–10](#operator-deployment-order) — is only produced by a full `destroy` + `apply`, which deletes
+and recreates the EIP resource.
+
+## Restarting The Stack
+
+To bounce the running stack on the live instance without a `destroy`/`apply`, use the operator helper.
+It drives `docker compose` on the box over SSM (no SSH), resolving the instance from its `Name=quorum-prod`
+tag, and prints `docker compose ps` when done:
+
+```bash
+export AWS_REGION=ap-southeast-2
+./crossplane/ops/quorum-restart.sh            # restart  — bounce all containers, no re-pull (fast)
+./crossplane/ops/quorum-restart.sh recreate   # recreate — up -d --force-recreate (picks up env/compose changes)
+./crossplane/ops/quorum-restart.sh full       # full     — re-run /opt/quorum/start.sh (re-pull, DB init, timers)
+```
+
+| Mode | Remote command | When to use |
+|------|----------------|-------------|
+| `restart` (default) | `docker compose restart` | A container is wedged; you want the fastest clean bounce. |
+| `recreate` | `docker compose up -d --force-recreate` | You rotated the application secret or edited `docker-compose.aws.yml` and need containers re-created with fresh env. |
+| `full` | `/opt/quorum/start.sh` | Re-pull images, re-run `init-db.sql`, restore the latest snapshot, and re-enable timers. Idempotent. |
+
+Override the target with `EC2_INSTANCE_ID` or `INSTANCE_NAME`. To restart a single service instead of the
+whole stack (for example, to re-issue TLS after a DNS change), restart that one container directly — see the
+Caddy note in [step 10](#operator-deployment-order). This helper never touches AWS infrastructure; it only
+acts on containers already on the instance.
 
 ## Credentials And Rotation
 
@@ -336,3 +435,18 @@ timeout. RDS uses a rolling final snapshot named `quorum-prod-final`: after type
 destroy removes the previous snapshot and waits for its deletion so the current database deletion
 can create the replacement. The externally managed `quorum/prod/gateway` secret and Vercel DNS
 record are retained.
+
+**Confirm billable resources are actually gone.** Crossplane deletion is asynchronous, and a deleted
+XR object in Kubernetes (`NotFound` on re-run) does **not** prove the AWS resources are released — an
+**unassociated Elastic IP keeps billing**, as do a lingering EC2 instance or RDS database. After
+`destroy` reports completion, verify directly against AWS (these should all return empty):
+
+```bash
+aws ec2 describe-addresses --region ap-southeast-2 \
+  --filters Name=tag:Name,Values=quorum-prod --query 'Addresses[].PublicIp'
+aws ec2 describe-instances --region ap-southeast-2 \
+  --filters Name=tag:Name,Values=quorum-prod Name=instance-state-name,Values=running,stopped \
+  --query 'Reservations[].Instances[].InstanceId'
+aws rds describe-db-instances --region ap-southeast-2 \
+  --query "DBInstances[?DBInstanceIdentifier=='quorum-prod'].DBInstanceStatus"
+```
