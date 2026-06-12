@@ -65,6 +65,7 @@ if [[ -n "${GHCR_USERNAME:-}" && -n "${GHCR_TOKEN:-}" ]]; then
 fi
 docker compose -f /opt/quorum/docker-compose.aws.yml pull
 docker compose -f /opt/quorum/docker-compose.aws.yml up -d
+install -m 0644 /opt/quorum/systemd/* /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now quorum-credential-refresh.timer quorum-snapshot.timer \
   quorum-decay.timer quorum-archive.timer quorum-recheck.timer

@@ -119,4 +119,16 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
     expect(createPosition).toBeGreaterThan(-1)
     expect(createPosition).toBeLessThan(schemaPosition)
   })
+
+  it('installs downloaded systemd units before enabling timers', () => {
+    /** Production stack startup source under test. */
+    const start = readFileSync('crossplane/bootstrap/start.sh', 'utf8')
+    /** Unit installation command. */
+    const installPosition = start.indexOf('install -m 0644 /opt/quorum/systemd/* /etc/systemd/system/')
+    /** Timer activation command. */
+    const enablePosition = start.indexOf('systemctl enable --now quorum-credential-refresh.timer')
+
+    expect(installPosition).toBeGreaterThan(-1)
+    expect(installPosition).toBeLessThan(enablePosition)
+  })
 })

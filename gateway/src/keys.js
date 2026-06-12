@@ -8,8 +8,8 @@
  * In production, QUORUM_JWT_PRIVATE_KEY and QUORUM_JWT_PUBLIC_KEY MUST be set.
  * Generate a key pair once and store securely (AWS Secrets Manager, Vault, etc.):
  *
- *   openssl ecparam -genkey -name prime256v1 -noout -out private.pem
- *   openssl ec -in private.pem -pubout -out public.pem
+ *   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out private.pem
+ *   openssl pkey -in private.pem -pubout -out public.pem
  *   # Base64-encode for env vars:
  *   base64 -i private.pem   → QUORUM_JWT_PRIVATE_KEY
  *   base64 -i public.pem    → QUORUM_JWT_PUBLIC_KEY

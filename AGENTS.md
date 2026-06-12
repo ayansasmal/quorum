@@ -294,6 +294,8 @@ graph TD
 - `spec.database.identifier` is the single RDS identifier used by the managed resource, bootstrap, RDS schedules, and budget action. Fresh production deployments use the stable `quorum-prod` identifier.
 - The RDS Composition must patch `spec.database.identifier` into both `spec.forProvider.identifier` and `metadata.annotations[crossplane.io/external-name]`; the annotation alone allows the provider to generate a `terraform-...` identifier during creation.
 - Bootstrap loads the application secret before resolving the canonical RDS identifier, ignores stale `DB_INSTANCE_ID` secret values, creates `quorum_audit` when absent, and then applies the idempotent schema.
+- Bootstrap installs downloaded service and timer units from `/opt/quorum/systemd` into `/etc/systemd/system` before enabling them.
+- `QUORUM_JWT_PRIVATE_KEY` is base64-encoded PKCS#8 PEM. `openssl ecparam -genkey` emits incompatible SEC1; use `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256`.
 - `crossplane/deploy.sh apply` is complete only after XR readiness, bootstrap upload, successful SSM execution, and the instance-local gateway health check.
 - `crossplane/deploy.sh destroy` empties every deploy-bucket object version, requests XR deletion, and waits until all namespaced managed resources are actually gone.
 - RDS teardown keeps one rolling final snapshot named `quorum-prod-final`; after typed confirmation, destroy deletes the previous snapshot before XR deletion so the current RDS instance can create its replacement without `DBSnapshotAlreadyExists`.

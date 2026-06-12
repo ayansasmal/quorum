@@ -126,6 +126,10 @@ The following steps are operator-run and intentionally excluded from tests.
    provider's `spec.forProvider.identifier` and its external-name annotation; the annotation alone
    does not control the AWS identifier during creation.
 
+   `QUORUM_JWT_PRIVATE_KEY` must be base64-encoded PKCS#8 PEM (`BEGIN PRIVATE KEY`), not SEC1
+   (`BEGIN EC PRIVATE KEY`). Generate it with `openssl genpkey -algorithm EC
+   -pkeyopt ec_paramgen_curve:P-256`; the gateway decodes the value before calling `importPKCS8`.
+
 5. The apply command uploads the reviewed `crossplane/bootstrap/` bundle to the deploy bucket under
    the live prefix after Crossplane reports the infrastructure ready:
 
