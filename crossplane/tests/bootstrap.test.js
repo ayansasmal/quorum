@@ -131,4 +131,11 @@ describe('S-DEPLOY bootstrap and ops scripts', () => {
     expect(installPosition).toBeGreaterThan(-1)
     expect(installPosition).toBeLessThan(enablePosition)
   })
+
+  it('enables TLS for gateway connections to RDS', () => {
+    /** RDS credential refresh source under test. */
+    const refresh = readFileSync('crossplane/bootstrap/refresh-rds-credentials.sh', 'utf8')
+
+    expect(refresh).toContain("printf 'POSTGRES_SSL=true")
+  })
 })

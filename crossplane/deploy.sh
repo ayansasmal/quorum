@@ -79,7 +79,7 @@ run_ssm_commands() {
   local instance_id="$1"
   local comment="$2"
   shift 2
-  local parameters command_id invocation_status
+  local parameters command_id invocation_status attempt
 
   parameters="$(printf '%s\n' "$@" | jq -Rsc 'split("\n")[:-1] | {commands: .}')"
   command_id="$(
@@ -93,19 +93,27 @@ run_ssm_commands() {
       --output text
   )"
 
-  aws ssm wait command-executed \
-    --region "${AWS_REGION}" \
-    --command-id "${command_id}" \
-    --instance-id "${instance_id}" || true
+  invocation_status="Pending"
+  for attempt in {1..120}; do
+    invocation_status="$(
+      aws ssm get-command-invocation \
+        --region "${AWS_REGION}" \
+        --command-id "${command_id}" \
+        --instance-id "${instance_id}" \
+        --query Status \
+        --output text 2>/dev/null || echo Pending
+    )"
+    case "${invocation_status}" in
+      Pending|InProgress|Delayed) sleep 5 ;;
+      *) break ;;
+    esac
+  done
 
-  invocation_status="$(
-    aws ssm get-command-invocation \
-      --region "${AWS_REGION}" \
-      --command-id "${command_id}" \
-      --instance-id "${instance_id}" \
-      --query Status \
-      --output text
-  )"
+  if [[ "${invocation_status}" =~ ^(Pending|InProgress|Delayed)$ ]]; then
+    echo "SSM command ${command_id} did not finish within 10 minutes" >&2
+    exit 1
+  fi
+
   aws ssm get-command-invocation \
     --region "${AWS_REGION}" \
     --command-id "${command_id}" \

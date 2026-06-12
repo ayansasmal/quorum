@@ -22,11 +22,12 @@ SECRET="$(aws secretsmanager get-secret-value --secret-id "${SECRET_ARN}" --regi
 USER="$(jq -r '.username' <<<"${SECRET}")"
 PASSWORD="$(jq -r '.password' <<<"${SECRET}")"
 
-grep -v -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_PASSWORD)=' "${ENV_FILE}" >"${TMP}" || true
+grep -v -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_SSL)=' "${ENV_FILE}" >"${TMP}" || true
 {
   printf 'POSTGRES_HOST=%q\n' "${HOST}"
   printf 'POSTGRES_PORT=%q\n' "${PORT}"
   printf 'POSTGRES_USER=%q\n' "${USER}"
   printf 'POSTGRES_PASSWORD=%q\n' "${PASSWORD}"
+  printf 'POSTGRES_SSL=true\n'
 } >>"${TMP}"
 install -o root -g root -m 0600 "${TMP}" "${ENV_FILE}"

@@ -156,7 +156,9 @@ The following steps are operator-run and intentionally excluded from tests.
    "no matches for kind ProviderConfig" race on a cold cluster. The first provider pull can take
    several minutes, so the `kubectl wait` steps may sit for a while. After the XR is ready, the command
    uploads the current bootstrap, waits for EC2 to register with SSM, runs bootstrap, prints the SSM
-   output, and verifies `http://127.0.0.1:3001/health` from the instance.
+output, and verifies `http://127.0.0.1:3001/health` from the instance.
+   SSM commands are polled for up to 10 minutes so application health retries are not cut off by
+   the AWS CLI waiter's shorter built-in attempt limit.
 
 7. Watch readiness:
 
@@ -234,7 +236,8 @@ images, and then run `docker logout ghcr.io`. The token must not include `repo`,
 
 RDS generates the master credential in AWS Secrets Manager. The EC2 instance profile reads the RDS
 endpoint and managed-secret ARN, then writes database variables to `/etc/quorum/quorum.env` with mode
-`0600`. `quorum-credential-refresh.timer` repeats this every 15 minutes so password rotation does not
+`0600`, including `POSTGRES_SSL=true` so the gateway uses encrypted RDS connections.
+`quorum-credential-refresh.timer` repeats this every 15 minutes so password rotation does not
 require a redeploy. On first boot, AL2023 installs Docker, `jq`, PostgreSQL client tools, and the
 checksum-verified ARM64 Docker Compose `v5.1.4` plugin. The bootstrap creates `quorum_audit` when
 missing, then applies `init-db.sql` with `ON_ERROR_STOP` before starting containers.

@@ -61,8 +61,9 @@ describe('S-DEPLOY deployment gate', () => {
     expect(bootstrapUpload).toBeGreaterThan(environmentWait)
     expect(bootstrapRun).toBeGreaterThan(bootstrapUpload)
     expect(source).toContain('aws ssm send-command')
-    expect(source).toContain('aws ssm wait command-executed')
     expect(source).toContain('aws ssm get-command-invocation')
+    expect(source).toContain('Pending|InProgress|Delayed')
+    expect(source).toContain('SSM command ${command_id} did not finish within 10 minutes')
     expect(source).toContain('curl --fail --silent --show-error')
   })
 
