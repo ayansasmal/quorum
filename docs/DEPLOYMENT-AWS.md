@@ -156,7 +156,8 @@ The following steps are operator-run and intentionally excluded from tests.
    "no matches for kind ProviderConfig" race on a cold cluster. The first provider pull can take
    several minutes, so the `kubectl wait` steps may sit for a while. After the XR is ready, the command
    uploads the current bootstrap, waits for EC2 to register with SSM, runs bootstrap, prints the SSM
-output, and verifies `http://127.0.0.1:3001/health` from the instance.
+   output, and verifies `http://127.0.0.1:3001/health` from inside the gateway container. The gateway
+   is intentionally not published on the EC2 host; Caddy is the only host-level HTTP entrypoint.
    SSM commands are polled for up to 10 minutes so application health retries are not cut off by
    the AWS CLI waiter's shorter built-in attempt limit.
 

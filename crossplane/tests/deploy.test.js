@@ -64,7 +64,8 @@ describe('S-DEPLOY deployment gate', () => {
     expect(source).toContain('aws ssm get-command-invocation')
     expect(source).toContain('Pending|InProgress|Delayed')
     expect(source).toContain('SSM command ${command_id} did not finish within 10 minutes')
-    expect(source).toContain('curl --fail --silent --show-error')
+    expect(source).toContain('docker exec quorum-gateway-1 node -e')
+    expect(source).toContain('response.status === 200')
   })
 
   it('uses a stable RDS identifier for clean rebuilds', () => {

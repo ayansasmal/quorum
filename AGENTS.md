@@ -297,6 +297,7 @@ graph TD
 - Bootstrap installs downloaded service and timer units from `/opt/quorum/systemd` into `/etc/systemd/system` before enabling them.
 - `QUORUM_JWT_PRIVATE_KEY` is base64-encoded PKCS#8 PEM. `openssl ecparam -genkey` emits incompatible SEC1; use `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256`.
 - `crossplane/deploy.sh apply` is complete only after XR readiness, bootstrap upload, successful SSM execution, and the instance-local gateway health check.
+- The deploy health gate runs from inside `quorum-gateway-1`; gateway port 3001 is not published on the EC2 host because Caddy is the only public HTTP entrypoint.
 - SSM execution uses explicit status polling for up to 10 minutes; the AWS CLI `command-executed` waiter is shorter than the gateway health retry window.
 - RDS credential refresh writes `POSTGRES_SSL=true`; production gateway connections must remain encrypted.
 - RDS passwords must be serialized with `jq @sh`, not Bash `%q`; `/etc/quorum/quorum.env` is consumed by both Bash and Docker Compose, whose backslash escaping rules differ.

@@ -147,7 +147,7 @@ bootstrap_application() {
   echo "checking gateway health on the instance..."
   run_ssm_commands "${instance_id}" "Quorum production health check" \
     "set -euo pipefail" \
-    "for attempt in \$(seq 1 30); do curl --fail --silent --show-error http://127.0.0.1:3001/health && exit 0; sleep 10; done" \
+    "for attempt in \$(seq 1 30); do docker exec quorum-gateway-1 node -e 'fetch(\"http://127.0.0.1:3001/health\").then(response => process.exit(response.status === 200 ? 0 : 1)).catch(() => process.exit(1))' && exit 0; sleep 10; done" \
     "docker compose -f /opt/quorum/docker-compose.aws.yml ps" \
     "exit 1"
 }
