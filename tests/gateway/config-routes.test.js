@@ -79,7 +79,7 @@ vi.mock('../../gateway/src/routes/sync.js', async (importOriginal) => {
 
 // ── Imports ────────────────────────────────────────────────────────────────────
 
-import { loadProjectConfig, loadUserProfile, invalidateProject } from '../../gateway/src/config-cache.js'
+import { loadProjectConfig, loadUserProfile, invalidateProject, invalidateProfile } from '../../gateway/src/config-cache.js'
 import { createProject, getProjectByGroupId } from '../../gateway/src/shared/graph/queries.js'
 import { loadKeys } from '../../gateway/src/keys.js'
 import configRoutes from '../../gateway/src/routes/config.js'
@@ -333,6 +333,32 @@ describe('POST /config/upload', () => {
     expect(body.project_id).toBe('new-project')
   })
 
+  it('busts the profile cache for owner and members after a successful upload', async () => {
+    const { syncOneProject } = await import('../../gateway/src/routes/sync.js')
+    syncOneProject.mockResolvedValue({ ok: true })
+
+    const config = {
+      group_id: 'cache-bust-project',
+      owner:    'alice',
+      members:  [
+        { name: 'Alice', github_username: 'alice', role: 'principal_architect', team: 'platform' },
+        { name: 'Bob',   github_username: 'bob',   role: 'engineer',            team: 'platform' },
+      ],
+    }
+
+    const { status } = await post(
+      '/config/upload',
+      config,
+      { 'X-Quorum-Sync-Token': 'sync-secret' },
+    )
+
+    expect(status).toBe(201)
+    // Owner + each member's stale profile:{sub} must be invalidated so the new
+    // membership is visible on their next request (no 300s TTL wait).
+    expect(invalidateProfile).toHaveBeenCalledWith('alice')
+    expect(invalidateProfile).toHaveBeenCalledWith('bob')
+  })
+
   it('returns 409 and does not overwrite when project already exists in S3', async () => {
     const send = vi.fn(async (cmd) => {
       if (cmd._type === 'head') return {}
@@ -402,5 +428,7 @@ describe('POST /config/upload', () => {
       { domains: {} },
       expect.objectContaining({ createdBy: 'alice' }),
     )
+    // Membership edits via PUT must also bust affected profile caches.
+    expect(invalidateProfile).toHaveBeenCalledWith('alice')
   })
 })

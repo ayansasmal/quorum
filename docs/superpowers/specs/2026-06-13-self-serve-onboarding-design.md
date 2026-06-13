@@ -49,6 +49,7 @@ Three gates re-check project membership **at login time**, contradicting the sli
 | 2 | Browser OAuth callback | [mcp-oauth.js:271-272](../../../gateway/src/routes/mcp-oauth.js#L271-L272) | `projects.length === 0` → redirect `?error=no_projects`; JWT never minted |
 | 3 | Dashboard client | [AuthContext.jsx:331-334](../../../../quorum-dash/src/context/AuthContext.jsx#L331-L334) | zero projects → error + discard JWT |
 | 4 | Profile discovery endpoint | [user.js:54-57](../../../gateway/src/routes/user.js#L54-L57) | self with `projects.length === 0` → `404 profile_not_found`; dashboard's `fetchProfile` throws "Profile fetch failed" **before** reaching gate 3's zero-project branch (found & fixed 2026-06-13) |
+| 5 | Profile cache staleness | [config.js](../../../gateway/src/routes/config.js) `/upload` + `PUT` | onboarding writes membership to DynamoDB but never busts the Redis `profile:{sub}` cache; a zero-project profile cached during pre-onboarding dashboard logins (TTL 300s) shadows the new membership, so the owner 403s on their **own** project for up to 5 min (found & fixed 2026-06-13) |
 
 **Key safety property preserved:** the per-request guard is untouched. `verify-jwt` still computes `access_denied` for non-members of private projects ([verify-jwt.js:97-118](../../../gateway/src/middleware/verify-jwt.js#L97-L118)), and `/pg/*` + `/api/*` still reject on it. We remove the **front-door ownership check**, not the **per-shelf** one.
 
@@ -71,7 +72,7 @@ Three gates re-check project membership **at login time**, contradicting the sli
 ### 4.3 Dashboard zero-projects welcome (no onboarding form)
 
 - [AuthContext.jsx:331-334](../../../../quorum-dash/src/context/AuthContext.jsx#L331-L334): zero projects → **keep the JWT**, enter `authenticated` with `activeProject = null` (not error, not discard).
-- A welcome/empty screen: *"You're in — no projects yet. Onboard one from your MCP client (`quorum config_upload`)."* No creation form.
+- A welcome/empty screen headed *"Hi {username}, there are no Quorum projects accessible to you"* with the sub-line *"Create a project from your repository to start sharing durable engineering context."* and the MCP onboarding steps (`npm install -g @as-quorum/mcp`, `quorum config_upload`). No creation form.
 - **Profile discovery (gate 4, [user.js:54-57](../../../gateway/src/routes/user.js#L54-L57)):** the dashboard reaches §4.3 only after `fetchProfile(sub)` resolves. For **self**, a zero-project profile must return `200 { projects: [] }`, never 404 — otherwise `fetchProfile` throws and the user never reaches the welcome state. Third-party zero-project lookups still 404 (username-enumeration guard). Fixed 2026-06-13.
 
 ### 4.4 Admin management from the dashboard (NEW)
@@ -79,6 +80,12 @@ Three gates re-check project membership **at login time**, contradicting the sli
 - The dashboard **Admin** panel ([Admin.jsx](../../../../quorum-dash/src/pages/Admin.jsx)) must let an admin **add and update admins**, backed by the existing `POST /admin/users` / `/admin/config` ([admin.js](../../../gateway/src/routes/admin.js)).
 - Guard rails (see §5): admin-gated; **cannot remove the last admin** (§5 G3).
 - **Propagation (§5 G2 decision):** `is_admin` stays in the JWT. A newly-granted admin must **re-authenticate** to receive powers (their current token has `is_admin: false`); a revoked admin retains powers until their token expires (≤15 min — `TOKEN_TTL_SECONDS = 900`). Accepted given the short TTL.
+
+### 4.5 Profile-cache invalidation on onboarding (gate 5 fix)
+
+- `POST /config/upload` and `PUT /config/:projectId` write membership into DynamoDB (`syncOneProject` / re-sync) but must **also bust the Redis profile cache** for every principal in the config — otherwise a stale zero-project `profile:{sub}` (cached during pre-onboarding dashboard logins, TTL 300s) makes `verify-jwt` compute `access_denied` for the project the user just created.
+- Implemented as `invalidateMemberProfiles(config)` in [config.js](../../../gateway/src/routes/config.js): collects `owner` + every member `github_username`, deduplicates, and calls `invalidateProfile(u)` for each (errors logged, never thrown — cache busting is best-effort and must not fail the upload).
+- The sibling `transfer-ownership` and `update-role` handlers already invalidate affected profiles; `/upload` and `PUT` simply omitted it. Without it the only recovery was waiting out the 300s TTL (restarting the MCP client does **not** help — the stale key lives in the gateway's Redis, keyed by username, not in MCP memory).
 
 ---
 

@@ -71,6 +71,33 @@ function authUpload(req) {
   return false
 }
 
+/**
+ * Invalidate the Redis profile cache for every principal named in a config.
+ *
+ * After a config upload/update syncs membership into DynamoDB, each affected
+ * user's cached `profile:{sub}` (TTL up to 300s) would otherwise shadow the new
+ * membership — causing `verify-jwt` to compute `access_denied` for the very
+ * project they just onboarded, until the cache expires. Busting the cache here
+ * makes the membership take effect on the next request (no 5-minute wait, no
+ * MCP restart).
+ *
+ * Invalidates the owner plus every member that declares a `github_username`,
+ * deduplicated.
+ *
+ * @param {{ owner?: string, members?: Array<{ github_username?: string }> }} config
+ * @returns {Promise<void>}
+ */
+async function invalidateMemberProfiles(config) {
+  const usernames = new Set()
+  if (config.owner) usernames.add(config.owner)
+  for (const m of config.members ?? []) {
+    if (m.github_username) usernames.add(m.github_username)
+  }
+  await Promise.all([...usernames].map((u) => invalidateProfile(u).catch((err) => {
+    console.error(`[Gateway:config] profile cache invalidation failed for ${u}: ${err.message}`)
+  })))
+}
+
 // POST /config/upload — onboard a new project (verify JWT unless sync-token present)
 router.use('/upload', (req, res, next) => {
   if (req.headers['x-quorum-sync-token']) return next()
@@ -185,6 +212,11 @@ router.post('/upload', async (req, res) => {
     console.error(`[Gateway:config] q_projects register failed for ${groupId}: ${err.message}`)
   }
 
+  // Bust each member's stale profile cache so the new membership is visible on
+  // their next request — otherwise the onboarding user 403s on their own project
+  // until the 300s profile TTL expires.
+  await invalidateMemberProfiles(config)
+
   res.status(201).json({
     project_id:   groupId,
     q_project_id: qProjectId,
@@ -242,6 +274,9 @@ router.put('/:projectId', verifyJwt, async (req, res) => {
   if (!syncResult.ok) {
     console.error(`[Gateway:config] DDB re-sync failed for ${projectId}: ${syncResult.error}`)
   }
+
+  // Membership may have changed (added/removed members) — bust their profile caches.
+  await invalidateMemberProfiles(config)
 
   const pool = req.app.locals.pool
   /** @type {string | null} */

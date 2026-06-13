@@ -312,7 +312,14 @@ The constitutional test suite enforces all of these at 100% coverage:
 bootstrap config creation, duplicate namespace rejection, public-project
 read-only enforcement, and the dashboard welcome state. Playwright discovery is
 verified; the live Docker/browser run remains pending because command approval
-was unavailable during implementation.
+was unavailable during implementation. Two follow-up fixes (2026-06-13): (1)
+`GET /user/profile/:username` for **self** with zero projects returns
+`200 { projects: [] }` (not 404) so the dashboard reaches the welcome state; (2)
+`POST /config/upload` + `PUT /config/:projectId` now call
+`invalidateMemberProfiles(config)` to bust each member's Redis `profile:{sub}`
+cache — without it a stale zero-project profile (TTL 300s) made the onboarding
+owner 403 on their own project for up to 5 minutes. `config-routes.test.js`
+asserts both `/upload` and `PUT` invalidate owner + member profiles.
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 
