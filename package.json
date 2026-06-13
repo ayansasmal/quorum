@@ -31,6 +31,7 @@
     "test:gateway": "vitest run tests/gateway",
     "test:coverage": "vitest run --coverage",
     "seed": "node scripts/seed.js",
+    "seed:admin": "./scripts/seed-admin.sh",
     "audit:scan-bypasses": "node scripts/audit-scan.js",
     "audit:scan-harddeletes": "node scripts/audit-scan-harddeletes.js",
     "audit:cli": "node scripts/audit-cli.js",

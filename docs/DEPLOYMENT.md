@@ -161,7 +161,7 @@ FALKORDB_PORT=6379
 QUORUM_CONFIG_BUCKET=quorum-configs
 QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects
 QUORUM_SYNC_SECRET=                         # EventBridge sync token (optional)
-QUORUM_FIRST_ADMIN=                         # GitHub username seeded into configs/.quorum
+QUORUM_FIRST_ADMIN=                         # GitHub username(s), comma-separated — seeded into configs/.quorum (see "Bootstrapping the first platform admin")
 
 # Redis (config + profile + admin cache, v0.3)
 REDIS_URL=redis://redis:6379
@@ -185,6 +185,32 @@ AWS_REGION=us-east-1
 # QUORUM_GATEWAY_URL=http://localhost:3001   ← default; change for remote gateway
 # QUORUM_AUTHOR=username                     ← optional identity override
 ```
+
+### Bootstrapping the first platform admin
+
+The platform admin list lives in S3 at `s3://${QUORUM_CONFIG_BUCKET}/configs/.quorum`. Self-serve onboarding needs at least one admin to exist so the first sign-ins can be governed — **with zero admins, no one can promote, manage members, or resolve conflicts.**
+
+Two ways to seed it:
+
+1. **Gateway boot-seed (automatic).** Set `QUORUM_FIRST_ADMIN` (comma-separated for multiple) in the gateway env. On startup `ensureAdminConfig()` writes `configs/.quorum` once, atomically, only if it does not already exist. **If `QUORUM_FIRST_ADMIN` is unset the boot-seed silently does nothing** — this is the most common way to end up with zero admins.
+
+2. **Run-once seed script (explicit, recommended for a fresh real-AWS deploy).** Seed yourself before/independently of the gateway boot:
+
+   ```bash
+   # interactive — suggests your `gh` login as the default
+   QUORUM_CONFIG_BUCKET=quorum-prod-config AWS_REGION=ap-southeast-2 npm run seed:admin
+
+   # non-interactive (single or comma-separated)
+   QUORUM_CONFIG_BUCKET=quorum-prod-config QUORUM_FIRST_ADMIN=octocat,alice \
+     AWS_REGION=ap-southeast-2 npm run seed:admin
+
+   # overwrite an existing config
+   npm run seed:admin -- --bucket quorum-prod-config --region ap-southeast-2 --force
+   ```
+
+   The script writes the same object shape the boot-seed produces, so it is forward-compatible: a later gateway boot finds the config present and no-ops. It is idempotent (skips an existing config unless `--force`). For **LocalStack/dev**, admin seeding is handled automatically by `scripts/init-localstack.sh` (uses `awslocal`) — use `seed:admin` only for real AWS.
+
+   > `github_username` must be the user's **GitHub login** (the value in their OAuth identity), not their display name — a mismatch silently grants no admin rights.
 
 ### Engineer Onboarding (one-time)
 
