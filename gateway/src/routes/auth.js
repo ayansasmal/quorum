@@ -34,9 +34,13 @@ const TOKEN_TTL_SECONDS = 900 // 15 minutes
  * @returns {Promise<string>} GitHub login
  */
 async function verifyGitHubToken(githubToken) {
-  const response = await fetch('https://api.github.com/user', {
+  /** @type {string} */
+  const githubUserUrl = process.env.GITHUB_USER_API_URL ?? 'https://api.github.com/user'
+  const response = await fetch(githubUserUrl, {
     headers: {
       Authorization: `Bearer ${githubToken}`,
+      Accept:        'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2026-03-10',
       'User-Agent': 'quorum-gateway/0.3.0',
     },
   })

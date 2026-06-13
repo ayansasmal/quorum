@@ -57,13 +57,9 @@ async function waitForGateway(timeoutMs = 60_000) {
 }
 
 /**
- * Upload (or update) a fixture config. Returns the response.
- * 201 = fresh upload. 200 = config updated (upserted).
+ * Create a fixture config, or update it through the project-scoped update route.
+ * 201 = fresh upload. 200 = authenticated update after a 409 create conflict.
  * Any other status is a setup failure.
- *
- * POST /config/upload is a true upsert: 201 on first upload, 200 on subsequent
- * calls. This ensures fixture changes (e.g. new members) are always reflected
- * in the running test environment without requiring an env restart.
  *
  * @param {string} configPath - absolute path to the .quorum.json fixture
  * @param {string} peToken    - PA JWT (test-pe is PA in both fixtures)
@@ -78,7 +74,25 @@ async function uploadFixture(configPath, peToken) {
       validateStatus: () => true,
     },
   )
-  if (res.status === 201 || res.status === 200) return res
+  if (res.status === 201) return res
+  if (res.status === 409 && res.data?.error === 'already_onboarded') {
+    const updateRes = await axios.put(
+      `${GATEWAY}/config/${encodeURIComponent(config.group_id)}`,
+      config,
+      {
+        headers: {
+          Authorization:      `Bearer ${peToken}`,
+          'Content-Type':     'application/json',
+          'X-Quorum-Project': config.group_id,
+        },
+        validateStatus: () => true,
+      },
+    )
+    if (updateRes.status === 200) return updateRes
+    throw new Error(
+      `T0 setup FAIL — config update for '${config.group_id}': HTTP ${updateRes.status} — ${JSON.stringify(updateRes.data)}`,
+    )
+  }
   throw new Error(
     `T0 setup FAIL — config upload for '${config.group_id}': HTTP ${res.status} — ${JSON.stringify(res.data)}`,
   )
@@ -95,8 +109,8 @@ export default async function setup(_config) {
   console.log('[setup] T0.1 gateway healthy ✓')
 
   // ── Fixture upload (idempotent) ─────────────────────────────────────────────
-  // All fixture configs must be in DDB before any test runs. 409 is accepted
-  // (already onboarded from a previous run — configs are unchanged).
+  // All fixture configs must be in DDB before any test runs. Existing fixtures
+  // are updated through PUT so bootstrap upload remains create-only.
   //
   // Each fixture is uploaded with the token of its owner (who must be a PA in
   // that project's member list). quorum-test-peer-project uses the architect

@@ -811,8 +811,10 @@ paths:
         `<group_id>.quorum.json`, and syncs to DynamoDB. Idempotent-fail: returns
         409 if the project already exists in S3.
 
-        Auth: `X-Quorum-Sync-Token` header OR a `principal_architect` JWT.
-        No standard Bearer JWT required for first-time onboarding (bootstrap problem).
+        Auth: `X-Quorum-Sync-Token` header, an existing `principal_architect`
+        JWT, or a JWT whose subject is listed as `principal_architect` in the
+        net-new config. Bootstrap authorization never applies to an existing
+        namespace; updates use `PUT /config/{projectId}`.
       parameters:
         - name: X-Quorum-Sync-Token
           in: header

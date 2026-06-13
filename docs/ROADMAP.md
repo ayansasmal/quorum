@@ -271,7 +271,7 @@ Wave H — Quality & Security Hardening ✅ (post-Wave G)
   ✅ coexist_merge: new ACTIVE entry by reviewer, both source versions SUPERSEDED atomically
   ✅ getLatestDraftVersion includes PENDING_CONFLICT_CHECK (self-approval check was bypassed for PA writes)
   ✅ LEGAL_TRANSITIONS extended: DRAFT→SUPERSEDED, PENDING_CONFLICT_CHECK→SUPERSEDED
-  ✅ POST /config/upload upsert: 200 on update (re-syncs DDB, invalidates Redis), 201 on create
+  ✅ POST /config/upload create-only: 201 on create, 409 on existing namespace; authenticated updates use PUT /config/:projectId
   ✅ test-pe2 (second PA) fixture member added; pe2Token() factory in jwt.js
   ✅ 498 E2E tests passing (up from 492); 685 gateway unit tests (up from 675)
 

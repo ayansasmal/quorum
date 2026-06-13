@@ -179,6 +179,7 @@ services:
       # Gateway config
       - QUORUM_GATEWAY_PORT=3001
       - QUORUM_SYNC_SECRET=
+      - GITHUB_USER_API_URL=http://mock-openai:3003/github/user
       - NODE_ENV=test
       # ── LLM (mock) — governance endpoints call the mock-openai service ────────
       - OPENAI_API_KEY=test-key-e2e

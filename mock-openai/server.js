@@ -1,9 +1,10 @@
 /**
  * mock-openai — Minimal OpenAI API mock for E2E tests.
  *
- * Handles the two endpoints Graphiti/FalkorDB actually calls:
+ * Handles the endpoints the isolated E2E stack calls:
  *   POST /v1/embeddings          — returns a deterministic 1536-dim float vector
  *   POST /v1/chat/completions    — returns a canned assistant response
+ *   GET  /github/user             — returns a deterministic authenticated user
  *   GET  /health                 — liveness check (used by docker-compose healthcheck)
  *
  * Embedding strategy:
@@ -180,6 +181,15 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ status: 'ok', service: 'mock-openai' }))
+  }
+
+  if (req.method === 'GET' && req.url === '/github/user') {
+    if (req.headers.authorization !== 'Bearer e2e-github-newbie') {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ message: 'Bad credentials' }))
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ login: 'e2e-newbie' }))
   }
 
   // Accumulate body

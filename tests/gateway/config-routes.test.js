@@ -80,6 +80,7 @@ vi.mock('../../gateway/src/routes/sync.js', async (importOriginal) => {
 // ── Imports ────────────────────────────────────────────────────────────────────
 
 import { loadProjectConfig, loadUserProfile, invalidateProject } from '../../gateway/src/config-cache.js'
+import { createProject, getProjectByGroupId } from '../../gateway/src/shared/graph/queries.js'
 import { loadKeys } from '../../gateway/src/keys.js'
 import configRoutes from '../../gateway/src/routes/config.js'
 
@@ -163,6 +164,7 @@ function request(method, path, body, headers = {}) {
 
 const get  = (path, headers = {}) => request('GET',  path, null, headers)
 const post = (path, body, headers = {}) => request('POST', path, body, headers)
+const put  = (path, body, headers = {}) => request('PUT',  path, body, headers)
 
 // ── POST /config/validate ─────────────────────────────────────────────────────
 
@@ -331,19 +333,15 @@ describe('POST /config/upload', () => {
     expect(body.project_id).toBe('new-project')
   })
 
-  it('returns 200 and updates config when project already exists in S3 (upsert)', async () => {
-    // Override S3 mock for this test: HeadObject succeeds (project exists), PutObject succeeds.
-    const { getS3 } = await import('../../gateway/src/routes/sync.js')
-    getS3.mockReturnValueOnce({
-      send: vi.fn(async (cmd) => {
-        // HeadObject succeeds (project exists in S3)
-        if (cmd._type === 'head') return {}
-        // PutObject succeeds
-        return {}
-      }),
+  it('returns 409 and does not overwrite when project already exists in S3', async () => {
+    const send = vi.fn(async (cmd) => {
+      if (cmd._type === 'head') return {}
+      throw new Error('PutObject must not run for an existing namespace')
     })
-    const { syncOneProject } = await import('../../gateway/src/routes/sync.js')
-    syncOneProject.mockResolvedValue({ ok: true })
+
+    // Override S3 mock for this test: HeadObject succeeds (project exists).
+    const { getS3 } = await import('../../gateway/src/routes/sync.js')
+    getS3.mockReturnValueOnce({ send })
 
     const { status, body } = await post(
       '/config/upload',
@@ -351,9 +349,10 @@ describe('POST /config/upload', () => {
       { 'X-Quorum-Sync-Token': 'sync-secret' },
     )
 
-    expect(status).toBe(200)
+    expect(status).toBe(409)
+    expect(body.error).toBe('already_onboarded')
     expect(body.project_id).toBe('new-project')
-    expect(body.message).toMatch(/updated/)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('allows bootstrap upload when JWT user is principal_architect in config', async () => {
@@ -376,5 +375,32 @@ describe('POST /config/upload', () => {
 
     expect(status).toBe(201)
     expect(body.project_id).toBe('bootstrap-project')
+  })
+
+  it('updates an existing config through PUT and re-registers a missing project row', async () => {
+    mockProfile('alice', 'new-project', 'principal_architect')
+    getProjectByGroupId.mockResolvedValueOnce(null)
+    createProject.mockResolvedValueOnce('q_recreated')
+    const tok = await makeToken('alice')
+
+    const { status, body } = await put(
+      '/config/new-project',
+      VALID_CONFIG,
+      {
+        Authorization:      `Bearer ${tok}`,
+        'X-Quorum-Project': 'new-project',
+      },
+    )
+
+    expect(status).toBe(200)
+    expect(body.q_project_id).toBe('q_recreated')
+    expect(createProject).toHaveBeenCalledWith(
+      app.locals.pool,
+      'new-project',
+      'alice',
+      VALID_CONFIG.members,
+      { domains: {} },
+      expect.objectContaining({ createdBy: 'alice' }),
+    )
   })
 })
