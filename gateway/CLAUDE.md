@@ -29,7 +29,7 @@ src/
   server.js               — Express app entry point
   routes/
     auth.js               — GitHub OAuth (browser + PAT), slim JWT issue/refresh
-    mcp-oauth.js          — PKCE OAuth 2.1 flow for MCP clients (RFC 8414 discovery)
+    mcp-oauth.js          — Shared dashboard + MCP PKCE callback; zero-project dashboard users receive a normal JWT with null project context
     oauth.js              — Shared OAuth callback + state helpers
     pg.js                 — All PostgreSQL REST routes (/pg/versions/*, /pg/audit/*, /pg/pending/*, /pg/audit/lineage/:topic/:key)
                             POST /pg/versions extracts agent_id, session_id, author_type from request body (all optional, defaults to null/'agent')

@@ -303,6 +303,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 | Bidirectional audit↔version | Every version record carries `created_by_audit`; every audit entry carries `version_id` |
 | No project offboarding via MCP | `DELETE /projects/:id` is dashboard-only; MCP must never expose an archive/offboard tool — project lifecycle decisions require a human in the loop |
 | Login is identity-only | `POST /auth/token` verifies GitHub identity and issues a slim JWT even without project membership; request middleware enforces project access |
+| Zero-project OAuth remains authenticated | Dashboard OAuth issues a 15-minute JWT with null project context instead of redirecting with `no_projects` |
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 

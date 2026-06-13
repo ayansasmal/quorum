@@ -136,6 +136,8 @@ sequenceDiagram
 
 The gateway discriminates between the two flows using separate in-memory Maps: `pendingStates` (dashboard CSRF states set by `GET /auth/github`) and `pkceStore` (MCP PKCE sessions set by `GET /oauth/authorize`). A callback with a state in `pendingStates` follows the dashboard path; one in `pkceStore` follows the MCP path.
 
+Dashboard OAuth does not require an existing project membership. When the verified GitHub user has zero projects, the callback issues a normal 15-minute JWT with `project`, `role`, and `team` set to `null` and redirects to the dashboard token fragment. The dashboard can then render an authenticated empty state without weakening project-scoped middleware.
+
 PAT-based exchange (`POST /auth/token`) is a CI fallback: the caller submits a GitHub PAT and the Gateway verifies it against `GET https://api.github.com/user` before issuing a slim identity JWT. `project_id` is optional and project membership never gates issuance. When a project is supplied, its config is used only to enrich the response with role and team metadata; project access is enforced later by request middleware using `X-Quorum-Project`.
 
 ### Graphiti Proxy Behaviour

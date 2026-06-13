@@ -269,7 +269,27 @@ router.get('/callback', async (req, res) => {
     }))
 
     if (projects.length === 0) {
-      return res.redirect(`${cfg.dashboardUrl}/login?error=no_projects`)
+      /** @type {{ privateKey: import('node:crypto').KeyObject, kid: string }} */
+      const { privateKey, kid } = getKeys()
+      /** @type {boolean} */
+      const isAdmin = await isPlatformAdmin(githubLogin)
+      /** @type {string} */
+      const jwt = await new SignJWT({
+        sub:             githubLogin,
+        is_admin:        isAdmin,
+        project:         null,
+        role:            null,
+        team:            null,
+        method:          'oauth2_web',
+        base_confidence: 0,
+      })
+        .setProtectedHeader({ alg: 'ES256', kid })
+        .setIssuedAt()
+        .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
+        .setIssuer('quorum-gateway')
+        .sign(privateKey)
+
+      return res.redirect(`${cfg.dashboardUrl}/login#token=${jwt}`)
     }
 
     const { privateKey, kid } = getKeys()
