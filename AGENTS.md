@@ -380,6 +380,12 @@ The constitutional test suite enforces all of these at 100% coverage:
 | The platform must retain an admin | `POST /admin/users` returns `409 last_admin` before removing the final configured administrator |
 | Bootstrap cannot reclaim an existing namespace | `POST /config/upload` returns `409 already_onboarded`; existing projects update through authenticated `PUT /config/:projectId` |
 
+**Self-serve onboarding (2026-06-13):** S-23 covers projectless JWT issuance,
+bootstrap config creation, duplicate namespace rejection, public-project
+read-only enforcement, and the dashboard welcome state. Playwright discovery is
+verified; the live Docker/browser run remains pending because command approval
+was unavailable during implementation.
+
 > Test strategy: [TESTING.md](docs/TESTING.md)
 
 ---

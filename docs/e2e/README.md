@@ -35,6 +35,12 @@ Each journey is its own file. Read the journey before implementing its spec file
 | J21 — MCP Layer Gateway Contracts | S-21 | 90 | 124 | 🟡 | [J21](journeys/J21-mcp-layer-contracts.md) |
 | J22 — Portfolio Intelligence UI | S-22 | 75 | 150 | 🟡 | [J22](journeys/J22-portfolio-intelligence.md) |
 
+### Initiative I Supplemental Journey
+
+| Journey | Scenario | Coverage | Status | Document |
+|---------|----------|----------|--------|----------|
+| J23 — Self-Serve Onboarding | S-23 | Projectless JWT, bootstrap config upload, namespace protection, public read-only boundary, dashboard welcome | Implemented; live E2E pending | [J23](journeys/J23-self-serve-onboarding.md) |
+
 **Suite OwnScore: 3605 | 10% gate: 361 pts | Max single FailureCost: 970 (S-05.1) | Hard block: any ⛔ failure**
 
 > J02 has 8 sub-scenarios spanning four different pillars (Governance ⛔, Data Integrity ⛔,

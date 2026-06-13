@@ -115,12 +115,17 @@ Added in v0.4 to cover federation, deviations, conformance, portfolio, and quali
 | `tests/gateway/dashboard-deviations.test.js` | engram | 27 tests: deviation recording, catalog link validation, severity formula (4 cases: standard/PA floor/missing confidence/unknown role), upsert idempotency, batch partial success, GET filters, PE action constitutional enforcement, denial hint |
 | `tests/gateway/dashboard-conformance.test.js` | engram | 14 tests: conformance UNCERTIFIED/CERTIFIED/catalogs/404; portfolio 403/admin-bypass/roles/rollup/null-rollup/node_id-filter/UNCERTIFIED-rollup |
 | `tests/gateway/config-routes.test.js` | engram | Covers create-only `POST /config/upload` (201=create, 409=existing namespace), bootstrap authorization, authenticated `PUT /config/:projectId`, validation errors, and auth modes |
+| `tests/e2e/scenarios/23-self-serve-onboarding.spec.js` | engram | S-23 cold-start projectless JWT, bootstrap upload, config readback, duplicate namespace rejection, public-project read access, and non-member write rejection |
 | `tests/gateway/audit-chain.test.js` (additions) | engram | 3 adversarial tamper-detection tests (GAP-001 closed): stale `entry_hash` after `author` mutation, after `tool` mutation; `ChainIntegrityViolation` carries `position`, `expected`, `actual` |
 | `tests/gateway/dashboard-write.test.js` (additions) | engram | `coexist_merge` action: `merged_content` required validation, `NO_SELF_APPROVAL` enforcement for DRAFT and `PENDING_CONFLICT_CHECK` authors, transaction-atomic merge (new ACTIVE + both sides SUPERSEDED); `PENDING_CONFLICT_CHECK→SUPERSEDED` legal transition |
 
-### E2E Suite — 498 passing (v0.4)
+### E2E Suite
 
-The Playwright E2E suite covers 21 journeys (S-01 through S-21) across the full stack. It runs against a fully-isolated Docker environment (`npm run test:e2e:docker`) or against a locally-started dev stack with Vite auto-started for browser tests.
+The Playwright E2E suite covers the established S-01 through S-22 journeys plus
+S-23 self-serve onboarding. It runs against a fully-isolated Docker environment
+(`npm run test:e2e:docker`) or against a locally-started dev stack. S-23 was
+added on 2026-06-13; its live Docker/browser run still needs execution after the
+local command-approval service becomes available.
 
 ```bash
 npm run test:e2e               # local dev mode (auto-starts Vite for browser tests)

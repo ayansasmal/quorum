@@ -10,6 +10,17 @@
 
 ---
 
+## Implementation Status - June 13, 2026
+
+Tasks 1-8 are implemented and committed on `prod`. Task 9 test code is
+implemented as S-19 plus S-23 because S-20 was already assigned to cross-catalog
+search. Playwright discovery passes. Live Docker and browser execution remains
+pending because the local command-approval service rejected further escalated
+commands after reaching its usage limit. Task 10 documentation reflects that
+verification boundary.
+
+---
+
 ## Source Spec
 
 [docs/superpowers/specs/2026-06-13-self-serve-onboarding-design.md](../specs/2026-06-13-self-serve-onboarding-design.md). Read §3 (the deadlock), §4 (design), §5 (security gaps G1–G7), §7 (resolved decisions) before starting.
@@ -48,7 +59,7 @@ None of these changes touch the vendored `gateway/src/shared/**` files (constitu
 | `quorum/tests/gateway/require-membership.test.js` | Create | G1 unit test for the guard |
 | `quorum/tests/gateway/ensure-admin-config.test.js` | Create | Boot-seed idempotency |
 | `quorum/tests/e2e/scenarios/19-auth-lifecycle.spec.js` | Modify | Drop the 403-on-non-member assertion; add no-project 200 |
-| `quorum/tests/e2e/scenarios/20-self-serve-onboarding.spec.js` | Create | S-20 cold-start onboarding + G1 public read-only |
+| `quorum/tests/e2e/scenarios/23-self-serve-onboarding.spec.js` | Create | S-23 cold-start onboarding + G1 public read-only |
 | `quorum-dash/src/context/AuthContext.jsx` | Modify | Zero projects → `authenticated` with null project (keep JWT) |
 | `quorum-dash/src/pages/NoProjects.jsx` | Create | Welcome/empty screen |
 | `quorum-dash/src/App.jsx` | Modify | Route null-project users to `NoProjects` |
@@ -854,11 +865,11 @@ git commit -m "feat(dashboard): admin add/remove panel backed by /admin/users"
 
 ---
 
-## Task 9: E2E — update S-19, add S-20 self-serve onboarding
+## Task 9: E2E — update S-19, add S-23 self-serve onboarding
 
 **Files:**
 - Modify: `quorum/tests/e2e/scenarios/19-auth-lifecycle.spec.js`
-- Create: `quorum/tests/e2e/scenarios/20-self-serve-onboarding.spec.js`
+- Create: `quorum/tests/e2e/scenarios/23-self-serve-onboarding.spec.js`
 
 - [ ] **Step 1: Read the E2E helpers + S-19**
 
@@ -883,13 +894,13 @@ test('S-19.x — /auth/token without project_id returns a slim JWT', async () =>
 
 (Use the suite's real GitHub-token fixture / mock — check the helpers for how S-19 currently authenticates.)
 
-- [ ] **Step 3: Create S-20** — `quorum/tests/e2e/scenarios/20-self-serve-onboarding.spec.js`. Keep the `S-20` prefix on every describe. Cover the cold-start onboarding flow and the G1 read-only guard at the API level (the browser half lives in quorum-dash, Step 5):
+- [ ] **Step 3: Create S-23** — `quorum/tests/e2e/scenarios/23-self-serve-onboarding.spec.js`. `S-20` is already assigned to cross-catalog search, so keep the `S-23` prefix on every describe. Cover the cold-start onboarding flow and the G1 read-only guard at the API level (the browser half lives in quorum-dash, Step 5):
 
 ```javascript
 import { test, expect } from '@playwright/test'
 import { uid } from '../helpers/...'   // use the suite's actual fixture helpers + api client
 
-test.describe('S-20.1 cold-start onboarding via /auth/token + /config/upload', () => {
+test.describe('S-23.1 cold-start onboarding via /auth/token + /config/upload', () => {
   test('a never-onboarded user gets a JWT and uploads their first project', async () => {
     // 1. POST /auth/token (no project_id) → 200 slim JWT for a fresh GitHub identity
     // 2. POST /config/upload with a net-new group_id (uid()-prefixed) where the
@@ -899,7 +910,7 @@ test.describe('S-20.1 cold-start onboarding via /auth/token + /config/upload', (
   })
 })
 
-test.describe('S-20.2 public projects are read-only for non-members (G1)', () => {
+test.describe('S-23.2 public projects are read-only for non-members (G1)', () => {
   test('non-member can read a public project but cannot write', async () => {
     // 1. As a member, onboard a public project (is_public: true), uid()-prefixed
     // 2. As a different, non-member identity, GET a read route with
@@ -915,13 +926,13 @@ Fill the bodies with the suite's real api client and JWT helpers (Step 1). Use `
 - [ ] **Step 4: Run the API E2E suite** (needs the test stack)
 
 Run: `cd quorum && npm run test:e2e:full`
-(or, if the stack is already up: `npm run test:e2e -- tests/e2e/scenarios/19-auth-lifecycle.spec.js tests/e2e/scenarios/20-self-serve-onboarding.spec.js`)
-Expected: S-19 (updated) + S-20 PASS.
+(or, if the stack is already up: `npm run test:e2e -- tests/e2e/scenarios/19-auth-lifecycle.spec.js tests/e2e/scenarios/23-self-serve-onboarding.spec.js`)
+Expected: S-19 (updated) + S-23 PASS.
 
-- [ ] **Step 5: Add the browser half in quorum-dash** — create `quorum-dash/tests/e2e/scenarios/20-self-serve-onboarding.spec.js` keeping the `S-20` IDs. Using `injectSession(page, …)` (from `tests/e2e/helpers/browser.js`) with a test identity that has **zero** projects, assert the dashboard shows the NoProjects welcome screen (text "no projects yet" and the `quorum config_upload` hint) and does NOT bounce to `/login`.
+- [ ] **Step 5: Add the browser half in quorum-dash** — create `quorum-dash/tests/e2e/scenarios/23-self-serve-onboarding.spec.js` keeping the `S-23` IDs. Using `injectSession(page, …)` (from `tests/e2e/helpers/browser.js`) with a test identity that has **zero** projects, assert the dashboard shows the NoProjects welcome screen (text "no projects yet" and the `quorum config_upload` hint) and does NOT bounce to `/login`.
 
 ```javascript
-test.describe('S-20.3 dashboard zero-projects welcome', () => {
+test.describe('S-23.3 dashboard zero-projects welcome', () => {
   test('a zero-project user lands on the welcome screen, not an error', async ({ page }) => {
     // injectSession(page, { sub: uid('newbie'), projects: [] })
     // navigate to dashboard root
@@ -933,16 +944,16 @@ test.describe('S-20.3 dashboard zero-projects welcome', () => {
 
 - [ ] **Step 6: Run the browser E2E** (needs gateway + dashboard test targets)
 
-Run: `cd quorum-dash && npm run test:e2e -- tests/e2e/scenarios/20-self-serve-onboarding.spec.js`
+Run: `cd quorum-dash && npm run test:e2e -- tests/e2e/scenarios/23-self-serve-onboarding.spec.js`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd quorum && git add tests/e2e/scenarios/19-auth-lifecycle.spec.js tests/e2e/scenarios/20-self-serve-onboarding.spec.js
-git commit -m "test(e2e): S-20 self-serve onboarding + G1 public read-only; update S-19 auth contract"
-cd ../quorum-dash && git add tests/e2e/scenarios/20-self-serve-onboarding.spec.js
-git commit -m "test(e2e): S-20.3 dashboard zero-projects welcome (@ui)"
+cd quorum && git add tests/e2e/scenarios/19-auth-lifecycle.spec.js tests/e2e/scenarios/23-self-serve-onboarding.spec.js
+git commit -m "test(e2e): S-23 self-serve onboarding + G1 public read-only; update S-19 auth contract"
+cd ../quorum-dash && git add tests/e2e/scenarios/23-self-serve-onboarding.spec.js
+git commit -m "test(e2e): S-23.3 dashboard zero-projects welcome (@ui)"
 ```
 
 ---
@@ -967,7 +978,7 @@ Run: `cd quorum && grep -n "project_id" gateway/openapi.yaml | head` to locate i
 
 - [ ] **Step 3: ARCHITECTURE.md / TESTING.md** —
   - `docs/ARCHITECTURE.md`: in the auth/identity section, document the decoupled model (login = GitHub; membership enforced per-request, not at issuance) and the boot-seed-admins-only flow.
-  - `docs/TESTING.md`: add S-20 to the scenario list and note the new unit tests (`require-membership`, `ensure-admin-config`, `admin-last-guard`).
+  - `docs/TESTING.md`: add S-23 to the scenario list and note the new unit tests (`require-membership`, `ensure-admin-config`, `admin-last-guard`).
 
 - [ ] **Step 4: Open the changed markdown for review** (per user workflow). For each changed `.md`, ensure the show-md server is up and open it:
 
@@ -1004,7 +1015,7 @@ Expected: all pass (incl. the new cold-start tests).
 - [ ] **Full E2E (API + browser)**
 
 Run: `cd quorum && npm run test:e2e:full` then `cd ../quorum-dash && npm run test:e2e`
-Expected: S-19 (updated), S-20 (new) green; no regressions.
+Expected: S-19 (updated), S-23 (new) green; no regressions.
 
 - [ ] **Manual cold-start rehearsal** (the acceptance demo) — with a fresh stack and `QUORUM_FIRST_ADMIN` set, confirm: (1) boot logs "Admin config seeded"; (2) a GitHub user in no project can log into the dashboard and sees the welcome screen; (3) that user runs `authenticate` + `config_upload` from an MCP client and onboards a project; (4) the project then appears in their dashboard selector; (5) a non-member can read but not write a public project.
 

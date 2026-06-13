@@ -113,8 +113,8 @@ graph TB
 - **Portfolio intelligence** — `GET /api/portfolio` (role-gated: exec + `is_admin`); weighted criticality rollup over all projects; `denial_hint_count` badge on global entries in Knowledge browser; full Portfolio page with cascading org filters (org → group → division → department), search, score table (GAP-028 ✅)
 - **Dashboard** — Stats (ConformanceCard: score badge, breakdown bar, staleness warning), Deviations (filter rail, inline action panel), Portfolio (rollup banner, cascading org filters, project table), Pending (overdue deferrals), Knowledge (denial hint badges), Graph, Audit, Config, Admin; full light/dark theme
 - **Conflict resolution** — `approve` / `reject` / `request_changes` / `coexist_merge`; `coexist_merge` creates a new unified ACTIVE entry authored by the reviewer, superseding both source versions atomically; self-approval constitutional check applies to all four actions
-- **Config upsert** — `POST /config/upload` is a true upsert: returns 200 on update (re-syncs DDB, invalidates Redis), 201 on first create; allows fixture and team config changes to take effect without environment restarts
-- **Tests** — 685 gateway tests · 629 quorum-mcp tests · 560 E2E (Playwright, 22 scenarios); coverage 86% lines · 77% branches; CI on Node 22; fully-isolated Docker E2E stack (`npm run test:e2e:docker`)
+- **Self-serve onboarding** — GitHub identity can receive a projectless JWT, bootstrap one net-new project through `POST /config/upload`, and use the projectless dashboard welcome state; existing namespaces return 409 and update through authenticated `PUT /config/:projectId`
+- **Tests** — 713 gateway tests · 631 quorum-mcp tests · 560 previously verified E2E tests plus the new S-23 onboarding scenarios; coverage 86% lines · 77% branches; CI on Node 22; fully-isolated Docker E2E stack (`npm run test:e2e:docker`)
 - **Tooling** — OpenAPI 3.1 spec v0.4.0 at [`gateway/openapi.yaml`](gateway/openapi.yaml) (Federation, Deviations, Conformance, Portfolio tags); `GET /schema/config` public JSON Schema; [`scripts/audit-cli.js`](scripts/audit-cli.js) ops CLI
 
 ---

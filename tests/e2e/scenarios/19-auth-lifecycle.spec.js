@@ -281,6 +281,19 @@ describe('S-19.5 — PAT Authentication', () => {
     }).get('/pg/versions/auth/any-key-s19')
     expect(res.status).toBe(401)
   })
+
+  test('step 3 — GitHub token without project_id returns a projectless JWT', async () => {
+    const res = await bare().post('/auth/token', {
+      github_token: 'e2e-github-newbie',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.data.sub).toBe('e2e-newbie')
+    expect(res.data.project).toBeNull()
+    expect(res.data.role).toBeNull()
+    expect(res.data.member_found).toBe(false)
+    expect(typeof res.data.token).toBe('string')
+  })
 })
 
 }) // outer describe — required by graph reporter extractScenarioId()

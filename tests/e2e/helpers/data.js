@@ -38,4 +38,5 @@ export const DOMAINS = {
   'S-17':   'conflict-edge-cases-test',
   'S-18':   'governance-route-test',
   'S-19':   'auth-lifecycle-test',
+  'S-23':   'self-serve-onboarding-test',
 }
