@@ -336,3 +336,16 @@ Each `{group_id}.quorum.json` object in the bucket follows this structure:
 ```
 
 The Quorum Gateway reads these at startup via the `QUORUM_CONFIG_BUCKET` env var and caches them in Redis (TTL: `QUORUM_CONFIG_CACHE_TTL`, default 300s).
+
+## DynamoDB Membership Contract
+
+The production `quorum-user-projects` table must match `gateway/src/ddb.js`:
+
+- partition key: `github_username`
+- sort key: `project_id`
+- GSI `ProjectMembersIndex`: partition key `project_id`, sort key `github_username`
+
+Gateway startup queries the GSI before writing each project's membership rows. A table without this
+index cannot be repaired by config re-sync alone. DynamoDB primary keys are immutable, so a table
+created with a different sort key must be replaced; the membership data is then rebuilt from the S3
+project configs.

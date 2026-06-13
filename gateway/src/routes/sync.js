@@ -140,7 +140,16 @@ export async function syncOneProject(bucket, projectId) {
 
     // Invalidate Redis config cache — next load will re-fetch from S3 fresh.
     await invalidateProject(projectId)
-    await syncProjectMembers(projectId, config.project ?? config.group_id ?? projectId, config.group_id ?? projectId, members)
+    /** @type {{ added: number, removed: number, error?: string } | undefined} */
+    const membershipResult = await syncProjectMembers(
+      projectId,
+      config.project ?? config.group_id ?? projectId,
+      config.group_id ?? projectId,
+      members,
+    )
+    if (membershipResult?.error) {
+      return { project_id: projectId, ok: false, error: membershipResult.error }
+    }
 
     return { project_id: projectId, ok: true, config }
   } catch (err) {

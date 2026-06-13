@@ -504,3 +504,20 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 - Create and seed `quorum/prod/gateway` directly in AWS Secrets Manager before applying the production
   XR. Crossplane does not own this secret; it grants EC2 read access to it.
 - No AWS deployment may be triggered without explicit user approval.
+
+## Production DynamoDB Membership Sync Fix (2026-06-14)
+
+- Production diagnosis confirmed the gateway environment was correct:
+  `QUORUM_CONFIG_BUCKET=quorum-prod-config`,
+  `QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects`, and
+  `AWS_REGION=ap-southeast-2`.
+- The deployed table was rendered from `crossplane/apis/environment/composition.yaml` with sort key
+  `group_id` and no GSI, while `gateway/src/ddb.js` requires sort key `project_id` and queries
+  `ProjectMembersIndex` before every sync write.
+- The live gateway error was:
+  `The table does not have the specified index: ProjectMembersIndex`.
+- `syncProjectMembers()` previously swallowed that error and returned zero counts, so
+  `syncOneProject()` falsely reported success. Membership write errors now carry an `error` field and
+  produce `ok: false`.
+- The membership table is rebuildable from S3 configs. Because DynamoDB primary keys are immutable,
+  an incorrectly keyed empty production table must be replaced before re-running config sync.

@@ -131,6 +131,31 @@ describe('S-DEPLOY composition render', () => {
     ))).toBe(true)
   }, 30000)
 
+  it('renders the membership table with the gateway-compatible key schema and reverse-lookup GSI', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** DynamoDB membership table consumed by gateway/src/ddb.js. */
+    const membershipTable = documents.find((document) => (
+      document.kind === 'Table'
+      && document.metadata.annotations?.['crossplane.io/external-name'] === 'quorum-user-projects'
+    ))
+
+    expect(membershipTable.spec.forProvider.hashKey).toBe('github_username')
+    expect(membershipTable.spec.forProvider.rangeKey).toBe('project_id')
+    expect(membershipTable.spec.forProvider.attribute).toEqual([
+      { name: 'github_username', type: 'S' },
+      { name: 'project_id', type: 'S' },
+    ])
+    expect(membershipTable.spec.forProvider.globalSecondaryIndex).toEqual([
+      {
+        name:           'ProjectMembersIndex',
+        hashKey:        'project_id',
+        rangeKey:       'github_username',
+        projectionType: 'ALL',
+      },
+    ])
+  }, 30000)
+
   it('uses role selectors and an automatic RDS budget stop action', () => {
     /** Rendered production resources. */
     const documents = render()

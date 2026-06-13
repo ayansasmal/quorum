@@ -116,7 +116,7 @@ function chunk(arr, size) {
  * @param {string} projectName
  * @param {string} projectSlug
  * @param {Array<{github_username, role, team, base_confidence, is_owner?}>} members
- * @returns {Promise<{added: number, removed: number}>}
+ * @returns {Promise<{added: number, removed: number, error?: string}>}
  */
 export async function syncProjectMembers(projectId, projectName, projectSlug, members) {
   try {
@@ -180,7 +180,7 @@ export async function syncProjectMembers(projectId, projectName, projectSlug, me
     return { added: toAdd.length, removed: toRemove.length }
   } catch (err) {
     console.error(`[Gateway] ddb.syncProjectMembers(${projectId}) failed: ${err.message}`)
-    return { added: 0, removed: 0 }
+    return { added: 0, removed: 0, error: err.message }
   }
 }
 

@@ -161,3 +161,8 @@ cd .. && ./scripts/setup.sh docker
 | `OPENAI_API_KEY` | — | LLM calls for conflict detection |
 
 Full defaults: [../.env.example](../.env.example)
+
+The membership table contract is PK `github_username`, SK `project_id`, with
+`ProjectMembersIndex` (PK `project_id`, SK `github_username`). Membership write failures are returned
+to `syncOneProject()`, so startup logs and config upload responses report failed projects instead of
+claiming a successful sync.

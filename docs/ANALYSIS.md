@@ -62,7 +62,7 @@
 - **Owns:** `quorum-user-projects` table — permanent membership index (PK: `github_username`, SK: `project_id`; GSI: `ProjectMembersIndex`)
 - **Reads:** `getUserProjects()` — called by profile cache cold path during every JWT verification
 - **Writes:** `syncProjectMembers()` on config sync, `updateMemberRecord()` on role/ownership changes
-- **Failure mode:** `getUserProjects()` catches all errors and returns `[]` (`ddb.js` line 74). The profile cache stores an empty projects array — `req.user.role` and `req.user.is_owner` become `null`/`false` silently for up to 5 minutes
+- **Failure mode:** `getUserProjects()` catches read errors and returns `[]`, so the profile cache can temporarily store an empty project list. Write errors return an explicit `error` field; `syncOneProject()` converts that into `ok: false`, preventing startup and config upload from reporting false success. The table key schema and `ProjectMembersIndex` must match the gateway contract.
 
 ### Redis
 - **Owns:** Three cache namespaces: `config:{group_id}`, `profile:{username}`, `admin:platform`

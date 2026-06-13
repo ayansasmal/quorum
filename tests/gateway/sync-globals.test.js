@@ -55,6 +55,8 @@ vi.mock('../../gateway/src/ddb.js', () => ({
   syncProjectMembers: vi.fn().mockResolvedValue(undefined),
 }))
 
+import { syncProjectMembers } from '../../gateway/src/ddb.js'
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -131,6 +133,27 @@ describe('syncOneProject — self-reference check', () => {
     expect(result.ok).toBe(true)
     expect(result.config?.group_id).toBe('payments-service')
     expect(result.config?.globals).toEqual(['security-standards'])
+  })
+
+  it('returns ok: false when DynamoDB membership sync reports an infrastructure error', async () => {
+    sendImpl = async (cmd) => {
+      if (cmd.constructor.name === 'ListObjectsV2Command') return s3List(['payments-service'])
+      return s3Body({ group_id: 'payments-service', owner: 'alice' })
+    }
+    syncProjectMembers.mockResolvedValueOnce({
+      added:   0,
+      removed: 0,
+      error:   'The table does not have the specified index: ProjectMembersIndex',
+    })
+
+    const { syncOneProject } = await import('../../gateway/src/routes/sync.js')
+    const result = await syncOneProject('quorum-configs', 'payments-service')
+
+    expect(result).toEqual({
+      project_id: 'payments-service',
+      ok:         false,
+      error:      'The table does not have the specified index: ProjectMembersIndex',
+    })
   })
 })
 

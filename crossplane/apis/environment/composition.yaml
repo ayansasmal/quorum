@@ -358,10 +358,15 @@ spec:
                   region: ap-southeast-2
                   billingMode: PAY_PER_REQUEST
                   hashKey: github_username
-                  rangeKey: group_id
+                  rangeKey: project_id
                   attribute:
                     - { name: github_username, type: S }
-                    - { name: group_id, type: S }
+                    - { name: project_id, type: S }
+                  globalSecondaryIndex:
+                    - name: ProjectMembersIndex
+                      hashKey: project_id
+                      rangeKey: github_username
+                      projectionType: ALL
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: database-subnet-group
             base:
