@@ -45,7 +45,7 @@ src/
                             Route ordering: /knowledge/deprecate/bulk MUST be registered before /knowledge/:topic/:key/deprecate to prevent Express matching "deprecate" as :topic.
                             POST /api/review/:conflictId branches on decision_type: conflict path (existing approve/reject/request_changes) vs deprecation_request path (approve runs atomic ACTIVE→DEPRECATED transaction; reject resolves request as rejected; request_changes returns 400). Both paths write audit entry with tool=dashboard-review-deprecation. PE role required for deprecation_request path. Staleness guard: if getCurrentVersion returns null on approve, request is auto-rejected.
     user.js               — GET /user/profile/:username (Redis → DDB)
-    admin.js              — Platform admin management (/admin/config, /admin/users)
+    admin.js              — Platform admin management (/admin/config, /admin/users); final-admin removal is blocked with `409 last_admin`
     governance.js         — LLM conflict detection via OpenAI
   middleware/
     verify-jwt.js         — Async two-step: ES256 verify → loadUserProfile(sub) → X-Quorum-Project header

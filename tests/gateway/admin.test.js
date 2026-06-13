@@ -351,7 +351,7 @@ describe('POST /admin/users', () => {
     expect(body.error).toBe('not_found')
   })
 
-  it('returns 409 when removing the last platform admin', async () => {
+  it('S-09 G3 returns 409 when the last admin self-demotes', async () => {
     mockAdminProfile()
     loadAdminConfig.mockResolvedValue({
       admins:  [{ github_username: 'alice', added_at: '2024-01-01T00:00:00Z', added_by: 'system' }],
@@ -367,5 +367,27 @@ describe('POST /admin/users', () => {
 
     expect(status).toBe(409)
     expect(body.error).toBe('last_admin')
+  })
+
+  it('S-09 G3 returns 409 when another authenticated admin removes the final configured admin', async () => {
+    loadUserProfile.mockResolvedValue({
+      github_username: 'bob',
+      projects:        [],
+    })
+    loadAdminConfig.mockResolvedValue({
+      admins:  [{ github_username: 'alice', added_at: '2024-01-01T00:00:00Z', added_by: 'system' }],
+      version: 1,
+    })
+
+    const tok = await makeToken('bob', true)
+    const { status, body } = await post(
+      '/admin/users',
+      { action: 'remove', github_username: 'alice', reason: 'removing the final configured administrator' },
+      { Authorization: `Bearer ${tok}` },
+    )
+
+    expect(status).toBe(409)
+    expect(body.error).toBe('last_admin')
+    expect(saveAdminConfig).not.toHaveBeenCalled()
   })
 })
