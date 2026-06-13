@@ -131,6 +131,37 @@ describe('GET /user/profile/:username', () => {
     expect(body.error).toBe('profile_not_found')
   })
 
+  it('returns 200 with empty projects when self has zero memberships (onboarding)', async () => {
+    // Self-serve onboarding: a projectless user fetches their own profile to
+    // discover they have no memberships. The gateway must return 200 { projects: [] }
+    // (NOT 404) so the dashboard routes to the NoProjects welcome page.
+    const tok = await makeToken('newcomer')
+    loadUserProfile.mockResolvedValue({ github_username: 'newcomer', projects: [] })
+    loadAdminConfig.mockResolvedValue({ admins: [] })
+
+    const { status, body } = await get('/user/profile/newcomer', { Authorization: `Bearer ${tok}` })
+
+    expect(status).toBe(200)
+    expect(body.github_username).toBe('newcomer')
+    expect(body.projects).toEqual([])
+    expect(body.role).toBeNull()
+  })
+
+  it('returns 404 for a third-party target with zero projects (enumeration guard)', async () => {
+    // A zero-project target is still treated as not-found for non-self lookups so
+    // usernames cannot be enumerated. The access check loads caller + target.
+    const tok = await makeToken('alice')
+    loadUserProfile
+      .mockResolvedValueOnce({ github_username: 'alice', projects: [{ group_id: 'proj-x' }] }) // verifyJwt
+      .mockResolvedValueOnce({ github_username: 'alice', projects: [{ group_id: 'proj-x' }] }) // Promise.all caller
+      .mockResolvedValueOnce({ github_username: 'ghost', projects: [] })                       // Promise.all target
+
+    const { status, body } = await get('/user/profile/ghost', { Authorization: `Bearer ${tok}` })
+
+    expect(status).toBe(404)
+    expect(body.error).toBe('profile_not_found')
+  })
+
   it('returns 403 when caller and target share no projects', async () => {
     const tok = await makeToken('alice')
     // Alice's profile — project X

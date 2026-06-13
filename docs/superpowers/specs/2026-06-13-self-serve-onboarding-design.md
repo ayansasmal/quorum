@@ -48,6 +48,7 @@ Three gates re-check project membership **at login time**, contradicting the sli
 | 1 | PAT / MCP exchange | [auth.js:87-115](../../../gateway/src/routes/auth.js#L87-L115) | `project_id` required; `findMember` → 403 — **before** `isPlatformAdmin` is even consulted |
 | 2 | Browser OAuth callback | [mcp-oauth.js:271-272](../../../gateway/src/routes/mcp-oauth.js#L271-L272) | `projects.length === 0` → redirect `?error=no_projects`; JWT never minted |
 | 3 | Dashboard client | [AuthContext.jsx:331-334](../../../../quorum-dash/src/context/AuthContext.jsx#L331-L334) | zero projects → error + discard JWT |
+| 4 | Profile discovery endpoint | [user.js:54-57](../../../gateway/src/routes/user.js#L54-L57) | self with `projects.length === 0` → `404 profile_not_found`; dashboard's `fetchProfile` throws "Profile fetch failed" **before** reaching gate 3's zero-project branch (found & fixed 2026-06-13) |
 
 **Key safety property preserved:** the per-request guard is untouched. `verify-jwt` still computes `access_denied` for non-members of private projects ([verify-jwt.js:97-118](../../../gateway/src/middleware/verify-jwt.js#L97-L118)), and `/pg/*` + `/api/*` still reject on it. We remove the **front-door ownership check**, not the **per-shelf** one.
 
@@ -71,6 +72,7 @@ Three gates re-check project membership **at login time**, contradicting the sli
 
 - [AuthContext.jsx:331-334](../../../../quorum-dash/src/context/AuthContext.jsx#L331-L334): zero projects → **keep the JWT**, enter `authenticated` with `activeProject = null` (not error, not discard).
 - A welcome/empty screen: *"You're in — no projects yet. Onboard one from your MCP client (`quorum config_upload`)."* No creation form.
+- **Profile discovery (gate 4, [user.js:54-57](../../../gateway/src/routes/user.js#L54-L57)):** the dashboard reaches §4.3 only after `fetchProfile(sub)` resolves. For **self**, a zero-project profile must return `200 { projects: [] }`, never 404 — otherwise `fetchProfile` throws and the user never reaches the welcome state. Third-party zero-project lookups still 404 (username-enumeration guard). Fixed 2026-06-13.
 
 ### 4.4 Admin management from the dashboard (NEW)
 

@@ -6,9 +6,15 @@
  *   This is the v0.3 replacement for GET /auth/projects and the JWT role claims.
  *
  *   Access rules:
- *     - Self: always allowed
+ *     - Self: always allowed (200 even with zero projects — drives the dashboard
+ *       self-serve onboarding flow; a projectless user discovers they have no
+ *       memberships and is routed to the NoProjects welcome page)
  *     - Platform admin (is_admin): any user
  *     - Others: allowed only if requester shares at least one project with the target
+ *
+ *   A zero-project profile is treated as "not found" (404) ONLY for third-party
+ *   lookups, to prevent username enumeration. For self, a zero-project profile is
+ *   a valid 200 response carrying `projects: []`.
  */
 
 import { Router } from 'express'
@@ -52,7 +58,9 @@ router.get('/profile/:username', verifyJwt, async (req, res) => {
   }
 
   const profile = await loadUserProfile(username)
-  if (!profile || profile.projects.length === 0) {
+  // Self with zero projects is a valid 200 ({ projects: [] }) so the dashboard can
+  // route to onboarding. Third parties still get 404 to prevent enumeration.
+  if (!profile || (profile.projects.length === 0 && caller !== username)) {
     return res.status(404).json({ error: 'profile_not_found', message: `No profile found for '${username}'` })
   }
 
