@@ -14,6 +14,7 @@
  */
 
 import { Router } from 'express'
+import { requireMembership } from '../middleware/require-membership.js'
 import {
   getProjectByGroupId,
   getOrCreateKey,
@@ -52,6 +53,10 @@ import { validateKnowledgeInput, ValidationError } from '../shared/graph/validat
 import { createHash } from 'node:crypto'
 
 const router = Router()
+
+// JWT verification is mounted in server.js. Public-project reads remain open,
+// while all dashboard mutations require membership or platform-admin status.
+router.use(requireMembership)
 
 /**
  * Per-IP rate limiter for PE knowledge write endpoints (10 writes/min/IP).

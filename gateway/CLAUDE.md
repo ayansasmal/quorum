@@ -50,6 +50,7 @@ src/
   middleware/
     verify-jwt.js         — Async two-step: ES256 verify → loadUserProfile(sub) → X-Quorum-Project header
                             attaches req.user = { sub, is_admin, project, role, base_confidence, is_owner }
+    require-membership.js — G1 write guard: public-project reads are open; mutations require membership or platform admin
     project.js            — Guards project-scoped routes (400 if req.user.project null)
     rate-limit.js         — Per-IP rate limiting (express-rate-limit)
   shared/                 — Vendored copies of quorum-mcp shared modules (no npm dep)

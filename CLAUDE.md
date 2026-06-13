@@ -304,6 +304,7 @@ The constitutional test suite enforces all of these at 100% coverage:
 | No project offboarding via MCP | `DELETE /projects/:id` is dashboard-only; MCP must never expose an archive/offboard tool — project lifecycle decisions require a human in the loop |
 | Login is identity-only | `POST /auth/token` verifies GitHub identity and issues a slim JWT even without project membership; request middleware enforces project access |
 | Zero-project OAuth remains authenticated | Dashboard OAuth issues a 15-minute JWT with null project context instead of redirecting with `no_projects` |
+| Public projects are read-only for non-members | `requireMembership` rejects roleless mutations across `/pg/*` and `/api/*`; authenticated reads remain available |
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 

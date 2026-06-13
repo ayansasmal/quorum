@@ -8,8 +8,10 @@ info:
     All protected endpoints require an ES256 JWT in the `Authorization: Bearer <token>` header.
     Tokens are issued after completing GitHub OAuth at `GET /auth/github`.
 
-    **Project scoping:** Every authenticated request has its `project_id` injected from the JWT
-    claim. Engineers cannot read or write data belonging to other projects.
+    **Project scoping:** Authenticated project routes resolve their active project from the
+    `X-Quorum-Project` header. Private projects reject non-members; public projects allow
+    authenticated reads but mutating requests return `403 not_a_member` unless the caller
+    has a project role or platform-admin status.
 
     **Base URL (local dev):** `http://localhost:3001`
   contact:

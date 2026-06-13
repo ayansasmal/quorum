@@ -45,6 +45,7 @@
 import { createHash } from 'node:crypto'
 import { Router } from 'express'
 import { verifyJwt } from '../middleware/verify-jwt.js'
+import { requireMembership } from '../middleware/require-membership.js'
 import { validateKnowledgeInput, ValidationError } from '../shared/graph/validate.js'
 import { enforceReasonRequired } from '../shared/governance/constitutional.js'
 import {
@@ -136,6 +137,10 @@ router.use((req, res, next) => {
   }
   next()
 })
+
+// Public projects remain readable to authenticated non-members, but all writes
+// require a resolved project role or platform-admin status.
+router.use(requireMembership)
 
 // Resolve group_id (req.user.project) → q_project_id once per request and stash
 // it on req.user.qProjectId. All subsequent handlers use the q_* id directly.

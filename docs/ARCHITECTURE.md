@@ -140,6 +140,8 @@ Dashboard OAuth does not require an existing project membership. When the verifi
 
 PAT-based exchange (`POST /auth/token`) is a CI fallback: the caller submits a GitHub PAT and the Gateway verifies it against `GET https://api.github.com/user` before issuing a slim identity JWT. `project_id` is optional and project membership never gates issuance. When a project is supplied, its config is used only to enrich the response with role and team metadata; project access is enforced later by request middleware using `X-Quorum-Project`.
 
+Public projects separate read visibility from write authority. `verifyJwt` permits authenticated roleless users to read when `is_public: true`; `requireMembership` then rejects every mutating `/pg/*` and `/api/*` request unless the caller has a project role or is a platform admin.
+
 ### Graphiti Proxy Behaviour
 
 Every `/graphiti/*` call is intercepted by JWT middleware. The Gateway:
