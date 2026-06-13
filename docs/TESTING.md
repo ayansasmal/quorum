@@ -106,7 +106,7 @@ Added as Phase 1 pre-merge gates to define the expected v0.3 behaviour before im
 | `tests/gateway/validate.test.js` | engram | 45 tests covering `validateKnowledgeInput`: all field rules, boundary values (500 chars, 501 chars, HTML chars, empty tags array, 11 tags), reason min/max, confidence range |
 | `tests/gateway/dashboard-write.test.js` | engram | 20 tests covering `POST /api/knowledge`, `POST /api/knowledge/:topic/:key/promote`, `POST /api/knowledge/:topic/:key/supersede`: 403 (wrong role), 413 (body too large), 400 (validation errors), 404 (no draft/active), 409 (duplicate active), 201/200 (success paths), server-set fields (`author`, `author_type`, `triggered_by`) |
 | `tests/gateway/sync-globals.test.js` | engram | Config sync self-reference and cross-catalog validation, plus propagation of DynamoDB membership write failures into `syncOneProject()` |
-| `crossplane/tests/render.test.js` | engram | Rendered production resource graph, including the `quorum-user-projects` PK/SK and `ProjectMembersIndex` contract consumed by the gateway |
+| `crossplane/tests/render.test.js` | engram | Rendered production resource graph, including the `quorum-user-projects` PK/SK and `ProjectMembersIndex` contract plus the instance role's `dynamodb:BatchWriteItem` permission |
 
 ### v0.4 Additions — Test File Inventory
 

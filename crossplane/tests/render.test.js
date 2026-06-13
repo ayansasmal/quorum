@@ -173,6 +173,30 @@ describe('S-DEPLOY composition render', () => {
     expect(action.spec.forProvider.definition.ssmActionDefinition.actionSubType).toBe('STOP_RDS_INSTANCES')
   }, 30000)
 
+  it('grants the application instance every DynamoDB operation used by the membership sync', () => {
+    /** Rendered production resources. */
+    const documents = render()
+    /** Inline policy attached to the EC2 application role. */
+    const instancePolicyResource = documents.find((document) => (
+      document.kind === 'RolePolicy'
+      && document.spec.forProvider.roleSelector?.matchLabels?.['quorum.io/role'] === 'instance'
+    ))
+    /** Parsed IAM policy document. */
+    const instancePolicy = JSON.parse(instancePolicyResource.spec.forProvider.policy)
+    /** DynamoDB statement used by gateway/src/ddb.js. */
+    const dynamodbStatement = instancePolicy.Statement.find((statement) => (
+      statement.Action?.some((action) => action.startsWith('dynamodb:'))
+    ))
+
+    expect(dynamodbStatement.Action).toEqual(expect.arrayContaining([
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+      'dynamodb:BatchWriteItem',
+    ]))
+  }, 30000)
+
   it('targets the configured RDS identifier everywhere', () => {
     /** Rendered production resources. */
     const documents = render()

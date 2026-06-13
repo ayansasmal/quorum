@@ -349,3 +349,7 @@ Gateway startup queries the GSI before writing each project's membership rows. A
 index cannot be repaired by config re-sync alone. DynamoDB primary keys are immutable, so a table
 created with a different sort key must be replaced; the membership data is then rebuilt from the S3
 project configs.
+
+The EC2 instance role must grant `dynamodb:BatchWriteItem` in addition to the item and query
+operations. `syncProjectMembers()` batches both upserts and removals through that API; `PutItem`
+permission alone does not authorize a batch containing put requests.

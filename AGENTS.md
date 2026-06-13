@@ -521,3 +521,6 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
   produce `ok: false`.
 - The membership table is rebuildable from S3 configs. Because DynamoDB primary keys are immutable,
   an incorrectly keyed empty production table must be replaced before re-running config sync.
+- After replacing the table, the next boot exposed a second blocker:
+  `dynamodb:BatchWriteItem` was missing from the EC2 instance role. `syncProjectMembers()` uses
+  `BatchWriteItemCommand` for both puts and removals, so `PutItem` permission is insufficient.

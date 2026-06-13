@@ -465,7 +465,7 @@ spec:
                     {"Version":"2012-10-17","Statement":[
                     {"Effect":"Allow","Action":["secretsmanager:GetSecretValue","rds:DescribeDBInstances","rds-db:connect"],"Resource":"*"},
                     {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],"Resource":["arn:aws:s3:::quorum-prod-*","arn:aws:s3:::quorum-prod-*/*"]},
-                    {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query"],"Resource":"*"},
+                    {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query","dynamodb:BatchWriteItem"],"Resource":"*"},
                     {"Effect":"Allow","Action":["kms:Decrypt","kms:Encrypt","kms:GenerateDataKey","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"*"}]}
                 providerConfigRef: { name: aws-prod, kind: ProviderConfig }
           - name: scheduler-role-policy
