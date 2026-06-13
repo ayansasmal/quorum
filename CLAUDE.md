@@ -358,7 +358,7 @@ REDIS_URL=redis://redis:6379                      # Redis for config + profile c
 QUORUM_CONFIG_CACHE_TTL=300                       # Config cache TTL in seconds
 QUORUM_PROFILE_CACHE_TTL=300                      # Profile cache TTL in seconds
 QUORUM_ADMIN_CACHE_TTL=300                        # Admin config cache TTL in seconds
-QUORUM_FIRST_ADMIN=                               # GitHub username — seeded into configs/.quorum on setup
+QUORUM_FIRST_ADMIN=                               # GitHub username(s), comma-separated — atomically seeded into configs/.quorum at gateway startup
 AWS_REGION · AWS_ENDPOINT_URL · AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY
 
 # Graphiti sidecar (Python container — local dev uses OpenAI)

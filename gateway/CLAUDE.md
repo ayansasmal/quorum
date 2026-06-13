@@ -63,7 +63,7 @@ src/
     governance/constitutional.js — Constitutional enforcement
   keys.js                 — ES256 key generation/loading
   redis.js                — Redis client (separate command + subscriber connections)
-  config-cache.js         — Redis config + profile + admin cache wrappers
+  config-cache.js         — Redis config + profile + admin cache wrappers; atomic `QUORUM_FIRST_ADMIN` boot seed
   ddb.js                  — DynamoDB client (quorum-user-projects table; config cache retired)
   llm.js                  — OpenAI wrapper for governance LLM calls
   errors.js               — Shared error types

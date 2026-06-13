@@ -156,7 +156,7 @@ Project configs live at `s3://quorum-configs/<group_id>.quorum.json` (flat bucke
 
 User profiles are cached in Redis under `profile:{github_username}` (TTL from `QUORUM_PROFILE_CACHE_TTL`, default 300s) — sourced from `quorum-user-projects` DDB on cache miss. Cache invalidation is triggered immediately on every governance write (`POST /config/update-role`, `POST /config/transfer-ownership`, `POST /admin/users`) via `redis.del()` + pub/sub publish to `quorum:invalidate`.
 
-The platform admin list (`configs/.quorum` in S3) is cached under `admin:platform` in Redis (TTL from `QUORUM_ADMIN_CACHE_TTL`, default 300s) and loaded at gateway startup.
+The platform admin list (`configs/.quorum` in S3) is cached under `admin:platform` in Redis (TTL from `QUORUM_ADMIN_CACHE_TTL`, default 300s). At gateway startup, `ensureAdminConfig()` atomically creates the object from the comma-separated `QUORUM_FIRST_ADMIN` value when it is absent, using an S3 conditional write so concurrent instances cannot overwrite or double-seed it. Startup then loads the resulting config into Redis.
 
 Configs are validated against the Zod schema on every load — an invalid config is a hard startup failure for that project.
 

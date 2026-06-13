@@ -269,16 +269,24 @@ async function startup() {
     process.exit(1)
   }
 
-  // 3. Load platform admin config into Redis (non-fatal — not yet seeded on first deploy)
+  // 3. Seed platform admin config once, then load it into Redis.
   try {
+    /** @type {{ ensureAdminConfig: typeof import('./config-cache.js').ensureAdminConfig }} */
+    const { ensureAdminConfig } = await import('./config-cache.js')
+    /** @type {{ seeded: boolean, count?: number, reason?: string }} */
+    const seed = await ensureAdminConfig()
+    if (seed.seeded) {
+      console.error(`[Gateway] ✓ Admin config seeded from QUORUM_FIRST_ADMIN (${seed.count} admin(s))`)
+    }
+    /** @type {object | null} */
     const adminConfig = await loadAdminConfig()
     if (adminConfig) {
       console.error(`[Gateway] ✓ Admin config loaded (${adminConfig.admins?.length ?? 0} admin(s))`)
     } else {
-      console.error('[Gateway] ⚠ Admin config not yet seeded — run setup.sh to initialise')
+      console.error('[Gateway] ⚠ Admin config not seeded — set QUORUM_FIRST_ADMIN to bootstrap admins')
     }
   } catch (err) {
-    console.error(`[Gateway] Admin config load failed (non-fatal): ${err.message}`)
+    console.error(`[Gateway] Admin config seed/load failed (non-fatal): ${err.message}`)
   }
 
   // 4. Start Redis pub/sub invalidation subscriber

@@ -273,6 +273,7 @@ export async function loadAdminConfig() {
  * @param {object} config
  */
 export async function saveAdminConfig(config) {
+  /** @type {string | undefined} */
   const bucket = process.env.QUORUM_CONFIG_BUCKET
   if (!bucket) throw new Error('QUORUM_CONFIG_BUCKET not set')
 
@@ -286,6 +287,76 @@ export async function saveAdminConfig(config) {
   const redis = getRedis()
   await redis.del('admin:platform')
   await redis.publish('quorum:invalidate', 'admin:platform')
+}
+
+/**
+ * Idempotently seed the platform admin config at gateway startup.
+ *
+ * The S3 conditional write makes the operation atomic across concurrent
+ * gateway instances. An existing object is never overwritten.
+ *
+ * @returns {Promise<{ seeded: boolean, count?: number, reason?: string }>}
+ */
+export async function ensureAdminConfig() {
+  /** @type {string | undefined} */
+  const bucket = process.env.QUORUM_CONFIG_BUCKET
+  /** @type {string | undefined} */
+  const firstAdmin = process.env.QUORUM_FIRST_ADMIN
+  if (!bucket || !firstAdmin) return { seeded: false, reason: 'not_configured' }
+
+  /** @type {object | null} */
+  const existing = await loadAdminConfig()
+  if (existing) return { seeded: false, reason: 'already_exists' }
+
+  /** @type {string[]} */
+  const usernames = [...new Set(firstAdmin.split(',').map((username) => username.trim()).filter(Boolean))]
+  if (usernames.length === 0) return { seeded: false, reason: 'not_configured' }
+
+  /** @type {string} */
+  const now = new Date().toISOString()
+  /** @type {{ admins: Array<{ github_username: string, added_at: string, added_by: string }>, version: number, created_at: string }} */
+  const config = {
+    admins: usernames.map((githubUsername) => ({
+      github_username: githubUsername,
+      added_at:        now,
+      added_by:        'boot-seed',
+    })),
+    version:    1,
+    created_at: now,
+  }
+
+  /** @type {import('@aws-sdk/client-s3').PutObjectCommandInput} */
+  const putInput = {
+    Bucket:      bucket,
+    Key:         ADMIN_S3_KEY,
+    Body:        JSON.stringify(config, null, 2),
+    ContentType: 'application/json',
+    IfNoneMatch: '*',
+  }
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await getS3().send(new PutObjectCommand(putInput))
+      break
+    } catch (err) {
+      if (err.name === 'PreconditionFailed' || err.$metadata?.httpStatusCode === 412) {
+        return { seeded: false, reason: 'already_exists' }
+      }
+      if (
+        attempt === 0 &&
+        (err.name === 'ConditionalRequestConflict' || err.$metadata?.httpStatusCode === 409)
+      ) {
+        continue
+      }
+      throw err
+    }
+  }
+
+  /** @type {ReturnType<typeof getRedis>} */
+  const redis = getRedis()
+  await redis.del('admin:platform').catch(() => {})
+
+  return { seeded: true, count: usernames.length }
 }
 
 /**
