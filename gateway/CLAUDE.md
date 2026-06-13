@@ -10,7 +10,7 @@ Not published to npm. Teams check out the repo from GitHub and deploy via Docker
 
 HTTP gateway sitting between the MCP server and persistence layers. Responsibilities:
 
-- **Auth:** GitHub OAuth → ES256 slim JWT `{ sub, is_admin, jti, iat, exp }` + refresh tokens. JWKS at `/.well-known/jwks.json`. PKCE OAuth 2.1 also supported (`routes/mcp-oauth.js`) for MCP clients.
+- **Auth:** GitHub OAuth → ES256 slim JWT `{ sub, is_admin, jti, iat, exp }` + refresh tokens. `POST /auth/token` accepts a GitHub PAT with optional `project_id`; membership never gates issuance and supplied project context only enriches the response. JWKS at `/.well-known/jwks.json`. PKCE OAuth 2.1 is supported (`routes/mcp-oauth.js`) for MCP clients.
 - **Identity:** Two-step `verify-jwt.js` middleware — JWT → `loadUserProfile(sub)` from Redis (`profile:{sub}`) → DDB on miss. Active project is set per-request via `X-Quorum-Project` header (not in JWT). `group_id` is injected into every Graphiti call from `req.user.project`.
 - **Config:** S3-backed project config with Redis read-through cache (`config:{group_id}`). DynamoDB holds the user→projects membership index (`quorum-user-projects`).
 - **Audit API:** `/pg/*` routes expose PostgreSQL operations to the MCP over HTTP. Dual-store pipeline writes to PostgreSQL (`knowledge_versions.summary` for durable content + SHA256 chain) and Graphiti (semantic graph).

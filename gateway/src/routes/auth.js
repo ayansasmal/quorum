@@ -82,11 +82,12 @@ async function issueToken(sub, isAdmin) {
 
 // POST /auth/token
 router.post('/token', async (req, res) => {
+  /** @type {{ github_token?: string, project_id?: string }} */
   const { github_token, project_id } = req.body ?? {}
 
   if (!github_token) return res.status(400).json({ error: 'missing_param', message: 'github_token required' })
-  if (!project_id)   return res.status(400).json({ error: 'missing_param', message: 'project_id required' })
 
+  /** @type {string} */
   let githubLogin
   try {
     githubLogin = await verifyGitHubToken(github_token)
@@ -94,33 +95,35 @@ router.post('/token', async (req, res) => {
     return res.status(401).json({ error: 'github_auth_failed', message: err.message })
   }
 
-  let config
-  try {
-    config = await loadProjectConfig(project_id)
-  } catch (err) {
-    return res.status(404).json({
-      error:   'project_not_found',
-      message: `Project '${project_id}' not found or config load failed: ${err.message}`,
-    })
+  /** @type {object | null} */
+  let config = null
+  /** @type {object | null} */
+  let member = null
+  if (project_id) {
+    try {
+      config = await loadProjectConfig(project_id)
+      member = findMember(config, githubLogin)
+    } catch {
+      config = null
+      member = null
+    }
   }
 
-  const member = findMember(config, githubLogin)
-  if (member === null && config.guest_access !== true) {
-    return res.status(403).json({
-      error:   'not_a_member',
-      message: `You are not a member of project '${project_id}'`,
-    })
-  }
-
+  /** @type {boolean} */
   const isAdmin = await isPlatformAdmin(githubLogin)
+  /** @type {string} */
   const token   = await issueToken(githubLogin, isAdmin)
 
   // Response still includes role/team/project for backward-compatible clients.
   // These are derived from the project config — not embedded in the token itself.
+  /** @type {string | null} */
   const role           = member?.role ?? null
+  /** @type {string | null} */
   const team           = member?.team ?? null
+  /** @type {number} */
   const baseConfidence = role && config.roles?.[role] ? config.roles[role].base_confidence : 0.5
-  const slug           = config.group_id ?? project_id
+  /** @type {string | null} */
+  const slug           = config?.group_id ?? project_id ?? null
 
   res.json({
     token,

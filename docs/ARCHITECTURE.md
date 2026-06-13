@@ -136,7 +136,7 @@ sequenceDiagram
 
 The gateway discriminates between the two flows using separate in-memory Maps: `pendingStates` (dashboard CSRF states set by `GET /auth/github`) and `pkceStore` (MCP PKCE sessions set by `GET /oauth/authorize`). A callback with a state in `pendingStates` follows the dashboard path; one in `pkceStore` follows the MCP path.
 
-PAT-based exchange (`POST /auth/token`) is a CI fallback: the caller submits a GitHub PAT, the Gateway verifies it against `GET https://api.github.com/user`, then performs the same member lookup and JWT signing.
+PAT-based exchange (`POST /auth/token`) is a CI fallback: the caller submits a GitHub PAT and the Gateway verifies it against `GET https://api.github.com/user` before issuing a slim identity JWT. `project_id` is optional and project membership never gates issuance. When a project is supplied, its config is used only to enrich the response with role and team metadata; project access is enforced later by request middleware using `X-Quorum-Project`.
 
 ### Graphiti Proxy Behaviour
 
@@ -1174,4 +1174,3 @@ For production at Macquarie or any enterprise — use AWS Bedrock. IAM auth mean
 in configuration, Claude Sonnet runs natively, and Titan Embeddings complete the stack.
 Anthropic direct API is also supported by Graphiti but verify structured output stability
 before relying on it in production Graphiti pipelines.
-

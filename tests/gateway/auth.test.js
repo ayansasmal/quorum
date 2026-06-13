@@ -13,8 +13,9 @@
  *   1. Valid GitHub token + known project → 200 with a signed JWT
  *   2. Invalid GitHub token (GitHub 401) → 401 gateway error
  *   3. Missing github_token in body → 400
- *   4. Missing project_id in body → 400
- *   5. Project not found → 404
+ *   4. Missing project_id in body → 200 with a slim JWT
+ *   5. Unknown project → 200 without project enrichment
+ *   6. Non-member project → 200 without member enrichment
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
@@ -137,6 +138,24 @@ function mockGitHub({ ok, status = 200, login = 'alice' }) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('POST /auth/token', () => {
+  it('returns a slim JWT when project_id is absent', async () => {
+    mockGitHub({ ok: true, login: 'alice' })
+
+    const { status, body } = await post('/auth/token', {
+      github_token: 'ghp_valid',
+    })
+
+    expect(status).toBe(200)
+    expect(body.sub).toBe('alice')
+    expect(typeof body.token).toBe('string')
+    expect(body.token.split('.').length).toBe(3)
+    expect(body.expires_in).toBe(900)
+    expect(body.project).toBeNull()
+    expect(body.role).toBeNull()
+    expect(body.member_found).toBe(false)
+    expect(body.is_admin).toBe(false)
+  })
+
   it('returns a signed JWT for a valid GitHub token and known project', async () => {
     mockGitHub({ ok: true, login: 'alice' })
     loadProjectConfig.mockResolvedValue(PROJECT_CONFIG)
@@ -180,17 +199,7 @@ describe('POST /auth/token', () => {
     expect(body.message).toMatch(/github_token/)
   })
 
-  it('returns 400 when project_id is absent from the request body', async () => {
-    const { status, body } = await post('/auth/token', {
-      github_token: 'ghp_valid',
-    })
-
-    expect(status).toBe(400)
-    expect(body.error).toBe('missing_param')
-    expect(body.message).toMatch(/project_id/)
-  })
-
-  it('returns 404 when the project does not exist', async () => {
+  it('issues a JWT without enrichment when the project does not exist', async () => {
     mockGitHub({ ok: true, login: 'alice' })
     loadProjectConfig.mockRejectedValue(new Error('project not found'))
 
@@ -199,8 +208,25 @@ describe('POST /auth/token', () => {
       project_id:   'unknown-project',
     })
 
-    expect(status).toBe(404)
-    expect(body.error).toBe('project_not_found')
+    expect(status).toBe(200)
+    expect(body.project).toBe('unknown-project')
+    expect(body.role).toBeNull()
+    expect(body.member_found).toBe(false)
+  })
+
+  it('issues a JWT without member enrichment for a project non-member', async () => {
+    mockGitHub({ ok: true, login: 'bob' })
+    loadProjectConfig.mockResolvedValue(PROJECT_CONFIG)
+
+    const { status, body } = await post('/auth/token', {
+      github_token: 'ghp_valid',
+      project_id:   'test-project',
+    })
+
+    expect(status).toBe(200)
+    expect(body.project).toBe('test-project')
+    expect(body.role).toBeNull()
+    expect(body.member_found).toBe(false)
   })
 })
 

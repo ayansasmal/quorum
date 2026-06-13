@@ -177,6 +177,20 @@ components:
         refresh_token: { type: string, description: Opaque refresh token (store securely) }
         expires_in:    { type: integer, description: JWT lifetime in seconds }
 
+    PatTokenResponse:
+      type: object
+      required: [token, expires_in, sub, project, role, base_confidence, is_admin, member_found]
+      properties:
+        token:           { type: string, description: ES256-signed slim JWT containing identity claims only }
+        expires_in:      { type: integer, description: JWT lifetime in seconds, example: 900 }
+        sub:             { type: string, description: Verified GitHub username }
+        project:         { type: string, nullable: true, description: Supplied or resolved project identifier; null when omitted }
+        role:            { type: string, nullable: true, description: Project role when the caller is a member }
+        team:            { type: string, nullable: true }
+        base_confidence: { type: number, minimum: 0, maximum: 1 }
+        is_admin:        { type: boolean }
+        member_found:    { type: boolean, description: Whether the verified user is a member of the supplied project }
+
     UserInfo:
       type: object
       properties:
@@ -584,27 +598,37 @@ paths:
 
   /auth/token:
     post:
-      summary: Exchange GitHub OAuth code for JWT (MCP / programmatic flow)
+      summary: Exchange a GitHub personal access token for a slim JWT
       operationId: exchangeToken
       security: []
       tags: [Auth]
+      description: |
+        Verifies the caller's GitHub identity and issues a slim `{ sub, is_admin }` JWT.
+        `project_id` is optional and membership never gates token issuance. When supplied,
+        the gateway attempts to enrich the response with project role and team metadata.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code]
+              required: [github_token]
               properties:
-                code: { type: string, description: GitHub OAuth code }
+                github_token: { type: string, description: GitHub personal access token }
+                project_id:   { type: string, description: Optional project identifier used only for response enrichment }
       responses:
         '200':
-          description: JWT and refresh token
+          description: Slim JWT issued after GitHub identity verification
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TokenResponse' }
+              schema: { $ref: '#/components/schemas/PatTokenResponse' }
         '400':
-          description: Missing or invalid code
+          description: Missing github_token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: GitHub token invalid or expired
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
