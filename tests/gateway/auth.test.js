@@ -152,7 +152,7 @@ describe('POST /auth/token', () => {
     expect(body.project).toBe('test-project')
     expect(body.role).toBe('engineer')
     expect(body.team).toBe('platform')
-    expect(body.expires_in).toBe(3600)
+    expect(body.expires_in).toBe(900)
     expect(body.member_found).toBe(true)
     // Verify it is a 3-part JWT
     expect(body.token.split('.').length).toBe(3)

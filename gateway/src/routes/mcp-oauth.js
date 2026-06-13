@@ -48,7 +48,7 @@ const codeStore   = new Map()
 
 const CODE_TTL_MS = 60_000        // auth codes expire in 60 s
 const PKCE_TTL_MS = 5 * 60_000   // PKCE state expires in 5 min
-const TOKEN_TTL_SECONDS = 3600
+const TOKEN_TTL_SECONDS = 900 // 15 minutes
 
 function pruneStores() {
   const now = Date.now()

@@ -76,7 +76,7 @@ Three gates re-check project membership **at login time**, contradicting the sli
 
 - The dashboard **Admin** panel ([Admin.jsx](../../../../quorum-dash/src/pages/Admin.jsx)) must let an admin **add and update admins**, backed by the existing `POST /admin/users` / `/admin/config` ([admin.js](../../../gateway/src/routes/admin.js)).
 - Guard rails (see §5): admin-gated; **cannot remove the last admin** (§5 G3).
-- **Propagation (§5 G2 decision):** `is_admin` stays in the JWT. A newly-granted admin must **re-authenticate** to receive powers (their current token has `is_admin: false`); a revoked admin retains powers until their token expires (≤1 h). Accepted given the short TTL.
+- **Propagation (§5 G2 decision):** `is_admin` stays in the JWT. A newly-granted admin must **re-authenticate** to receive powers (their current token has `is_admin: false`); a revoked admin retains powers until their token expires (≤15 min — `TOKEN_TTL_SECONDS = 900`). Accepted given the short TTL.
 
 ---
 
@@ -90,7 +90,9 @@ Any authenticated user can `POST` a **DRAFT** to **any `is_public` project** the
 
 ### G2 — Stale `is_admin` on revocation · **P1 · ACCEPTED RISK** · **RESOLVED**
 `is_admin` is baked into the JWT at issuance.
-**RESOLVED:** keep `is_admin` in the JWT (no per-request resolution). Consequence accepted: a newly-granted admin must **re-authenticate** to receive powers, and a revoked admin retains powers until their token expires (≤1 h TTL). Bounded by the short TTL; admin churn is expected to be rare. The zero-admin lockout case is covered separately by G3.
+**RESOLVED:** keep `is_admin` in the JWT (no per-request resolution). Consequence accepted: a newly-granted admin must **re-authenticate** to receive powers, and a revoked admin retains powers until their token expires (≤15 min — `TOKEN_TTL_SECONDS = 900` in both `auth.js` and `mcp-oauth.js`). Bounded by the short TTL; admin churn is expected to be rare. The zero-admin lockout case is covered separately by G3.
+
+> **Note — refresh friction:** `/auth/refresh` is a *sliding-window* refresh (requires a still-valid JWT), so the dashboard can refresh silently on a timer. The MCP OAuth flow has **no `refresh_token` grant** (`authorization_code` only), so MCP clients must re-run PKCE every ≤15 min. Accepted as the cost of a uniform 15-min revocation window. A true MCP refresh-token grant is a future hardening item, not part of Initiative I.
 
 ### G3 — Last-admin lockout / self-demotion · **P1 · NEW** · **RESOLVED**
 Dashboard admin management could remove the final admin (or an admin demotes themselves), leaving the building with no keys.
@@ -134,7 +136,7 @@ All four security questions are settled; they are the source of truth for implem
 | # | Decision | Resolution |
 |---|----------|------------|
 | **G1** | Public-project writes by non-members | **Read-only.** Public projects are readable by any authenticated user; **writes** require membership. Every write path rejects a `role === null` writer even when `!access_denied`. |
-| **G2** | `is_admin` propagation | **Keep `is_admin` in the JWT** (no per-request resolution). A newly-granted admin re-authenticates to gain powers; a revoked admin keeps them until token expiry (≤1 h TTL). Risk accepted as bounded. |
+| **G2** | `is_admin` propagation | **Keep `is_admin` in the JWT** (no per-request resolution). A newly-granted admin re-authenticates to gain powers; a revoked admin keeps them until token expiry (**≤15 min** — `TOKEN_TTL_SECONDS = 900`). Risk accepted as bounded. MCP has no refresh-token grant, so MCP clients re-auth every ≤15 min. |
 | **G3** | Last-admin lockout | **Block the last removal.** `409 last_admin` on removing the final admin or self-demoting when you are the last. Adds are always allowed. |
 | **G4** | Namespace squatting | **Accept-and-reclaim.** First-come-first-served, no pre-reservation; admins reclaim contested names via `DELETE /admin/projects/:groupId`; decay retires unused squats. |
 

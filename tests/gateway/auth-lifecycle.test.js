@@ -133,7 +133,7 @@ describe('POST /auth/refresh', () => {
     expect(status).toBe(200)
     expect(typeof body.token).toBe('string')
     expect(body.token.split('.').length).toBe(3)
-    expect(body.expires_in).toBe(3600)
+    expect(body.expires_in).toBe(900)
     expect(body.sub).toBe('alice')
     expect(body.is_admin).toBe(false)
   })

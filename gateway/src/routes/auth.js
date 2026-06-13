@@ -26,7 +26,7 @@ import { getUserProjects } from '../ddb.js'
 
 const router = Router()
 
-const TOKEN_TTL_SECONDS = 3600 // 1 hour
+const TOKEN_TTL_SECONDS = 900 // 15 minutes
 
 /**
  * Verify a GitHub token by calling the GitHub user API.
