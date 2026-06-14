@@ -193,6 +193,62 @@ describe('getConfig', () => {
   })
 })
 
+// ── getConfigSafe / isConfigLoaded ────────────────────────────────────────────
+
+describe('getConfigSafe / isConfigLoaded', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env.QUORUM_CONFIG_PATH
+    delete process.env.QUORUM_CONFIG_BUCKET
+  })
+
+  it('isConfigLoaded() is true and getConfigSafe() returns the config after loadConfig()', async () => {
+    const { loadConfig, getConfigSafe, isConfigLoaded } = await import('../../gateway/src/shared/config/loader.js')
+    await loadConfig(null)
+    expect(isConfigLoaded()).toBe(true)
+    const safe = getConfigSafe()
+    expect(safe).not.toBeNull()
+    expect(typeof safe.group_id).toBe('string')
+  })
+
+  it('getConfigSafe() never throws — unlike getConfig() — so callers can degrade', async () => {
+    const { loadConfig, getConfig, getConfigSafe } = await import('../../gateway/src/shared/config/loader.js')
+    await loadConfig(null)
+    // Both reflect the same loaded config; the contract difference (throw vs null
+    // when unloaded) is what remember() relies on to avoid "Config not loaded".
+    expect(() => getConfigSafe()).not.toThrow()
+    expect(getConfigSafe()).toEqual(getConfig())
+  })
+})
+
+// ── buildEnvFallback infallibility ────────────────────────────────────────────
+
+describe('loadConfig — env fallback is infallible (never leaves _config null)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env.QUORUM_CONFIG_PATH
+    delete process.env.QUORUM_CONFIG_BUCKET
+  })
+
+  afterEach(() => {
+    delete process.env.QUORUM_CONFLICT_THRESHOLD
+    delete process.env.QUORUM_AUTHORITY_THRESHOLD
+  })
+
+  it('loads a usable config even when threshold env vars are non-numeric', async () => {
+    // parseFloat('not-a-number') → NaN; the schema parse may reject it, but the
+    // fallback must still populate _config (raw shape) rather than leaving it null.
+    process.env.QUORUM_CONFLICT_THRESHOLD  = 'not-a-number'
+    process.env.QUORUM_AUTHORITY_THRESHOLD = 'also-bad'
+    const { loadConfig, isConfigLoaded, getConfigSafe } = await import('../../gateway/src/shared/config/loader.js')
+    const config = await loadConfig(null)
+    expect(config).not.toBeNull()
+    expect(isConfigLoaded()).toBe(true)
+    expect(getConfigSafe()).not.toBeNull()
+    expect(typeof config.group_id).toBe('string')
+  })
+})
+
 // ── stopConfigPoller ──────────────────────────────────────────────────────────
 
 describe('stopConfigPoller', () => {

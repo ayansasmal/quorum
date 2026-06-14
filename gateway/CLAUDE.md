@@ -96,6 +96,7 @@ When either repo changes shared logic (queries, audit, constitutional rules), th
 | File | Purpose |
 |------|---------|
 | `config/schema.js` | QuorumConfigSchema (zod) |
+| `config/loader.js` | Config resolution + cache (`loadConfig`); `getConfig` throws when unloaded, `getConfigSafe`/`isConfigLoaded` are non-throwing; env fallback is infallible (never leaves `_config` null) |
 | `config/migrations.js` | PostgreSQL schema migrations — `q_*` id schema (`q_projects`, `q_keys`) |
 | `graph/schema.js` | KnowledgeStatus enum |
 | `graph/queries.js` | SQL query helpers — always pass a real `pg.Pool` |
