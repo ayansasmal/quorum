@@ -9,6 +9,11 @@ LOG_FILE="${LOG_DIR}/$(basename "${BASH_SOURCE[0]}" .sh)-$(date +%Y%m%d-%H%M%S).
 exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[quorum] $(date '+%Y-%m-%dT%H:%M:%S%z') start $(basename "${BASH_SOURCE[0]}"); log -> ${LOG_FILE}"
 
+# SSM runs a non-login root shell — source the runtime env file so variables
+# written from the prod secret by start.sh (SNAPSHOT_BUCKET, AWS_REGION, …) are available.
+# shellcheck source=/dev/null
+[[ -f /etc/quorum/quorum.env ]] && source /etc/quorum/quorum.env
+
 : "${SNAPSHOT_BUCKET:?}" "${AWS_REGION:?}"
 COMPOSE=(docker compose -f /opt/quorum/docker-compose.aws.yml)
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
