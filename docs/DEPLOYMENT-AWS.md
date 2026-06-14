@@ -91,22 +91,34 @@ The following steps are operator-run and intentionally excluded from tests.
    kubectl get secret aws-creds-prod -n quorum-system
    ```
 
-2. Build the arm64 images locally:
+2. Verify the Graphiti MCP image is published to GHCR.
+
+   The Graphiti image is built automatically by the `quorum-graphiti-publish.yml` workflow in the
+   `ayansasmal/quorum-graphiti` fork on every push to `main`. The tag is always an immutable
+   commit-derived `sha-<commit>` — never a floating version label.
+
+   To find the current pinned tag:
+
+   ```bash
+   grep graphitiTag crossplane/environments/prod.yaml
+   # graphitiTag: "sha-<commit>"
+   ```
+
+   To verify the image exists in GHCR before deploying:
+
+   ```bash
+   docker pull ghcr.io/ayansasmal/graphiti-mcp:<sha-tag>
+   ```
+
+   The gateway image is still built manually and pushed as a semver tag. To build and push a new
+   gateway image:
 
    ```bash
    docker buildx build --platform linux/arm64 -f Dockerfile.gateway \
      -t ghcr.io/ayansasmal/quorum-gateway:0.4.12 --load .
-   docker buildx build --platform linux/arm64 -f Dockerfile.graphiti \
-     -t ghcr.io/ayansasmal/graphiti-mcp:0.4.x --load .
-   ```
-
-3. Authenticate to GHCR and push the reviewed images:
-
-   ```bash
    gh auth refresh -h github.com -s write:packages
    gh auth token | docker login ghcr.io --username ayansasmal --password-stdin
    docker push ghcr.io/ayansasmal/quorum-gateway:0.4.12
-   docker push ghcr.io/ayansasmal/graphiti-mcp:0.4.x
    ```
 
    Both runtime packages are public under the `ayansasmal` GHCR namespace, so EC2 pulls them without
@@ -125,9 +137,9 @@ The following steps are operator-run and intentionally excluded from tests.
    > present in the secret. The XR's `spec.images.*` block is required by the XRD schema but is
    > **not wired into the Composition**; editing `gatewayTag`/`graphitiTag` in `prod.yaml` and
    > reapplying changes nothing on the box. A missing tag key surfaces as an unhelpful
-   > `image: ghcr.io/ayansasmal/quorum-gateway:` pull failure at boot. Note `graphitiTag: "0.4.x"`
-   > is a **floating** tag — re-bootstrapping a box can pull a different graphiti build; pin a
-   > concrete tag if reproducibility matters.
+   > `image: ghcr.io/ayansasmal/quorum-gateway:` pull failure at boot. `graphitiTag` must always
+   > be an immutable `sha-<commit>` tag — floating tags are not permitted; the Graphiti fork's CI
+   > workflow publishes a new immutable tag on every `main` push.
 
    The application secret does not control the RDS resource identifier. Production bootstrap uses
    the canonical `quorum-prod` identifier, matching `spec.database.identifier`, schedules, and budget
