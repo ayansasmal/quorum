@@ -1123,7 +1123,7 @@ echo "rds credentials refreshed"
   - `quorum-snapshot.service` + `.timer` (every 60 min) → `snapshot-save.sh`.
   - `quorum-decay.service` + `.timer` (daily) → `docker compose run --rm decay-job`.
   - `quorum-archive.service` + `.timer` (daily) → `docker compose run --rm archive-job`.
-  - `quorum-recheck.service` + `.timer` (hourly) → `docker compose run --rm recheck-job`.
+  - `quorum-recheck.service` + `.timer` (every 5 min) → `docker compose run --rm recheck-job`.
   Each `.service` sources `/etc/quorum/quorum.env` via `EnvironmentFile=`.
 - [ ] **Step 2:** Validate with `systemd-analyze verify` if available (Linux only; on macOS skip with a note). At minimum, add a vitest case asserting every `.timer` has a `[Timer]` section and every `.service` has `ExecStart=`. Put it in a new `crossplane/tests/systemd.test.js`.
 - [ ] **Step 3:** Commit `feat(deploy): add systemd units and timers for the stack and jobs`.

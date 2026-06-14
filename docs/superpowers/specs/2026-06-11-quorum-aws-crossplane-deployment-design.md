@@ -744,7 +744,7 @@ These are in-instance systemd timers (they only run while the instance is up):
 |-----|---------|---------|
 | Confidence decay | `npm run job:decay` | Daily |
 | Audit archival | `npm run job:archive` | Daily |
-| Conflict recheck | `npm run job:recheck` | Hourly |
+| Conflict recheck | `npm run job:recheck` | Every 5 min |
 | FalkorDB + Caddy snapshot | `snapshot-save.sh` | Every 60 minutes |
 | RDS credential refresh | bootstrap script | Every 15 minutes |
 

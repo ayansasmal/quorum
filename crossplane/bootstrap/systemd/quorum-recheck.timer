@@ -1,9 +1,9 @@
 [Unit]
-Description=Recheck Quorum pending conflicts hourly
+Description=Recheck Quorum pending conflicts every 5 minutes
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=60min
+OnBootSec=5min
+OnUnitActiveSec=5min
 Persistent=true
 
 [Install]
