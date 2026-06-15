@@ -177,8 +177,8 @@ export const QuorumConfigSchema = z.object({
     .optional(),
 
   /**
-   * Marks this project's knowledge as freely readable without authentication.
-   * Defined now for schema completeness; enforcement is a v0.5 feature.
+   * Allows authenticated non-members to read this project's knowledge.
+   * Mutations still require project membership or platform-admin authority.
    */
   is_public: z.boolean().optional(),
 

@@ -208,7 +208,7 @@ graph TD
 - `quorum-mcp/tests/tools/forget.test.js`: two fixes — (1) enrichment assertion updated to `expect.objectContaining({ requestor })` since `forget.js` now includes `topic`/`key` in enrichment; (2) `already_requested` mock now includes `conflict_key` field for key-scoped dedup check.
 - `docs/e2e/journey-story-04-06-2026.md` updated: MCP stdio protocol gap upgraded from `🔶 MT-01–MT-06 only` to `✅ Automated (54/54)`; cross-reference to `quorum-mcp/docs/journey-story-04-06-2026-mcp.md` added.
 
-**Gap analysis complete (2026-05-28):** `docs/e2e/journey-story-28-05-2026.md` + `docs/e2e/GAP-ANALYSIS.md` — 38 prioritised gaps across P0–P6. Three-layer test architecture: UT (pure function) | GIT (gateway integration, mocked DB) | E2E-API (running stack) | E2E-UI (Playwright browser). P0 gaps: GAP-001 ✅, GAP-002 ✅, GAP-003 ✅. P1 gap: GAP-004 ✅ — `constraints` silently dropped from `buildExtractPrompt`; fixed: `buildExtractPrompt` now takes a 4th `constraintsToAvoid` param, `/extract` handler destructures `constraints` from req.body and forwards it; 2 new GIT tests; S-21.3 step 2 comment updated; 687 gateway tests. GAP-005 deferred to production (no EventBridge in dev stack; production smoke test documented in GAP-ANALYSIS.md). GAP-006 ✅ — S-21.6 (4 tests): `deviate()` contract — full body/severity/idempotent/not_linked/missing-field; `deviation_id` is UUID not BIGINT. GAP-007 ✅ — S-21.7 (3 tests): `conformance()` contract — all 7 fields, breakdown 6 keys, UNCERTIFIED shape. GAP-008 ✅ (CODE-FIRST) — `PUT /config/:projectId` added to `gateway/src/routes/config.js` (PA-only, schema-validated, S3 write + Redis invalidate + DDB sync); S-13.6 (5 tests): write/read-back/403/400-mismatch/restore. E2E suite: 510 passed, 1 skipped.
+**Gap analysis complete (2026-05-28):** `docs/e2e/journey-story-28-05-2026.md` + `docs/e2e/GAP-ANALYSIS.md` — 38 prioritised gaps across P0–P6. Three-layer test architecture: UT (pure function) | GIT (gateway integration, mocked DB) | E2E-API (running stack) | E2E-UI (Playwright browser). P0 gaps: GAP-001 ✅, GAP-002 ✅, GAP-003 ✅. P1 gap: GAP-004 ✅ — `constraints` silently dropped from `buildExtractPrompt`; fixed: `buildExtractPrompt` now takes a 4th `constraintsToAvoid` param, `/extract` handler destructures `constraints` from req.body and forwards it; 2 new GIT tests; S-21.3 step 2 comment updated; 687 gateway tests. GAP-005 deferred to production (no EventBridge in dev stack; production smoke test documented in GAP-ANALYSIS.md). GAP-006 ✅ — S-21.6 (4 tests): `deviate()` contract — full body/severity/idempotent/not_linked/missing-field; `deviation_id` is UUID not BIGINT. GAP-007 ✅ — S-21.7 (3 tests): `conformance()` contract — all 7 fields, breakdown 6 keys, UNCERTIFIED shape. GAP-008 ✅ (CODE-FIRST) — `PUT /config/:projectId` added to `gateway/src/routes/config.js` (principal architect or platform admin, schema-validated, S3 write + Redis invalidate + DDB sync); S-13.6 (5 tests): write/read-back/403/400-mismatch/restore. E2E suite: 510 passed, 1 skipped.
 
 **Documentation synced (2026-05-29):** All docs updated to reflect 685 gateway tests, 498 E2E, all P0 gaps closed. Updated: `README.md` (test counts, coexist_merge, config upsert), `docs/ROADMAP.md` (Wave H section), `docs/TESTING.md` (v0.4 snapshot, e2e suite metrics), `docs/e2e/GAP-ANALYSIS.md` (P0 closure notes), `docs/e2e/README.md` + `TEST-PLAN.md` (S-11 OwnScore 180→288, suite total 3422→3530, pillar table corrected), `docs/e2e/journeys/J11-self-approval.md` (S-11.4 Case 4 added), `docs/ARCHITECTURE.md` (config/upload upsert, coexist_merge in /api/review).
 
@@ -385,6 +385,13 @@ bootstrap config creation, duplicate namespace rejection, public-project
 read-only enforcement, and the dashboard welcome state. Playwright discovery is
 verified; the live Docker/browser run remains pending because command approval
 was unavailable during implementation.
+
+**Project visibility UI handoff (2026-06-15):** The dashboard Config page
+visibility toggle must mirror `PUT /config/:projectId`: both
+`principal_architect` users and platform admins may change `is_public`. Read the
+active project role from `currentProjectData.role`, not the slim JWT-backed
+`user.role`. Public projects grant authenticated non-members read-only access;
+private projects remain member-only.
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 

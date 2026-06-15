@@ -92,7 +92,7 @@ Edit `my-project.quorum.json`:
 | `hierarchy` | No | Position in the org hierarchy. Used for portfolio rollup (v0.4). See Step 5. |
 | `is_global` | No | When `true`, this project is a global catalog — its entries are visible across all linked projects. Requires `architect+` to write; PA to approve. Default: `false`. |
 | `global_scope` | No | Visibility scope when `is_global: true`. One of: `"org"` (all projects), `"division:<group_id>"`, `"department:<group_id>"`. Default: `"org"`. |
-| `is_public` | No | Reserved for future anonymous read access. Define now for forward compatibility; no gateway behaviour change yet. |
+| `is_public` | No | When `true`, authenticated non-members have read-only access. Mutations still require project membership or platform-admin authority. Defaults to private when omitted. |
 | `globals` | No | List of `group_id` values that are `is_global: true` projects this project links to. Entries from these catalogs appear in `recall()`/`search()` results annotated `source: 'global'`. |
 
 ### IDE validation and autocomplete

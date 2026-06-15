@@ -484,7 +484,7 @@ An entry moves through: `DRAFT → ACTIVE → SUPERSEDED / DEPRECATED`. The grap
 | S-13.3 Self-Reference Guard | Project that lists itself in `globals` uploads (201) but sync puts it in `failed[]` |
 | S-13.4 `GET /api/globals` | Discovers `is_global=TRUE` projects; enriches with config metadata; non-member of private project → 403 |
 | S-13.5 Config Schema Validation | Invalid `global_scope` → 400; `is_global`, `hierarchy`, `globals` all accepted |
-| S-13.6 Config Update | `PUT /config/:projectId` (PA-only, schema-validated, S3 write + Redis invalidate + DDB sync); write/read-back/403/400-mismatch/restore |
+| S-13.6 Config Update | `PUT /config/:projectId` (principal architect or platform admin, schema-validated, S3 write + Redis invalidate + DDB sync); write/read-back/403/400-mismatch/restore |
 | S-13.7 Division-Scoped Catalog Hierarchy | Division-scoped catalog visible to projects in same division; invisible to projects in other divisions |
 
 ### Story
