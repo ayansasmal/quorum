@@ -711,6 +711,10 @@ describe('POST /api/review/:conflictId — conflict path', () => {
       if (sql.includes('SELECT topic, key FROM q_keys')) {
         return Promise.resolve({ rows: [{ topic: 'infra', key: 'deploy-policy' }] })
       }
+      // Linked DRAFT lookup — used when pending_decisions.incoming_version_id is set (BUG-06 fix)
+      if (sql.includes('knowledge_versions') && sql.includes('version_id = $1')) {
+        return Promise.resolve({ rows: [{ version_id: 'q_k1_v7', version: 7, author: 'bob', q_key_id: 'q_k1', q_project_id: 'q_p1' }] })
+      }
       return Promise.resolve({ rows: [] })
     })
     // getLatestDraftVersion returns { version: 2, author: 'bob' } (default from global mock)
