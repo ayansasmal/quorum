@@ -64,7 +64,7 @@ async function main() {
 
   // Fetch pending rows
   const { rows: pending } = await pool.query(
-    `SELECT id, topic, key, version, content, author, triggered_by, project_id
+    `SELECT version_id, topic, key, version, summary, author, triggered_by, q_project_id
      FROM knowledge_versions
      WHERE status = $1
      ORDER BY created_at ASC
@@ -91,7 +91,7 @@ async function main() {
   let conflicted = 0
 
   for (const row of pending) {
-    const conflictResult = await detectConflict(row.content, row.topic, row.key).catch(() => ({
+    const conflictResult = await detectConflict(row.summary, row.topic, row.key).catch(() => ({
       conflict: false,
       graphiti_unavailable: true,
     }))
@@ -106,8 +106,8 @@ async function main() {
     if (conflictResult.conflict) {
       // Conflict detected — leave as DRAFT and log for human review
       await pool.query(
-        `UPDATE knowledge_versions SET status = $1 WHERE id = $2`,
-        [KnowledgeStatus.DRAFT, row.id],
+        `UPDATE knowledge_versions SET status = $1 WHERE version_id = $2`,
+        [KnowledgeStatus.DRAFT, row.version_id],
       )
       console.error(`[recheck-conflicts] CONFLICT found for ${row.topic}:${row.key} v${row.version} — set to DRAFT`)
       conflicted++
@@ -121,8 +121,8 @@ async function main() {
       const newStatus = isDraftAuthor ? KnowledgeStatus.DRAFT : KnowledgeStatus.ACTIVE
 
       await pool.query(
-        `UPDATE knowledge_versions SET status = $1 WHERE id = $2`,
-        [newStatus, row.id],
+        `UPDATE knowledge_versions SET status = $1 WHERE version_id = $2`,
+        [newStatus, row.version_id],
       )
       console.error(`[recheck-conflicts] ${row.topic}:${row.key} v${row.version} promoted to ${newStatus}`)
       promoted++
@@ -132,7 +132,7 @@ async function main() {
     await pool.query(
       `INSERT INTO audit_log
          (entry_id, operation, tool, timestamp, author, author_role, content_hash,
-          governance_json, outcome_json, version_impact, entry_hash, chain_position, project_id)
+          governance_json, outcome_json, version_impact, entry_hash, chain_position, q_project_id)
        SELECT
          $1, 'conflict_recheck_complete', 'recheck-conflicts', NOW(), 'system', 'system',
          content_hash,
@@ -140,13 +140,13 @@ async function main() {
          '{"versions_created":[],"versions_superseded":[]}'::jsonb,
          encode(sha256(($1 || content_hash)::bytea), 'hex'),
          COALESCE((SELECT MAX(chain_position) FROM audit_log), 0) + 1,
-         project_id
-       FROM knowledge_versions WHERE id = $4`,
+         q_project_id
+       FROM knowledge_versions WHERE version_id = $4`,
       [
-        `recheck_${row.id}_${Date.now()}`,
+        `recheck_${row.version_id}_${Date.now()}`,
         JSON.stringify({ topic: row.topic, key: row.key, version: row.version }),
         JSON.stringify({ conflict: conflictResult.conflict }),
-        row.id,
+        row.version_id,
       ],
     )
   }
