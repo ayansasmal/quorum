@@ -125,7 +125,7 @@ Notification system  ████████░░░░░░  Browser polling
 │  GET  /pg/pending           POST /api/review/:id     │
 │  PATCH /pg/pending/:id      GET  /api/search         │
 │  GET  /pg/audit             POST /bump/:topic/:key   │
-│  GET  /config/:projectId    PATCH /projects/:id      │
+│  GET  /config/:projectId    PUT /config/:projectId   │
 │  POST /config/validate      (config editor write)    │
 │  GET  /health                                        │
 └──────────┬───────────────────────────────────────────┘
@@ -443,6 +443,7 @@ Replaces "write JSON, upload to S3 manually, wait for poll cycle, hope it worked
 
 **Editable sections:**
 - **Members** — add/remove engineers, assign role (engineer / tech_lead / architect / principal_architect) and team, set base_confidence
+- **Project visibility** — principal architects and platform admins can switch between private and public. Public grants authenticated non-members read-only access; public → private requires confirmation because access is revoked immediately.
 - **Domains** — add/remove domain namespaces, set per-domain conflict threshold (slider: 0.70–0.95)
 - **Authority weights** — sliders for confidence / recency / access_frequency weights (must sum to 1.0)
 - **Governance settings** — QUORUM_AUTHORITY_THRESHOLD, DRAFT alert max age
@@ -451,9 +452,9 @@ Replaces "write JSON, upload to S3 manually, wait for poll cycle, hope it worked
 - Inline validation on every change via `POST /config/validate`
 - Errors shown inline (member missing github_username, weights don't sum to 1, etc.)
 - **Save button** — only enabled when config is valid
-- On save: calls `PATCH /projects/:id` with the updated config body — gateway writes directly to the `projects` table. No S3 upload, no poll cycle latency, no cache invalidation step needed. PostgreSQL is the authoritative config store; the optimistic lock (`config_version`) prevents concurrent editor overwrites.
+- On save: calls `PUT /config/:projectId` with the complete updated config body. The gateway validates it, writes the S3 config, re-syncs project membership, and invalidates affected profile caches.
 
-**Why this is important:** Role and seniority signals for the authority model become configurable here — no code change needed to update the org hierarchy. The `PATCH /projects/:id` route already exists from Wave 2, including the PA-guard (last principal architect cannot be removed) and `config_version` double-check locking.
+**Why this is important:** Role, membership, catalog links, and read visibility are governed from one schema-validated surface. The gateway remains authoritative for principal-architect/platform-admin config writes and public-project read-only enforcement.
 
 ---
 
@@ -899,5 +900,5 @@ Add to `docker-compose.yml` and `helm/quorum/` when each section is stable.
 1. ~~**Notifications:** Should the dashboard poll or use webhooks?~~ **Resolved:** Frontend polling every 60 minutes (configurable) with browser Notifications API. See Notification Strategy section above.
 2. ~~**Multi-project UI:** The JWT carries one project at a time. Should the dashboard support switching projects without re-authenticating?~~ **Resolved:** Single JWT carries all projects as an array. Project switch updates `X-Quorum-Project-Id` header in AuthContext — no re-auth needed. Project picker in sidebar reads from JWT `projects` array.
 3. **Graph scale:** How many nodes before Cytoscape.js performance degrades? At ~500+ nodes, switch to `dagre` layout only for the visible domain rather than rendering the full graph. May need server-side pagination for the graph endpoint.
-4. ~~**Config write path:** The Gateway currently reads config from S3 but has no S3 write route.~~ **Resolved:** Config editor uses `PATCH /projects/:id` (existing Wave 2 route). PostgreSQL is the authoritative config store. S3 path is legacy — not used for config writes.
+4. ~~**Config write path:** The Gateway originally exposed config reads without an authenticated update route.~~ **Resolved:** Config editor uses `PUT /config/:projectId`; the gateway validates the full config, writes S3, re-syncs memberships, and invalidates affected profile caches.
 5. ~~**Notification poll granularity:** The poll fires `GET /api/stats` and checks `pending.total`.~~ **Resolved:** Dedicated `GET /api/notifications` endpoint returns full array with `conflict_id`, `topic`, `key`, `type`, `incoming_author`, `age_hours`. Count = array.length. Client diffs by `conflict_id` set. Full details fetched in parallel on open.

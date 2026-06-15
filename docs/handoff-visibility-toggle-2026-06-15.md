@@ -3,6 +3,7 @@
 **For:** Codex
 **Repo:** `github.com/ayansasmal/quorum` (gateway) + `github.com/ayansasmal/Quorum-dash` (dashboard SPA)
 **Feature:** A principal architect or platform admin can toggle a project between public (any authenticated GitHub user has read-only access) and private (members only) from the dashboard Config page.
+**Status:** Implemented in `Quorum-dash` on 2026-06-15.
 
 ---
 
@@ -124,3 +125,12 @@ Reuse `quorum-dash/src/components/knowledge/ConfirmDialog.jsx` for the public→
 4. Users who are neither principal architects nor platform admins see the current visibility state read-only, with no toggle
 5. After making a project public, an authenticated GitHub user who is not a member can `GET /api/knowledge` without a 403
 6. After making a project private, that same authenticated non-member gets 403
+
+---
+
+## Implementation
+
+- Added `src/components/config/VisibilityCard.jsx`
+- Wired the card into `src/pages/Config.jsx` above the raw JSON editor
+- Reused `useSaveConfig()` and `ConfirmDialog`
+- Added S-14.2 browser coverage for PA/admin authority, read-only members, confirmation/cancel, full-config PUT payloads, and inline success/error feedback

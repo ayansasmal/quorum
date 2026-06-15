@@ -509,7 +509,7 @@ An entry moves through: `DRAFT → ACTIVE → SUPERSEDED / DEPRECATED`. The grap
 | Sub | What is tested |
 |-----|----------------|
 | S-14.1 Knowledge Graph | Domain `<select>` → Cytoscape canvas renders; legend labels; node-click grid sweep → NodePanel if hit |
-| S-14.2 Config Editor | Textarea shows current config JSON; schema-invalid JSON (missing `owner`) → red error div → Save disabled; Save success path → `data-testid="save-success"` |
+| S-14.2 Config Editor | Raw JSON validation/save; PA/admin visibility control; full-config `is_public` PUT; public→private confirmation/cancel; ordinary-member read-only state; inline success/error feedback |
 | S-14.3 System Status | "Service health" heading; all service names visible; ≥ 3 Healthy badges; 0 Unavailable |
 | S-14.4 Audit Timeline | Entries listed; author filter narrows results |
 | S-14.5 Project Selector | Switch button in header; search input filters projects; "Back to current project" navigates to `/` |

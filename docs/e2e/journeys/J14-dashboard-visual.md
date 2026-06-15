@@ -1,7 +1,7 @@
 # J14 — Dashboard Visual & Interaction Flows
 
 **Scenario ID:** S-14
-**Weight:** 30 (20 raw leaves × F1.5)
+**Weight:** 37.5 (25 raw leaves × F1.5)
 **Blast radius:** 3.2% of suite
 **Frequency tier:** F1.5 (periodic — visual regression checked on scheduled runs and after frontend changes)
 **Spec file:** `tests/e2e/scenarios/14-dashboard-visual.spec.js`
@@ -75,11 +75,25 @@ This ensures the graph has nodes to render.
 9. Restore valid JSON but with a Zod schema violation (e.g., set `is_global: "yes"` instead of boolean):
    - Assert: Save produces a `400` response with field-level validation error shown in the editor
 
+10. As a principal architect, switch a private project to public:
+    - Assert: `PUT /config/:projectId` receives the full config with `is_public: true`
+    - Assert: inline success feedback appears
+
+11. Switch a public project to private:
+    - Assert: confirmation dialog opens
+    - Assert: Cancel keeps the project public and sends no PUT
+    - Assert: Make Private persists `is_public: false`
+
+12. Verify authority and failure states:
+    - Assert: platform admins can use the control without a principal architect role
+    - Assert: ordinary members see read-only visibility
+    - Assert: failed saves show inline errors and preserve the current state
+
 ---
 
 ### 14c — System Status (`/status`)
 
-10. Navigate to `/status` as `test-pe`
+13. Navigate to `/status` as `test-pe`
     - Assert: status page renders with service health indicators for:
       - PostgreSQL
       - FalkorDB / Graphiti
@@ -91,11 +105,11 @@ This ensures the graph has nodes to render.
 
 ### 14d — Audit Timeline (`/audit`)
 
-11. Navigate to `/audit` as `test-pe`
+14. Navigate to `/audit` as `test-pe`
     - Assert: audit entries listed in reverse-chronological order (most recent first)
     - Assert: each row shows at minimum: operation type, tool, author, timestamp
 
-12. Click an audit entry row
+15. Click an audit entry row
     - Assert: expanded detail panel opens
     - Assert: `governance_json` section shows the intent payload
     - Assert: `outcome_json` section shows the result
@@ -104,15 +118,15 @@ This ensures the graph has nodes to render.
 
 ### 14e — Project Selector
 
-13. Click the project dropdown in the navigation bar
+16. Click the project dropdown in the navigation bar
     - Assert: search input field appears
     - Assert: initial list shows available projects (at least `quorum-test-project` and `quorum-test-catalog`)
 
-14. Type partial name `"catalog"` in the search field
+17. Type partial name `"catalog"` in the search field
     - Assert: results filter in real-time to show only `quorum-test-catalog`
     - Assert: `quorum-test-project` not visible in filtered results
 
-15. Press Escape or click Cancel
+18. Press Escape or click Cancel
     - Assert: dropdown closes without switching project
     - Assert: active project in header/nav is unchanged (still `quorum-test-project`)
 
@@ -128,6 +142,11 @@ This ensures the graph has nodes to render.
 - [ ] Valid config edit saves successfully
 - [ ] Invalid JSON → save blocked (no API call with malformed data)
 - [ ] Zod schema violation → `400` with field-level error shown in editor
+- [ ] Principal architect and platform admin can change project visibility
+- [ ] Public → private requires confirmation; Cancel sends no PUT
+- [ ] Visibility PUT preserves the full config and changes only `is_public`
+- [ ] Ordinary members see visibility read-only
+- [ ] Failed visibility saves show inline errors and preserve current state
 - [ ] System status page shows all services green in test stack
 - [ ] Audit timeline shows entries in reverse-chronological order
 - [ ] Expanded audit entry shows governance_json and outcome_json

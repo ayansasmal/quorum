@@ -386,12 +386,14 @@ read-only enforcement, and the dashboard welcome state. Playwright discovery is
 verified; the live Docker/browser run remains pending because command approval
 was unavailable during implementation.
 
-**Project visibility UI handoff (2026-06-15):** The dashboard Config page
-visibility toggle must mirror `PUT /config/:projectId`: both
+**Project visibility UI (2026-06-15):** The dashboard Config page visibility
+toggle mirrors `PUT /config/:projectId`: both
 `principal_architect` users and platform admins may change `is_public`. Read the
 active project role from `currentProjectData.role`, not the slim JWT-backed
 `user.role`. Public projects grant authenticated non-members read-only access;
-private projects remain member-only.
+private projects remain member-only. The implementation lives in
+`quorum-dash/src/components/config/VisibilityCard.jsx` with S-14.2 browser
+coverage.
 
 > Test strategy: [TESTING.md](docs/TESTING.md)
 
