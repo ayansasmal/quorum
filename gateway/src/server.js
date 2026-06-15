@@ -246,9 +246,18 @@ app.use((err, _req, res, _next) => {
   }
   const status = err.status ?? 500
   const code   = err.code   ?? 'INTERNAL_ERROR'
-  if (status >= 500) console.error('[Gateway] Unhandled error:', err.message, err.stack)
+  if (status >= 500) {
+    // Include PostgreSQL-specific detail so callers can distinguish constraint names.
+    const pgDetail = err.detail ? ` | pg.detail: ${err.detail}` : ''
+    const pgConstraint = err.constraint ? ` | pg.constraint: ${err.constraint}` : ''
+    console.error(`[Gateway] Unhandled error: ${err.message}${pgDetail}${pgConstraint}`, err.stack)
+  }
   const message = status >= 500 ? 'Internal server error' : err.message
-  res.status(status).json({ error: code.toLowerCase(), message })
+  // For PostgreSQL errors, expose constraint detail in dev; keep response opaque in prod.
+  const extraDetail = (status >= 500 && err.constraint)
+    ? { pg_constraint: err.constraint, pg_detail: err.detail ?? null }
+    : {}
+  res.status(status).json({ error: code.toLowerCase(), message, ...extraDetail })
 })
 
 // ── Startup ────────────────────────────────────────────────────────────────────

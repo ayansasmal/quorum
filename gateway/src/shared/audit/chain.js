@@ -162,5 +162,26 @@ export async function nextChainPosition(client) {
      WHERE id = 1
      RETURNING next_position - 1 AS next_pos`,
   )
+  if (!result.rows.length) {
+    throw new Error('audit_chain_counter row missing — run init-db.sql to reseed it')
+  }
   return result.rows[0].next_pos
+}
+
+/**
+ * Resync the audit chain counter to MAX(chain_position) + 1.
+ * Safe to call when the counter has drifted behind the actual table — e.g. after
+ * a chain_position UNIQUE violation (23505) causes infinite rollback loops.
+ * Runs outside any caller transaction so it commits immediately.
+ * @param {import('pg').Pool} pg
+ * @returns {Promise<number>} the new next_position
+ */
+export async function resyncChainCounter(pg) {
+  const result = await pg.query(
+    `UPDATE audit_chain_counter
+     SET next_position = COALESCE((SELECT MAX(chain_position) FROM audit_log), 0) + 1
+     WHERE id = 1
+     RETURNING next_position`,
+  )
+  return result.rows[0]?.next_position ?? 1
 }

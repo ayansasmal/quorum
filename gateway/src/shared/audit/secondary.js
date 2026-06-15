@@ -10,23 +10,30 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
-import { buildEntryWithHash, nextChainPosition } from './chain.js'
+import { buildEntryWithHash, nextChainPosition, resyncChainCounter } from './chain.js'
 import { enforceAppendOnlyAudit } from '../governance/constitutional.js'
 
 /**
  * Write a new audit entry to the PostgreSQL audit log.
  * Transactional: chain position claim + hash computation + INSERT are atomic.
+ *
+ * Self-healing: if the chain_position UNIQUE constraint fires (counter drifted
+ * behind the table — e.g. after a crash mid-transaction), the counter is resynced
+ * to MAX(chain_position) + 1 and the write is retried exactly once.
+ *
  * @param {import('pg').Pool} pg
  * @param {Record<string, unknown>} entry - partial entry (without chain fields)
+ * @param {boolean} [_retried] - internal guard, prevents infinite retry loops
  * @returns {Promise<Record<string, unknown>>} the stored entry with all chain fields
  */
-export async function writeAuditEntry(pg, entry) {
+export async function writeAuditEntry(pg, entry, _retried = false) {
   if (typeof pg.writeAuditEntry === 'function') return pg.writeAuditEntry(entry)
   const client = await pg.connect()
   try {
     await client.query('BEGIN')
 
     const chainPosition = await nextChainPosition(client)
+    console.error(`[Audit] writing chain_position=${chainPosition} tool=${entry.tool ?? '?'} op=${entry.operation ?? '?'}`)
 
     // Get previous hash for chain linking
     const prevResult = await client.query(
@@ -90,6 +97,18 @@ export async function writeAuditEntry(pg, entry) {
     return completeEntry
   } catch (err) {
     await client.query('ROLLBACK')
+    // 23505 on chain_position means the counter drifted behind the table.
+    // Resync the counter outside this (now-rolled-back) transaction and retry once.
+    if (err.code === '23505' && !_retried) {
+      const isChainPositionCollision =
+        err.constraint === 'audit_log_chain_position_key' ||
+        (err.detail ?? '').includes('chain_position')
+      if (isChainPositionCollision) {
+        console.error(`[Audit] chain_position collision (23505) — resyncing counter. constraint=${err.constraint} detail=${err.detail}`)
+        await resyncChainCounter(pg)
+        return writeAuditEntry(pg, entry, true)
+      }
+    }
     throw err
   } finally {
     client.release()
