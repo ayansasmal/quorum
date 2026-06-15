@@ -72,8 +72,6 @@ services:
     image: ${IMAGE_REGISTRY}/quorum-gateway:${GATEWAY_TAG}
     profiles: [jobs]
     env_file: ["${QUORUM_ENV_FILE:-/etc/quorum/quorum.env}"]
-    environment:
-      QUORUM_GATEWAY_URL: ""
     volumes:
       - /etc/quorum/rds-global-bundle.pem:/etc/quorum/rds-global-bundle.pem:ro
     command: ["npm", "run", "job:recheck"]

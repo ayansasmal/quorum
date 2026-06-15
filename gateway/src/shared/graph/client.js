@@ -62,10 +62,22 @@ export const AUDIT_GROUP_ID = 'quorum-audit'
 
 /**
  * Returns the base URL for Graphiti calls.
- * In gateway mode, routes to the gateway's /graphiti prefix.
+ *
+ * Routing precedence (first match wins):
+ *   1. GRAPHITI_URL set → direct server-side access (gateway, job scripts).
+ *      QUORUM_GATEWAY_URL is intentionally ignored: both vars can coexist in the
+ *      same container environment (quorum.env is shared), but a process that has a
+ *      direct Graphiti endpoint must never route through the external gateway proxy.
+ *   2. QUORUM_GATEWAY_URL set → MCP client path: no direct Graphiti access, proxy
+ *      all calls through <gatewayUrl>/graphiti (requires Bearer token).
+ *   3. Neither set → fall back to GRAPHITI_URL default (http://graphiti:8000).
+ *
  * @returns {{ baseUrl: string, useGateway: boolean }}
  */
 function graphitiTarget() {
+  if (process.env.GRAPHITI_URL) {
+    return { baseUrl: process.env.GRAPHITI_URL, useGateway: false }
+  }
   const gatewayUrl = process.env.QUORUM_GATEWAY_URL
   if (gatewayUrl) {
     return { baseUrl: `${gatewayUrl.replace(/\/$/, '')}/graphiti`, useGateway: true }
