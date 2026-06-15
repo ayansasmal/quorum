@@ -77,11 +77,29 @@ async function pingGraphiti() {
  * @param {string} qProjectId
  * @returns {Promise<string[]>}
  */
-export async function getProjectGlobals(_poolInstance, _qProjectId) {
-  // Project configs live in S3/DynamoDB, not PostgreSQL.
-  // The recheck job runs without HTTP middleware access, so globals federation
-  // is not available here. Conflict detection still runs against the project scope.
-  return []
+export async function getProjectGlobals(poolInstance, qProjectId) {
+  try {
+    const { rows } = await poolInstance.query(
+      'SELECT group_id FROM q_projects WHERE q_project_id = $1',
+      [qProjectId],
+    )
+    const groupId = rows[0]?.group_id
+    if (!groupId) return []
+
+    const bucket = process.env.QUORUM_CONFIG_BUCKET
+    if (!bucket) return []
+
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3')
+    const s3 = new S3Client({ region: process.env.AWS_REGION ?? 'ap-southeast-2' })
+    const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: `${groupId}.quorum.json` }))
+    const body = await resp.Body.transformToString()
+    const config = JSON.parse(body)
+    return config.globals ?? []
+  } catch {
+    // Cannot load config — return null so the caller defers rather than
+    // promoting without federation-scoped conflict detection.
+    return null
+  }
 }
 
 /**
@@ -149,6 +167,17 @@ export async function processPendingRow(poolInstance, row, deps = {}) {
   const detectConflictFn = deps.detectConflictFn ?? detectConflict
   const now = deps.now ?? Date.now
   const globals = await getProjectGlobals(poolInstance, row.q_project_id)
+
+  if (globals === null) {
+    // Could not load project globals from S3 — defer rather than promote without
+    // federation-scoped conflict detection (fail-safe for projects with globals).
+    return {
+      outcome:             'deferred',
+      newStatus:           null,
+      conflictResult:      { conflict: false, graphiti_unavailable: true },
+      supersededVersionId: null,
+    }
+  }
 
   const conflictResult = await detectConflictFn(
     row.summary,
