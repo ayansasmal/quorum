@@ -946,8 +946,21 @@ router.post('/review/:conflictId', async (req, res, next) => {
     }
     // ── End deprecation request branch ──────────────────────────────────────────
 
-    // Get the DRAFT version to check authorship
-    const draftVersion = await getLatestDraftVersion(pool, decision.q_key_id)
+    // Prefer the specific incoming DRAFT linked to this pending decision.
+    // Fallback to latest DRAFT for backward compatibility with older rows.
+    let draftVersion = null
+    if (decision.incoming_version_id) {
+      const linkedDraft = await pool.query(
+        `SELECT * FROM knowledge_versions
+         WHERE version_id = $1 AND q_project_id = $2
+         LIMIT 1`,
+        [decision.incoming_version_id, qProjectId],
+      )
+      draftVersion = linkedDraft.rows[0] ?? null
+    }
+    if (!draftVersion) {
+      draftVersion = await getLatestDraftVersion(pool, decision.q_key_id)
+    }
 
     // Constitutional Rule 4: no self-approval
     // E2E: tests/e2e/scenarios/11-self-approval.spec.js — S-11 NO_SELF_APPROVAL on review
@@ -1111,7 +1124,7 @@ router.post('/review/:conflictId', async (req, res, next) => {
       await client.query('BEGIN')
 
       if (draftVersion) {
-        const draftVersionId = `${decision.q_key_id}_v${draftVersion.version}`
+        const draftVersionId = draftVersion.version_id ?? `${decision.q_key_id}_v${draftVersion.version}`
 
         if (action === 'approve') {
           const forwardLink = {

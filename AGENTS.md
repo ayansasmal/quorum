@@ -550,3 +550,15 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 - Unit coverage for BUG-02/03/04 lives in `tests/scripts/recheck.test.js`. The broad
   `npm test -- tests/scripts` run still exposes a separate pre-existing testability issue in
   `scripts/decay-confidence.js`, which auto-executes and calls `process.exit()` on import.
+
+## Pending Conflict Draft Linkage Fix (2026-06-15)
+
+- `pending_decisions` now carries `incoming_version_id`, with idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+  applied in all three init-db entrypoints: `helm/quorum/files/init-db.sql`, `scripts/init-db.sql`, and
+  `crossplane/bootstrap/init-db.sql`.
+- `POST /pg/pending` accepts `incoming_version_id` and stores it; both canonical query helpers
+  (`gateway/src/shared/graph/queries.js` and `quorum-mcp/src/graph/queries.js`) include the field in
+  `insertPendingDecision()`.
+- `POST /api/review/:conflictId` now prefers the exact draft linked by `incoming_version_id` and falls
+  back to `getLatestDraftVersion()` only for older rows. This prevents a review action from accidentally
+  approving or rejecting the wrong DRAFT when multiple drafts exist for the same key.

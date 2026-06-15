@@ -200,6 +200,7 @@ CREATE TABLE IF NOT EXISTS pending_decisions (
   active_version_at_creation INTEGER,
   existing_content           TEXT,
   incoming_content           TEXT,
+  incoming_version_id        TEXT REFERENCES knowledge_versions(version_id),
   conflict_reason            TEXT,
 
   -- Resolution
@@ -228,6 +229,9 @@ CREATE TABLE IF NOT EXISTS pending_decisions (
   created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE pending_decisions
+  ADD COLUMN IF NOT EXISTS incoming_version_id TEXT REFERENCES knowledge_versions(version_id);
 
 CREATE INDEX IF NOT EXISTS idx_pd_q_key_id   ON pending_decisions (q_key_id);
 CREATE INDEX IF NOT EXISTS idx_pd_project    ON pending_decisions (q_project_id, status);

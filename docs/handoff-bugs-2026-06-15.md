@@ -15,7 +15,7 @@
 | BUG-03 | Low | ✅ Fixed locally (2026-06-15) | `scripts/recheck-conflicts.js` | Audit `version_impact` now records the superseded ACTIVE version when promotion swaps versions |
 | BUG-04 | Medium | ✅ Fixed locally (2026-06-15) | `scripts/recheck-conflicts.js` | `detectConflict()` now receives `projectId` + `globals` loaded from `project_configs` |
 | BUG-05 | High | ❌ Data fix needed | PostgreSQL `knowledge_versions` | 5 prod entries with dual ACTIVE versions |
-| BUG-06 | Medium | ❌ Design/code fix needed | `quorum-mcp/src/tools/remember.js` | Incoming knowledge is discarded on conflict detection |
+| BUG-06 | Medium | ✅ Fixed locally (2026-06-15) | `quorum-mcp/src/tools/remember.js` + pending-decision schema | Incoming conflicting knowledge is now stored as `DRAFT` and linked from `pending_decisions.incoming_version_id` |
 
 ---
 
@@ -186,7 +186,7 @@ This sets the lower-versioned ACTIVE row to SUPERSEDED for any key with more tha
 
 ## BUG-06 — Incoming knowledge discarded when conflict detected (design gap)
 
-**Status:** Design/code fix needed. Medium priority.
+**Status:** Fixed locally on 2026-06-15. Still needs migration + deploy.
 
 **File:** `quorum-mcp/src/tools/remember.js:165-226`
 
@@ -201,7 +201,7 @@ The user is left holding a `conflict_id` but the knowledge itself is lost unless
 
 **User expectation (the "library" model):** Knowledge should always be stored. If a conflict is detected, store the incoming entry as DRAFT and surface the conflict for review. Don't discard the content.
 
-**Proposed fix:** When conflict requires human resolution, store the incoming content as `DRAFT` before returning:
+**Fix applied:** When conflict requires human resolution, `remember()` now stores the incoming content as a real `DRAFT` version before returning the `conflict_detected` response. The `pending_decisions` row stores `incoming_version_id`, and the response now includes `knowledge_status: 'DRAFT'` plus the stored version number.
 
 ```js
 if (resolution.action === 'human_required') {
@@ -235,9 +235,9 @@ if (resolution.action === 'human_required') {
 }
 ```
 
-**Schema change required:** `pending_decisions` needs an `incoming_version_id` column so `review()` can promote the draft to ACTIVE (approve) or set it to REJECTED (reject).
+**Schema change applied:** `pending_decisions` now has `incoming_version_id TEXT REFERENCES knowledge_versions(version_id)` in all init-db entrypoints, with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for existing environments.
 
-**Scope note:** This is a multi-file change touching:
+**Scope note:** This change touched:
 - `quorum-mcp/src/tools/remember.js`
 - `quorum/gateway/src/routes/pg.js` (pending_decisions schema + `POST /pg/pending`)
 - `quorum/gateway/src/routes/dashboard.js` (`POST /api/review/:conflictId` — needs to promote/reject the stored draft)
@@ -256,9 +256,9 @@ For BUG-02, BUG-03, BUG-04 (all in `recheck-conflicts.js`):
 - E2E remains valuable later: seed a `PENDING_CONFLICT_CHECK` row (S-17.2 pattern), run the job, and verify Pending + audit state
 
 For BUG-06:
-- TDD: write a failing test in `quorum-mcp/tests/tools/remember.test.js` first
-- The test should assert: after a conflict-detected response, calling `GET /api/knowledge?domain=X` still shows a DRAFT entry with the incoming content
-- This is a breaking change to the `conflict_detected` response shape — update `quorum-mcp/tests/tools/remember.test.js` assertions
+- TDD started in `quorum-mcp/tests/tools/remember.test.js`
+- The `conflict_detected` response shape now includes stored-draft metadata (`knowledge_status`, `version`)
+- Gateway-side tests were updated for `incoming_version_id`, but the existing HTTP test harness still fails early at `server.address().port` in this environment before route assertions execute
 
 ---
 

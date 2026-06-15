@@ -546,9 +546,9 @@ export async function insertPendingDecision(pg, record) {
   await pg.query(
     `INSERT INTO pending_decisions
        (conflict_id, q_key_id, q_project_id, decision_type,
-        active_version_at_creation, existing_content, incoming_content,
+        active_version_at_creation, existing_content, incoming_content, incoming_version_id,
         conflict_reason, enrichment, more_pending_same_key)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       conflictId,
       record.q_key_id,
@@ -557,6 +557,7 @@ export async function insertPendingDecision(pg, record) {
       record.active_version_at_creation ?? null,
       record.existing_content ?? null,
       record.incoming_content ?? null,
+      record.incoming_version_id ?? null,
       record.conflict_reason  ?? null,
       record.enrichment == null
         ? null

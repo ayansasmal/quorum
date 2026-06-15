@@ -568,6 +568,29 @@ describe('POST /pg/pending', () => {
     expect(body.conflict_id).toBe('q_c10')
   })
 
+  it('persists incoming_version_id when provided', async () => {
+    const inserted = {
+      conflict_id: 'q_c11',
+      status: 'pending',
+      q_key_id: 'q_k1',
+      q_project_id: 'q_p1',
+      incoming_version_id: 'q_k1_v2',
+    }
+    fakePool.query.mockResolvedValueOnce({ rows: [inserted] })
+
+    const { status, body } = await post('/pg/pending', {
+      q_key_id:             'q_k1',
+      conflict_id:          'q_c11',
+      incoming_version_id:  'q_k1_v2',
+      conflict_reason:      'explicit incoming draft linkage',
+    })
+
+    expect(status).toBe(201)
+    expect(body.incoming_version_id).toBe('q_k1_v2')
+    expect(fakePool.query.mock.calls[0][0]).toContain('incoming_version_id')
+    expect(fakePool.query.mock.calls[0][1]).toContain('q_k1_v2')
+  })
+
   it('uses provided q_key_id and conflict_id directly (no nextval)', async () => {
     const inserted = { conflict_id: 'q_c99', status: 'pending' }
     fakePool.query.mockResolvedValueOnce({ rows: [inserted] })

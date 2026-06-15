@@ -729,6 +729,8 @@ describe('POST /api/review/:conflictId — conflict path', () => {
   })
 
   it('approve — transitions DRAFT to ACTIVE (conflict resolution)', async () => {
+    getPendingDecisionById.mockResolvedValue(makeConflictDecision({ incoming_version_id: 'q_k1_v7' }))
+
     const res = await post('/api/review/q_c99', {
       action: 'approve', note: 'Incoming version is more accurate.',
     })
@@ -739,9 +741,9 @@ describe('POST /api/review/:conflictId — conflict path', () => {
     // DRAFT (version 2) must become ACTIVE
     expect(transitionVersionStatus).toHaveBeenCalledWith(
       fakeClient,
-      'q_k1_v2',
+      'q_k1_v7',
       'ACTIVE',
-      expect.objectContaining({ version: 2 }),
+      expect.objectContaining({ version: 7 }),
     )
   })
 
@@ -764,6 +766,8 @@ describe('POST /api/review/:conflictId — conflict path', () => {
   })
 
   it('reject — transitions DRAFT to REJECTED (not ACTIVE)', async () => {
+    getPendingDecisionById.mockResolvedValue(makeConflictDecision({ incoming_version_id: 'q_k1_v7' }))
+
     const res = await post('/api/review/q_c99', {
       action: 'reject', note: 'Existing policy is correct.',
     })
@@ -773,7 +777,7 @@ describe('POST /api/review/:conflictId — conflict path', () => {
 
     expect(transitionVersionStatus).toHaveBeenCalledWith(
       fakeClient,
-      'q_k1_v2',
+      'q_k1_v7',
       'REJECTED',
       null,
     )

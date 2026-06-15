@@ -850,9 +850,9 @@ router.post('/pending', async (req, res, next) => {
     const { rows } = await pool.query(
       `INSERT INTO pending_decisions (
          conflict_id, q_key_id, q_project_id, decision_type, status,
-         active_version_at_creation, existing_content, incoming_content, conflict_reason,
+         active_version_at_creation, existing_content, incoming_content, incoming_version_id, conflict_reason,
          enrichment, more_pending_same_key
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [
         conflictId,
@@ -863,6 +863,7 @@ router.post('/pending', async (req, res, next) => {
         d.active_version_at_creation ?? null,
         d.existing_content ?? null,
         d.incoming_content ?? null,
+        d.incoming_version_id ?? null,
         d.conflict_reason ?? null,
         d.enrichment ? JSON.stringify(d.enrichment) : null,
         d.more_pending_same_key ?? 0,
