@@ -120,10 +120,41 @@ async function main() {
 
       const newStatus = isDraftAuthor ? KnowledgeStatus.DRAFT : KnowledgeStatus.ACTIVE
 
-      await pool.query(
-        `UPDATE knowledge_versions SET status = $1 WHERE version_id = $2`,
-        [newStatus, row.version_id],
-      )
+      // Atomically: supersede any existing ACTIVE version for this key, then promote.
+      // storePendingConflictCheck leaves v(N-1) ACTIVE intentionally — if v(N) turns out
+      // to have a conflict, the old version must remain live. On clean promotion we must
+      // complete the swap that the normal supersede path does atomically.
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+
+        if (newStatus === KnowledgeStatus.ACTIVE) {
+          await client.query(
+            `UPDATE knowledge_versions
+               SET status = $1
+             WHERE q_project_id = $2
+               AND q_key_id = (
+                 SELECT q_key_id FROM knowledge_versions WHERE version_id = $3
+               )
+               AND status = $4
+               AND version_id <> $3`,
+            [KnowledgeStatus.SUPERSEDED, row.q_project_id, row.version_id, KnowledgeStatus.ACTIVE],
+          )
+        }
+
+        await client.query(
+          `UPDATE knowledge_versions SET status = $1 WHERE version_id = $2`,
+          [newStatus, row.version_id],
+        )
+
+        await client.query('COMMIT')
+      } catch (err) {
+        await client.query('ROLLBACK')
+        throw err
+      } finally {
+        client.release()
+      }
+
       console.error(`[recheck-conflicts] ${row.topic}:${row.key} v${row.version} promoted to ${newStatus}`)
       promoted++
     }
