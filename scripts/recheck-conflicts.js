@@ -77,17 +77,11 @@ async function pingGraphiti() {
  * @param {string} qProjectId
  * @returns {Promise<string[]>}
  */
-export async function getProjectGlobals(poolInstance, qProjectId) {
-  const { rows } = await poolInstance.query(
-    `SELECT pc.config_json
-       FROM project_configs pc
-      WHERE pc.q_project_id = $1
-      ORDER BY pc.created_at DESC
-      LIMIT 1`,
-    [qProjectId],
-  )
-
-  return rows[0]?.config_json?.globals ?? []
+export async function getProjectGlobals(_poolInstance, _qProjectId) {
+  // Project configs live in S3/DynamoDB, not PostgreSQL.
+  // The recheck job runs without HTTP middleware access, so globals federation
+  // is not available here. Conflict detection still runs against the project scope.
+  return []
 }
 
 /**
