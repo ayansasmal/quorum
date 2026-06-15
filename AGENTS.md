@@ -533,3 +533,20 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 - After replacing the table, the next boot exposed a second blocker:
   `dynamodb:BatchWriteItem` was missing from the EC2 instance role. `syncProjectMembers()` uses
   `BatchWriteItemCommand` for both puts and removals, so `PutItem` permission is insufficient.
+
+## Recheck Job Conflict Recovery Fixes (2026-06-15)
+
+- `scripts/recheck-conflicts.js` now exports testable helpers instead of only auto-running on import:
+  `getProjectGlobals()`, `processPendingRow()`, `buildVersionImpact()`, and `writeRecheckAudit()`.
+- Deferred conflict rechecks now load linked catalog scope from `project_configs.config_json.globals`
+  and call `detectConflict(summary, topic, key, topic, null, q_project_id, globals)`, matching the
+  scoped federation contract used by the MCP `remember()` path.
+- When a deferred row now conflicts after Graphiti recovers, the cron job opens a transaction,
+  downgrades the row to `DRAFT`, captures the ACTIVE sibling snapshot, and inserts a
+  `pending_decisions` row directly in PostgreSQL. This is the reviewer-visible state the dashboard
+  Pending tab and `pending()` depend on.
+- Recheck audit entries no longer hardcode an empty `version_impact`; promotion records the
+  superseded ACTIVE `version_id` when a swap occurs.
+- Unit coverage for BUG-02/03/04 lives in `tests/scripts/recheck.test.js`. The broad
+  `npm test -- tests/scripts` run still exposes a separate pre-existing testability issue in
+  `scripts/decay-confidence.js`, which auto-executes and calls `process.exit()` on import.
