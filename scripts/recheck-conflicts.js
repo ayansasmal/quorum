@@ -20,6 +20,11 @@
  * to drain a realistic outage queue within 1–2 runs after Graphiti recovers.
  */
 
+// Force direct Graphiti access. The gateway container sets QUORUM_GATEWAY_URL,
+// which makes graph/client.js proxy all Graphiti calls through /graphiti (auth required).
+// This script has no Bearer token so we bypass the proxy and connect directly.
+process.env.QUORUM_GATEWAY_URL = ''
+
 import pg from 'pg'
 import { fileURLToPath } from 'node:url'
 import { detectConflict } from '../gateway/src/shared/governance/conflict.js'
