@@ -31,12 +31,15 @@ const BATCH_SIZE      = 200
 const MS_PER_WEEK     = 7 * 24 * 60 * 60 * 1000
 const ABSOLUTE_FLOOR  = 0.10
 
+const pgSsl = process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: true } : false
+
 const pool = new pg.Pool({
   host:     process.env.POSTGRES_HOST     ?? 'localhost',
   port:     parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
   database: process.env.POSTGRES_DB       ?? 'quorum_audit',
   user:     process.env.POSTGRES_USER     ?? 'quorum',
   password: process.env.POSTGRES_PASSWORD ?? 'quorum_local',
+  ssl:      pgSsl,
 })
 
 /**

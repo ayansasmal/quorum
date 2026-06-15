@@ -31,12 +31,15 @@ const S3_PREFIX          = process.env.ARCHIVE_S3_PREFIX            ?? 'audit-ar
 
 // ── PostgreSQL connection ─────────────────────────────────────────────────────
 
+const pgSsl = process.env.POSTGRES_SSL === 'true' ? { rejectUnauthorized: true } : false
+
 const pool = new pg.Pool({
   host:     process.env.POSTGRES_HOST     ?? 'localhost',
   port:     parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
   database: process.env.POSTGRES_DB       ?? 'quorum_audit',
   user:     process.env.POSTGRES_USER     ?? 'quorum',
   password: process.env.POSTGRES_PASSWORD ?? 'quorum_local',
+  ssl:      pgSsl,
 })
 
 // ── S3 client (optional — gracefully absent) ──────────────────────────────────
