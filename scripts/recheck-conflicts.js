@@ -254,14 +254,6 @@ export async function processPendingRow(poolInstance, row, deps = {}) {
         [KnowledgeStatus.SUPERSEDED, row.q_project_id, row.version_id, KnowledgeStatus.ACTIVE],
       )
       supersededVersionId = rows[0]?.version_id ?? null
-
-      await client.query(
-        `UPDATE pending_decisions
-            SET status = 'resolved', resolution = 'approved',
-                resolved_by = 'recheck-job', resolved_at = NOW(), updated_at = NOW()
-          WHERE q_key_id = $1 AND q_project_id = $2 AND status = 'pending'`,
-        [row.q_key_id, row.q_project_id],
-      )
     }
 
     await client.query(

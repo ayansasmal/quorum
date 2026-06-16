@@ -194,7 +194,6 @@ describe('processPendingRow', () => {
     client.query
       .mockResolvedValueOnce({ rows: [] })                      // BEGIN
       .mockResolvedValueOnce({ rows: [{ version_id: 'q_v1' }] }) // supersede active sibling
-      .mockResolvedValueOnce({ rows: [] })                      // UPDATE pending_decisions
       .mockResolvedValueOnce({ rows: [] })                      // promote pending version
       .mockResolvedValueOnce({ rows: [] })                      // COMMIT
 
@@ -214,32 +213,8 @@ describe('processPendingRow', () => {
       row.version_id,
       KnowledgeStatus.ACTIVE,
     ])
-  })
-
-  it('auto-resolves open pending_decisions rows when promoting to ACTIVE', async () => {
-    const client = makeClient()
-    const pool = makePool({ client })
-    const row = makePendingRow()
-
-    client.query
-      .mockResolvedValueOnce({ rows: [] })                      // BEGIN
-      .mockResolvedValueOnce({ rows: [{ version_id: 'q_v1' }] }) // supersede active sibling
-      .mockResolvedValueOnce({ rows: [] })                      // UPDATE pending_decisions
-      .mockResolvedValueOnce({ rows: [] })                      // promote pending version
-      .mockResolvedValueOnce({ rows: [] })                      // COMMIT
-
-    await processPendingRow(pool, row, {
-      detectConflictFn: vi.fn().mockResolvedValue({ conflict: false }),
-      getProjectGlobalsFn: vi.fn().mockResolvedValue([]),
-    })
-
-    const pdCall = client.query.mock.calls.find(
-      ([sql]) => typeof sql === 'string' && sql.includes('UPDATE pending_decisions'),
-    )
-    expect(pdCall).toBeDefined()
-    expect(pdCall[0]).toMatch(/status = 'resolved'/)
-    expect(pdCall[0]).toMatch(/resolution = 'approved'/)
-    expect(pdCall[1]).toEqual([row.q_key_id, row.q_project_id])
+    // pending_decisions are NOT touched on ACTIVE promotion — human review is required
+    expect(client.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('UPDATE pending_decisions'))).toBe(false)
   })
 })
 
