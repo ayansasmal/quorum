@@ -3,6 +3,7 @@
 ##
 ## Builds on push to prod branch:
 ##   ghcr.io/{repo}-gateway:*   <- Quorum Gateway (gateway/src/server.js)
+## Manual runs may build from any ref, but publish only from refs/heads/prod.
 ##
 ## All active jobs share the Buildx cache.
 ##
@@ -48,14 +49,13 @@ jobs:
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
 
       - name: Build and push Quorum Gateway image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.gateway
-          push: true
+          push: ${{ github.ref == 'refs/heads/prod' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=gateway
