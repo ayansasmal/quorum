@@ -113,12 +113,14 @@ flowchart TD
     end
 
     subgraph prod["Production (EC2 — ap-southeast-2)"]
-        PIN["crossplane/environments/prod.yaml\ngatewayTag: 0.4.12\ngraphitiTag: sha-d99abda..."]
-        SKILL["quorum-update skill\nrepins GATEWAY_TAG secret\n→ restart.sh full → /health"]
+        DECL["crossplane/environments/prod.yaml\ndeclarative input"]
+        PIN["Live runtime secret/env\nGATEWAY_TAG / GRAPHITI_TAG"]
+        SKILL["quorum-update skill\nrepins runtime secret/env\n→ restart.sh full → /health"]
     end
 
-    GW_IMG -.->|"manual: update prod.yaml\nthen quorum-update"| PIN
-    GR_IMG -.->|"manual: update graphitiTag in prod.yaml"| PIN
+    GW_IMG -.->|"verify image, then update declarative input\nand/or runtime tag flow"| DECL
+    GR_IMG -.->|"verify image, then update declarative input\nand/or runtime tag flow"| DECL
+    DECL -.->|"reconciles into runtime secret/env"| PIN
     PIN --> SKILL
 ```
 
@@ -154,9 +156,11 @@ flowchart TD
     end
 
     subgraph prod["Production"]
-        PIN["prod.yaml pins\ngatewayTag, graphitiTag"]
+        DECL["prod.yaml declarative inputs"]
+        PIN["runtime secret/env\nGATEWAY_TAG / GRAPHITI_TAG"]
         SKILL["quorum-update skill"]
-        GW_IMG & GR_IMG -.->|"manual repin after verify"| PIN
+        GW_IMG & GR_IMG -.->|"manual repin after verify"| DECL
+        DECL -.->|"reconciles into"| PIN
         PIN --> SKILL
     end
 ```
@@ -193,7 +197,7 @@ No `latest` in production. `latest` is acceptable on the `prod`/`main` branch in
 | graphiti-mcp | `sha-d99abda...` | quorum-graphiti fork |
 | quorum-dashboard | Vercel remains the live production path; GHCR image supports local/E2E/container flows | quorum-dash repo |
 
-> **Action:** migrate `gatewayTag` from `0.4.12` to `sha-<commit>` to be consistent with graphiti. The `quorum-update` skill already handles SHA-format tags.
+> **Action:** migrate the declarative `gatewayTag` input from `0.4.12` to `sha-<commit>` to be consistent with graphiti, and keep the runtime `GATEWAY_TAG` flow aligned with that input.
 
 ---
 
@@ -224,7 +228,7 @@ sequenceDiagram
 ```
 
 **Key files:**
-- `crossplane/environments/prod.yaml` — declarative pin store
+- `crossplane/environments/prod.yaml` — declarative deployment input, not the host's direct runtime pin
 - `crossplane/bootstrap/docker-compose.aws.yml` — EC2 runtime compose
 - `.claude/skills/quorum-update` — repin + re-converge skill
 - `crossplane/ops/quorum-restart.sh` — SSM-driven bounce script
@@ -310,32 +314,24 @@ Modelled exactly on the production skills (`quorum-resume`, `quorum-suspend`, `q
 ### Skill: `quorum-local-update`
 
 **Purpose:** Pull the latest GHCR images for gateway and graphiti, then restart the running stack.  
-**Resolves tags:** same fallback chain as described in the Graphiti analysis — sibling checkout → `GRAPHITI_TAG` env → hardcoded prod tag.  
+**Resolves tags independently per image:** explicit env override first (`GATEWAY_TAG`, `GRAPHITI_TAG`), then a local component SHA when that component's checkout is present, then the currently configured runtime tag from the production secret/env chain if no local override is available.  
 **Wraps:** `docker compose pull gateway graphiti && docker compose up -d gateway graphiti`  
 **Confirmation:** Show current vs. new image SHAs before pulling.
 
 ```mermaid
 flowchart TD
     A["quorum-local-update called"]
-    B{"GATEWAY_TAG\nenv set?"}
-    C{"../graphiti/quorum-graphiti\nexists?"}
-    D["Use env GATEWAY_TAG"]
-    E["sha-$(git -C ../quorum rev-parse HEAD)"]
-    F["Fallback: current prod pin\nfrom prod.yaml"]
-    G["docker compose pull gateway graphiti"]
-    H["docker compose up -d gateway graphiti"]
-    I{"Health check\n/health → 200?"}
-    J["✅ Done"]
-    K["❌ Roll back to previous image"]
+    B["Resolve gateway tag:\n1. GATEWAY_TAG env\n2. current quorum checkout SHA\n3. current runtime tag from prod secret/env"]
+    C["Resolve graphiti tag:\n1. GRAPHITI_TAG env\n2. ../graphiti/quorum-graphiti checkout SHA\n3. current runtime tag from prod secret/env"]
+    D["docker compose pull gateway graphiti"]
+    E["docker compose up -d gateway graphiti"]
+    F{"Health check\n/health → 200?"}
+    G["✅ Done"]
+    H["❌ Roll back to previous image"]
 
-    A --> B
-    B -->|yes| D
-    B -->|no| C
-    C -->|yes| E
-    C -->|no| F
-    D & E & F --> G --> H --> I
-    I -->|yes| J
-    I -->|no| K
+    A --> B --> C --> D --> E --> F
+    F -->|yes| G
+    F -->|no| H
 ```
 
 ### Skill: `quorum-local-logs`

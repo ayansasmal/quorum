@@ -19,11 +19,13 @@
 | **LocalStack** | Local dev only | Docker Compose | ✅ Dev-only |
 | **MCP Server** | Engineer machines | `npm install -g @as-quorum/mcp` | ✅ Published to npm |
 
-**Production image pins** (from `crossplane/environments/prod.yaml`):
+**Declarative image tag inputs** (tracked in `crossplane/environments/prod.yaml` and typically mirrored into the live production secret/env as `GATEWAY_TAG` and `GRAPHITI_TAG`):
 ```
 gatewayTag:  0.4.12   ← semver (migrate to sha-* — see roadmap)
 graphitiTag: sha-d99abda38b1181d1f56198f1565510de9564f79b
 ```
+
+The host runtime source of truth is the production secret/env consumed by the EC2 Docker Compose stack. `prod.yaml` is a declarative Crossplane input to the broader deployment system, not the direct runtime pin on the host.
 
 The dashboard image now publishes from `quorum-dash`, but that GHCR artifact is for local development, browser E2E, and other containerised flows. The live production dashboard remains Vercel.
 
@@ -503,7 +505,7 @@ kubectl delete pvc --all -n quorum
                     │  docker-compose.aws.yml                             │
                     │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
                     │  │ gateway  │  │ graphiti │  │ falkordb + redis │  │
-ALB / CloudFront    │  │ :3001    │  │ :8000    │  │ :6379 / :6380   │  │
+Caddy on EC2        │  │ :3001    │  │ :8000    │  │ :6379 / :6380   │  │
 ──────────────────► │  └──────────┘  └──────────┘  └──────────────────┘  │
 HTTPS :443          │        │                                            │
                     └────────┼────────────────────────────────────────────┘
@@ -545,7 +547,7 @@ kubectl get xquorumenvironments   # check environment status
 kubectl describe xquorumenvironment quorum-prod   # inspect
 ```
 
-### Future options (post v1.0)
+### Future options (post v1.0, not the current production path)
 
 ```
 Kubernetes (EKS):
@@ -563,7 +565,7 @@ ECS Fargate:
   → ALB for TLS termination
 ```
 
-### Production Sizing (Reference)
+### Production Sizing (Reference for future non-EC2 targets)
 
 ```
 Small team (< 20 engineers):
@@ -586,21 +588,28 @@ Large org (100+ engineers, multiple teams):
 
 ## Secrets Management
 
+> **Current production path:** the live EC2 deployment uses AWS Secrets Manager plus bootstrap/runtime env files. The runtime tags the host actually pulls come from `GATEWAY_TAG` and `GRAPHITI_TAG` in that production secret/env chain. The examples below are optional references for future Kubernetes-style targets unless a subsection explicitly says "current production".
+
 `.env` files are fine for local development. In production, secrets must come from
 a secrets manager — never baked into a container image or committed to git.
 
 ### What lives where
 
-| Secret | Where |
-|--------|-------|
-| `OPENAI_API_KEY` | Gateway pod only (via Secrets Manager / K8s Secret) |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Gateway pod only |
-| `QUORUM_JWT_PRIVATE_KEY` | Gateway pod only |
-| `QUORUM_JWT_PUBLIC_KEY` | Gateway pod (also served at `/.well-known/jwks.json`) |
-| `POSTGRES_PASSWORD` | Gateway pod + PostgreSQL StatefulSet |
-| `QUORUM_GATEWAY_URL` | Engineer's machine `.quorum` file (not a secret) |
+| Secret | Current EC2 production | Future Kubernetes-style targets |
+|--------|-------------------------|---------------------------------|
+| `OPENAI_API_KEY` | Production secret/env consumed by gateway container | Gateway pod only (via Secrets Manager / K8s Secret) |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Production secret/env consumed by gateway container | Gateway pod only |
+| `QUORUM_JWT_PRIVATE_KEY` | Production secret/env consumed by gateway container | Gateway pod only |
+| `QUORUM_JWT_PUBLIC_KEY` | Production secret/env consumed by gateway container (also served at `/.well-known/jwks.json`) | Gateway pod |
+| `POSTGRES_PASSWORD` | Runtime env refreshed from AWS-managed secret flow | Gateway pod + PostgreSQL StatefulSet |
+| `GATEWAY_TAG` / `GRAPHITI_TAG` | Live runtime image tags on the EC2 host | N/A unless a future platform adopts the same env contract |
+| `QUORUM_GATEWAY_URL` | Engineer's machine `.quorum` file (not a secret) | Engineer's machine `.quorum` file (not a secret) |
 
-### Option A — AWS Secrets Manager (recommended for EKS)
+### Current production — AWS Secrets Manager + runtime env
+
+Current production uses the `quorum/prod/gateway` secret plus bootstrap/runtime env materialisation on the EC2 host. Crossplane config feeds that workflow, but the host ultimately reads its runtime values from the generated env/secret chain rather than directly from `prod.yaml`.
+
+### Future option — AWS Secrets Manager for Kubernetes/EKS
 
 ```bash
 aws secretsmanager create-secret \
@@ -619,7 +628,7 @@ Use the AWS Secrets Store CSI Driver to mount as environment variables. The gate
 pod's IRSA role needs `secretsmanager:GetSecretValue` scoped to
 `arn:aws:iam::<account>:secret:quorum/production/*`.
 
-### Option B — Kubernetes Secrets
+### Future option — Kubernetes Secrets
 
 ```bash
 kubectl create secret generic quorum-gateway-secrets \
@@ -648,7 +657,16 @@ Enable KMS envelope encryption on etcd to encrypt K8s Secrets at rest.
 
 The gateway serves plain HTTP on port 3001. TLS is terminated at the layer in front.
 
-### Production — AWS ALB
+### Current production — direct EC2 with Caddy
+
+Current production does **not** use an ALB or Kubernetes ingress. Caddy terminates TLS on the EC2 instance and forwards to the internal gateway container in the backend-only Docker Compose stack.
+
+Traffic flow:
+```
+Engineer → HTTPS :443 → Caddy on EC2 → HTTP :3001 → Gateway container
+```
+
+### Future option — AWS ALB / Kubernetes ingress
 
 ```yaml
 # helm/quorum/values-aws.yaml
@@ -696,8 +714,9 @@ Update `.quorum`:
 
 ### Production TLS checklist
 
-- [ ] TLS terminated at ALB (ACM cert) or ingress controller (cert-manager)
-- [ ] Gateway pod only listens on HTTP internally
+- [ ] For current EC2 production: TLS terminated by Caddy on the instance
+- [ ] For future Kubernetes-style targets: TLS terminated at ALB (ACM cert) or ingress controller (cert-manager)
+- [ ] Gateway container or pod only listens on HTTP internally
 - [ ] `QUORUM_GATEWAY_URL` in all `.quorum` files uses `https://`
 - [ ] `POSTGRES_SSL=true` in gateway environment (enables `ssl: { rejectUnauthorized: true }`)
 - [ ] HTTP → HTTPS redirect enforced at the load balancer
