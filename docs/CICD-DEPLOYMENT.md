@@ -20,9 +20,9 @@ graph TD
     end
 
     subgraph infra["Third-party infrastructure images (pulled, not built)"]
-        LS["localstack/localstack:latest\nS3 + DynamoDB emulation"]
+        LS["localstack/localstack:latest\nS3 + DynamoDB emulation\n(dev/E2E only)"]
         FDB["falkordb/falkordb:latest\nGraph database"]
-        PG["postgres:16-alpine\nAudit store"]
+        PG["postgres:16-alpine\nAudit store\n(dev/E2E only)"]
         RD["redis:7-alpine\nConfig + profile cache"]
     end
 
@@ -40,7 +40,8 @@ graph TD
     GW --> DEV & PROD
     GR --> DEV & PROD
     DASH --> DEV & CI_E2E
-    LS & FDB & PG & RD --> DEV & PROD & CI_E2E
+    FDB & RD --> DEV & PROD & CI_E2E
+    LS & PG --> DEV & CI_E2E
     MO & E2E --> CI_E2E
 ```
 
@@ -230,7 +231,7 @@ sequenceDiagram
 **Key files:**
 - `crossplane/environments/prod.yaml` — declarative deployment input, not the host's direct runtime pin
 - `crossplane/bootstrap/docker-compose.aws.yml` — EC2 runtime compose
-- `.claude/skills/quorum-update` — repin + re-converge skill
+- `docs/DEPLOYMENT-AWS.md` — canonical operator runbook for the live image-tag and restart flow
 - `crossplane/ops/quorum-restart.sh` — SSM-driven bounce script
 
 ---

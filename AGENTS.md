@@ -275,8 +275,9 @@ graph TD
 - Crossplane v2 namespaced managed resources use `aws.m.upbound.io/v1beta1` ProviderConfig
   `quorum-system/aws-prod`; generate `quorum-system/aws-creds-prod` key `creds` from the
   `quorum-prod` AWS CLI profile through stdin. Never store production access keys in repository YAML.
-- Runtime images `ghcr.io/ayansasmal/quorum-gateway:0.4.12` and
-  `ghcr.io/ayansasmal/graphiti-mcp:0.4.x` are public Linux ARM64 packages; EC2 must pull them
+- Runtime images currently use a mixed production state: gateway is still the legacy semver tag
+  `ghcr.io/ayansasmal/quorum-gateway:0.4.12`, while Graphiti is already pinned to an immutable
+  `ghcr.io/ayansasmal/graphiti-mcp:sha-...` tag. Both are public Linux ARM64 packages; EC2 must pull them
   anonymously rather than storing a GitHub token. Upload bootstrap assets to
   `s3://quorum-prod-deploy/bootstrap/current/` with `*.example` excluded.
 - Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
