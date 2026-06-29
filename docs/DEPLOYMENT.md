@@ -19,7 +19,7 @@
 | **LocalStack** | Local dev only | Docker Compose | ✅ Dev-only |
 | **MCP Server** | Engineer machines | `npm install -g @as-quorum/mcp` | ✅ Published to npm |
 
-**Declarative image tag inputs** (tracked in `crossplane/environments/prod.yaml` and typically mirrored into the live production secret/env as `GATEWAY_TAG` and `GRAPHITI_TAG`):
+**Declarative image tag inputs** (tracked in `crossplane/environments/prod.yaml`; operators may keep them aligned with the live production secret/env values `GATEWAY_TAG` and `GRAPHITI_TAG`, but they are not wired into the host runtime path today):
 ```
 gatewayTag:  0.4.12   ← semver (migrate to sha-* — see roadmap)
 graphitiTag: sha-d99abda38b1181d1f56198f1565510de9564f79b
@@ -82,25 +82,25 @@ gantt
 
 ## Architecture: Two Parties, One Stack
 
-Quorum has a clear split between who runs what:
+Quorum has a clear split between the live production backend, local development services, and the engineer-local MCP client.
 
-```
-Platform Team                          Engineers
-─────────────────────────────────      ─────────────────────────────────────
-Runs the central Quorum stack:         Connect from their local machine:
+**Current production backend**
 
-  gateway       :3001                    npm install -g @as-quorum/mcp
-  dashboard     :3002 †                  quorum install   ← one-time setup
-  postgresql    :5432                    quorum init      ← connect to project
-  graphiti      :8001
-  falkordb      :6379                  Claude Code auto-starts the MCP each
-  localstack    :4566 (local/S3)       session. Engineers never touch infra.
-```
+- Runs on EC2 Docker Compose: gateway, Graphiti, FalkorDB, Redis, and Caddy.
+- Uses AWS-managed services for PostgreSQL (RDS), S3, DynamoDB, and Secrets Manager.
+- Does not host the live dashboard SPA; the live dashboard remains Vercel-hosted at [quorum-dashboard.ayansasmal.work](https://quorum-dashboard.ayansasmal.work).
 
-> † The dashboard (:3002) ships from its own repo —
-> [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) — with its own image
-> publishing workflow. Vercel remains the live production path; this repo's chart
-> provisions the gateway + backing stores only.
+**Local development stack**
+
+- `./scripts/setup.sh docker` brings up gateway, Graphiti, PostgreSQL, FalkorDB, Redis, and LocalStack on the developer machine.
+- Optional local dashboard flows come from [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash): Docker nginx on `:3002` or the Vite dev server on `:3002`.
+- These local services are for development and E2E only; they are not the live production topology.
+
+**Engineers**
+
+- Install `@as-quorum/mcp` locally with `npm install -g @as-quorum/mcp`.
+- Run `quorum install` once, then `quorum init` per project.
+- Claude Code auto-starts the MCP each session; it talks to the central gateway over HTTP and does not run inside the platform stack.
 
 The MCP server runs **locally on each engineer's machine** — not in the platform stack.
 It talks to the central gateway over HTTP. Engineers never need database credentials,

@@ -118,9 +118,9 @@ flowchart TD
         SKILL["quorum-update skill\nrepins runtime secret/env\n→ restart.sh full → /health"]
     end
 
-    GW_IMG -.->|"verify image, then update declarative input\nand/or runtime tag flow"| DECL
-    GR_IMG -.->|"verify image, then update declarative input\nand/or runtime tag flow"| DECL
-    DECL -.->|"reconciles into runtime secret/env"| PIN
+    GW_IMG -.->|"verify image, then update runtime tag flow"| PIN
+    GR_IMG -.->|"verify image, then update runtime tag flow"| PIN
+    DECL -.->|"tracked separately for Crossplane config\nnot wired into the live host tags today"| PIN_NOTE["no live reconciliation path"]
     PIN --> SKILL
 ```
 
@@ -159,8 +159,8 @@ flowchart TD
         DECL["prod.yaml declarative inputs"]
         PIN["runtime secret/env\nGATEWAY_TAG / GRAPHITI_TAG"]
         SKILL["quorum-update skill"]
-        GW_IMG & GR_IMG -.->|"manual repin after verify"| DECL
-        DECL -.->|"reconciles into"| PIN
+        GW_IMG & GR_IMG -.->|"manual repin after verify"| PIN
+        DECL -.->|"tracked separately;\nnot reconciled into runtime tags today"| DECL_NOTE["reference only"]
         PIN --> SKILL
     end
 ```
@@ -197,7 +197,7 @@ No `latest` in production. `latest` is acceptable on the `prod`/`main` branch in
 | graphiti-mcp | `sha-d99abda...` | quorum-graphiti fork |
 | quorum-dashboard | Vercel remains the live production path; GHCR image supports local/E2E/container flows | quorum-dash repo |
 
-> **Action:** migrate the declarative `gatewayTag` input from `0.4.12` to `sha-<commit>` to be consistent with graphiti, and keep the runtime `GATEWAY_TAG` flow aligned with that input.
+> **Action:** migrate the runtime `GATEWAY_TAG` flow from `0.4.12` to `sha-<commit>` to be consistent with graphiti. If `prod.yaml` keeps a matching declarative value, treat that as documentation/config hygiene rather than a live rollout path.
 
 ---
 
@@ -314,15 +314,15 @@ Modelled exactly on the production skills (`quorum-resume`, `quorum-suspend`, `q
 ### Skill: `quorum-local-update`
 
 **Purpose:** Pull the latest GHCR images for gateway and graphiti, then restart the running stack.  
-**Resolves tags independently per image:** explicit env override first (`GATEWAY_TAG`, `GRAPHITI_TAG`), then a local component SHA when that component's checkout is present, then the currently configured runtime tag from the production secret/env chain if no local override is available.  
+**Resolves tags independently per image:** explicit env override first (`GATEWAY_TAG`, `GRAPHITI_TAG`), then a local component SHA when that component's checkout is present, then a safe local fallback that reuses the tag already configured for the local stack (for example the current shell/.env value or the tag on the running local container). It does not require reading production secrets.  
 **Wraps:** `docker compose pull gateway graphiti && docker compose up -d gateway graphiti`  
 **Confirmation:** Show current vs. new image SHAs before pulling.
 
 ```mermaid
 flowchart TD
     A["quorum-local-update called"]
-    B["Resolve gateway tag:\n1. GATEWAY_TAG env\n2. current quorum checkout SHA\n3. current runtime tag from prod secret/env"]
-    C["Resolve graphiti tag:\n1. GRAPHITI_TAG env\n2. ../graphiti/quorum-graphiti checkout SHA\n3. current runtime tag from prod secret/env"]
+    B["Resolve gateway tag:\n1. GATEWAY_TAG env\n2. current quorum checkout SHA\n3. current local stack tag/default"]
+    C["Resolve graphiti tag:\n1. GRAPHITI_TAG env\n2. ../graphiti/quorum-graphiti checkout SHA\n3. current local stack tag/default"]
     D["docker compose pull gateway graphiti"]
     E["docker compose up -d gateway graphiti"]
     F{"Health check\n/health → 200?"}
