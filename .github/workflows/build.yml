@@ -1,12 +1,8 @@
 ##
-## Quorum CI - Build and Push Docker Images
+## Quorum CI - Build and Push Gateway Image
 ##
 ## Builds on push to prod branch:
 ##   ghcr.io/{repo}-gateway:*   <- Quorum Gateway (gateway/src/server.js)
-##   (verify only, no push)     <- Graphiti sidecar (Dockerfile.graphiti)
-##
-##   MCP image build (ghcr.io/{repo}:*) is disabled until @as-quorum/mcp
-##   is published to npm. Re-enable the build-mcp job when ready.
 ##
 ## All active jobs share the Buildx cache.
 ##
@@ -21,53 +17,9 @@ on:
   workflow_dispatch:
 
 env:
-  MCP_IMAGE:     ghcr.io/${{ github.repository }}
   GATEWAY_IMAGE: ghcr.io/${{ github.repository }}-gateway
 
 jobs:
-  build-mcp:
-    name: Build Quorum MCP Image
-    if: false  # disabled — @as-quorum/mcp not yet published to npm; re-enable after publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for MCP image
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.MCP_IMAGE }}
-          tags: |
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-
-      - name: Build and push Quorum MCP image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=mcp
-          cache-to: type=gha,mode=max,scope=mcp
-          platforms: linux/amd64,linux/arm64
-
   build-gateway:
     name: Build Quorum Gateway Image
     runs-on: ubuntu-latest
@@ -109,24 +61,3 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
           platforms: linux/amd64,linux/arm64
-
-  build-graphiti:
-    name: Verify Graphiti Image Builds
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Graphiti image (verify only — no push)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.graphiti
-          push: false
-          cache-from: type=gha,scope=graphiti
-          cache-to: type=gha,mode=max,scope=graphiti
