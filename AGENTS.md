@@ -357,6 +357,13 @@ scripts/                ← seed · audit-scan · decay · archive · recheck
 >
 > Dashboard source: `github.com/ayansasmal/Quorum-dash` — the React SPA (:3002) moved to its own repo and consumes the gateway's BFF (`/api/*`) over HTTP. The gateway's `routes/dashboard.js` BFF handlers stay here.
 
+## CI/CD Ownership
+
+- `quorum/.github/workflows/build.yml` owns **gateway image publishing only**.
+- Graphiti image publishing belongs to `graphiti/quorum-graphiti`.
+- Dashboard image publishing belongs to `quorum-dash`.
+- Do not reintroduce dormant MCP or Graphiti image jobs into the `quorum` repo; any future MCP container release flow belongs in `quorum-mcp`.
+
 ---
 
 ## Non-Negotiable Implementation Rules

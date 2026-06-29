@@ -1,12 +1,82 @@
 # Quorum — Deployment Guide
 
-> **Production architecture notice (June 11, 2026):** The Helm/EKS sections below remain useful for
-> optional Kubernetes deployments, but they are not the approved AWS production path. Production uses a
-> local Docker Desktop Crossplane `v2.3.2` control plane, a stateless EC2 Docker Compose backend with RDS,
-> and the Vercel dashboard at <https://quorum-dashboard.ayansasmal.work>. Helm installs Crossplane core
-> only; the gateway is not deployed with Helm or `provider-helm`. See the
-> [current AWS deployment design](superpowers/specs/2026-06-11-quorum-aws-crossplane-deployment-design.md).
-> The implemented operator workflow is documented in [DEPLOYMENT-AWS.md](DEPLOYMENT-AWS.md).
+> This document is the authoritative deployment reference — current state, options, and roadmap.
+> For CI/CD pipelines and image publishing see [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md).
+> For the production AWS Crossplane setup see [DEPLOYMENT-AWS.md](DEPLOYMENT-AWS.md).
+
+---
+
+## Current Deployment State (2026-06-30)
+
+| Component | Where it runs | How it's deployed | Status |
+|-----------|--------------|------------------|--------|
+| **Gateway** | EC2 `quorum-prod` (ap-southeast-2) | Docker Compose via Crossplane SSM | ✅ Live |
+| **Graphiti MCP** | EC2 `quorum-prod` (sidecar) | Docker Compose via Crossplane SSM | ✅ Live |
+| **PostgreSQL** | RDS `quorum-prod` | Crossplane-managed | ✅ Live |
+| **FalkorDB** | EC2 `quorum-prod` (container) | Docker Compose | ✅ Live |
+| **Redis** | EC2 `quorum-prod` (container) | Docker Compose | ✅ Live |
+| **Dashboard SPA** | Vercel | Git push to main | ✅ Live at [quorum-dashboard.ayansasmal.work](https://quorum-dashboard.ayansasmal.work) |
+| **LocalStack** | Local dev only | Docker Compose | ✅ Dev-only |
+| **MCP Server** | Engineer machines | `npm install -g @as-quorum/mcp` | ✅ Published to npm |
+
+**Production image pins** (from `crossplane/environments/prod.yaml`):
+```
+gatewayTag:  0.4.12   ← semver (migrate to sha-* — see roadmap)
+graphitiTag: sha-d99abda38b1181d1f56198f1565510de9564f79b
+```
+
+The dashboard image now publishes from `quorum-dash`, but that GHCR artifact is for local development, browser E2E, and other containerised flows. The live production dashboard remains Vercel.
+
+**Claude skills for production operations:**
+
+| Skill | Does |
+|-------|------|
+| `/quorum-resume` | Start RDS → EC2 → wait for `/health` |
+| `/quorum-suspend` | SSM snapshot → stop EC2 + RDS |
+| `/quorum-restart` | SSM bounce: `restart \| recreate \| full` |
+| `/quorum-update sha-<commit>` | Repin `GATEWAY_TAG` secret → re-converge → verify `/health` |
+
+---
+
+## Deployment Roadmap
+
+```mermaid
+gantt
+    title Deployment Maturity Roadmap
+    dateFormat YYYY-MM-DD
+    section Images
+        Dashboard GHCR publish workflow        :done, a1, 2026-06-30, 1d
+        quorum-mcp npm automation              :a2, after a1, 1d
+        quorum-mcp Docker image (enable CI)    :a3, after a2, 1d
+        Migrate gatewayTag to sha-* format     :a4, after a1, 1d
+    section Local Dev
+        docker-compose.pull.yml overlay        :b1, 2026-06-30, 1d
+        Unify local Graphiti to GHCR pull      :b2, after b1, 2d
+        quorum-local-start skill               :b3, after b2, 1d
+        quorum-local-stop / reset / status     :b4, after b3, 1d
+        quorum-local-update / logs / seed      :b5, after b4, 1d
+    section Production
+        Optional dashboardTag in prod.yaml     :c1, after a1, 1d
+        Optional EC2 dashboard consumption     :c2, after c1, 1d
+        Retire Dockerfile.graphiti + CI job    :c3, after b2, 1d
+```
+
+### Action Items
+
+| # | Action | Status | Effort | Docs |
+|---|--------|--------|--------|------|
+| 1 | Dashboard local Docker service + npm scripts | ✅ Done | — | This doc |
+| 2 | GHA test jobs on `node:24-alpine` | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
+| 3 | `Dockerfile.quorum` → Python 3.12 + uv | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
+| 4 | `quorum-dash` GitHub Actions build + push to GHCR | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#dashboard-cicd-ownership) |
+| 5 | Optional: add `dashboardTag` to `prod.yaml`, update EC2 compose | ⬜ Future option | 30m | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
+| 6 | `quorum-mcp` release workflow for npm + Docker | ⬜ Todo | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#mcp-npm-publish-automation-plan) |
+| 7 | `docker-compose.pull.yml` overlay (GHCR pull mode) | ⬜ Todo | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#docker-compose-simplification-plan) |
+| 8 | Unify local Graphiti to GHCR pull (remove `Dockerfile.graphiti`) | ⬜ Todo | 2h | [local-graphiti-image-analysis-2026-06-29.md](local-graphiti-image-analysis-2026-06-29.md) |
+| 9 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ⬜ Todo | 15m | — |
+| 10 | Create 7 `quorum-local-*` Claude skills | ⬜ Todo | 3h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#local-deployment--proposed-skills) |
+
+---
 
 ## Architecture: Two Parties, One Stack
 
@@ -26,8 +96,9 @@ Runs the central Quorum stack:         Connect from their local machine:
 ```
 
 > † The dashboard (:3002) ships from its own repo —
-> [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) — with its own image and
-> Helm chart. This repo's chart provisions the gateway + backing stores only.
+> [`quorum-dash`](https://github.com/ayansasmal/Quorum-dash) — with its own image
+> publishing workflow. Vercel remains the live production path; this repo's chart
+> provisions the gateway + backing stores only.
 
 The MCP server runs **locally on each engineer's machine** — not in the platform stack.
 It talks to the central gateway over HTTP. Engineers never need database credentials,
@@ -91,11 +162,17 @@ automatically at session start when the token is missing or expired.
 │  postgresql       → audit store   :5432         │
 │  graphiti         → LLM sidecar   :8001         │
 │  gateway          → central API   :3001         │
+│                                                 │
+│  dashboard        → nginx SPA     :3002   *opt* │
+│  (profile: dashboard — requires ../quorum-dash) │
 └─────────────────────────────────────────────────┘
-   (the dashboard :3002 ships from the quorum-dash repo)
 
 Note: The MCP server is NOT in this stack.
       It runs locally on each engineer's machine via Claude Code.
+
+Dashboard options:
+  Docker nginx (opt-in):  npm run docker:start:dash  → http://localhost:3002
+  Vite dev server (hot-reload): cd quorum-dash && npm run dev → http://localhost:3002
 ```
 
 ### Prerequisites
@@ -233,10 +310,22 @@ quorum init
 ### Useful Commands
 
 ```bash
-# Start full stack
+# Start full stack (gateway + graphiti + postgres + falkordb + redis + localstack)
 ./scripts/setup.sh docker
 
-# Stop
+# Start dashboard alongside the stack (builds nginx image from ../quorum-dash)
+npm run docker:start:dash       # → http://localhost:3002
+
+# Rebuild dashboard image after React code changes, then restart
+npm run docker:rebuild:dash
+
+# Stop dashboard only (leaves gateway stack running)
+npm run docker:stop:dash
+
+# OR: use Vite dev server for hot-reload during active frontend work
+cd ../quorum-dash && npm run dev   # → http://localhost:3002 (hot-reload)
+
+# Stop everything
 docker compose down
 
 # Stop and wipe all data
@@ -258,8 +347,12 @@ node scripts/decay-confidence.js
 
 ## Option 2 — Local Kubernetes (Docker Desktop)
 
-Full Helm chart deployment. Matches production orchestration. Good for testing the
-Helm chart itself or prod-parity local development.
+> **Note:** This is **not the current production path**. Production uses EC2 Docker Compose
+> via Crossplane (see [DEPLOYMENT-AWS.md](DEPLOYMENT-AWS.md)). Use this option only when
+> specifically testing the Helm chart or Kubernetes configuration changes.
+
+Full Helm chart deployment. Good for testing the Helm chart itself or Kubernetes-specific
+configuration changes.
 
 ### Docker Desktop Setup
 
@@ -395,27 +488,79 @@ kubectl delete pvc --all -n quorum
 
 ---
 
-## Production — High Level Plan
+## Production — Current Architecture (AWS)
 
-### Targets
+> The production deployment runs on EC2 Docker Compose managed by Crossplane. See
+> [DEPLOYMENT-AWS.md](DEPLOYMENT-AWS.md) for the full Crossplane IaC setup and
+> operator runbook. This section summarises the deployed topology.
+
+### Current AWS topology
 
 ```
-Kubernetes (any cloud):
-  → Same Helm chart as local
-  → values-production.yaml with proper resource sizing
-  → Real StorageClass (gp3 on AWS, premium-ssd on Azure)
-  → Ingress controller (nginx or cloud ALB)
-  → TLS via cert-manager or ACM
-  → Secrets via External Secrets Operator (AWS Secrets Manager)
-  → HPA for gateway pods (FalkorDB and PostgreSQL are StatefulSets)
+                    ┌─────────────────────────────────────────────────────┐
+                    │  EC2 quorum-prod (ap-southeast-2)                   │
+                    │                                                     │
+                    │  docker-compose.aws.yml                             │
+                    │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+                    │  │ gateway  │  │ graphiti │  │ falkordb + redis │  │
+ALB / CloudFront    │  │ :3001    │  │ :8000    │  │ :6379 / :6380   │  │
+──────────────────► │  └──────────┘  └──────────┘  └──────────────────┘  │
+HTTPS :443          │        │                                            │
+                    └────────┼────────────────────────────────────────────┘
+                             │
+                    ┌────────▼───────────────────────────────────────────┐
+                    │  AWS Managed                                        │
+                    │  RDS PostgreSQL (quorum-prod)                      │
+                    │  S3 (quorum-prod-config)                           │
+                    │  DynamoDB (quorum-user-projects)                   │
+                    │  Secrets Manager (quorum/prod/gateway)             │
+                    └────────────────────────────────────────────────────┘
 
-AWS Native:
-  → Gateway on ECS Fargate
-  → FalkorDB on ECS Fargate + EFS persistent volume
-  → PostgreSQL on RDS (managed backups)
-  → Secrets Manager for OPENAI_API_KEY, GitHub OAuth credentials, JWT keys
+Dashboard (SPA):    Vercel → quorum-dashboard.ayansasmal.work
+                    Static React app — calls gateway API via HTTPS
+```
+
+### Deploying a new gateway version
+
+```bash
+# 1. Push changes to prod branch → GitHub Actions builds + pushes to GHCR
+git push origin prod
+
+# 2. Verify the image
+docker pull ghcr.io/ayansasmal/quorum-gateway:sha-<commit>
+
+# 3. Deploy via Claude skill
+# In Claude Code:
+/quorum-update sha-<commit>
+```
+
+### Crossplane control plane (local)
+
+```bash
+# Crossplane runs on local Docker Desktop — it is the control plane only
+# It manages AWS infrastructure (VPC, RDS, EC2, S3, DDB, Secrets)
+# It does NOT deploy the gateway container — that happens via SSM + restart.sh
+
+kubectl get xquorumenvironments   # check environment status
+kubectl describe xquorumenvironment quorum-prod   # inspect
+```
+
+### Future options (post v1.0)
+
+```
+Kubernetes (EKS):
+  → Same Helm chart, values-production.yaml
+  → RDS PostgreSQL (managed backups)
+  → ElastiCache Redis
+  → ALB Ingress + ACM
+  → External Secrets Operator → Secrets Manager
+  → HPA for gateway pods
+
+ECS Fargate:
+  → Gateway + Graphiti as Fargate tasks
+  → RDS PostgreSQL
+  → EFS for FalkorDB persistence
   → ALB for TLS termination
-  → ECR for container images
 ```
 
 ### Production Sizing (Reference)
@@ -573,6 +718,25 @@ Quorum uses `group_id` to namespace every Graphiti operation to a specific proje
 
 An engineer with a JWT for `project-A` cannot read or write data belonging to `project-B`,
 even if they construct a request body with `"group_id": "project-B"`.
+
+---
+
+## Local Deployment Skills (Planned)
+
+Modelled on the production skills. Once created, all local stack operations become
+single-invocation Claude commands instead of terminal commands.
+
+> **Status:** Planned. See [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#local-deployment--proposed-skills) for the full spec.
+
+| Skill | Does | Analogue |
+|-------|------|---------|
+| `/quorum-local-start [dev\|prod]` | Start full stack; `dev` hot-reloads gateway src; `prod` pulls GHCR images | `/quorum-resume` |
+| `/quorum-local-stop` | Stop containers without wiping volumes | `/quorum-suspend` (no snapshot) |
+| `/quorum-local-reset` | Stop + wipe all data volumes (with explicit confirmation) | — |
+| `/quorum-local-update` | Pull latest GHCR images + restart gateway + graphiti | `/quorum-update` |
+| `/quorum-local-status` | Show health of all 6 services in one table | — |
+| `/quorum-local-logs [service]` | Tail logs for one or more services | — |
+| `/quorum-local-seed` | Re-seed LocalStack S3 + DDB without restart | — |
 
 ---
 
