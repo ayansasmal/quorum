@@ -613,7 +613,7 @@ Current production uses the `quorum/prod/gateway` secret plus bootstrap/runtime 
 
 ```bash
 aws secretsmanager create-secret \
-  --name "quorum/production/gateway" \
+  --name "quorum/future-eks/gateway" \
   --secret-string '{
     "POSTGRES_PASSWORD": "...",
     "QUORUM_JWT_PRIVATE_KEY": "...",
