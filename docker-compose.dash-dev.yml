@@ -1,0 +1,36 @@
+# docker-compose.dash-dev.yml — hot-reload dashboard development overlay
+#
+# Replaces the nginx build with a Vite dev server so React changes are
+# reflected immediately without rebuilding the Docker image.
+#
+# Usage (from quorum/ directory):
+#   npm run docker:start:dash:dev
+#
+# The anonymous volume at /app/node_modules prevents macOS node_modules
+# (compiled for darwin) from leaking into the Alpine container.
+# On first start, 'npm ci' runs inside the container to install Linux deps.
+#
+# VITE_GATEWAY_URL points to the gateway service over Docker internal DNS.
+# Vite's dev server proxy forwards /api/*, /auth/*, etc. to the gateway —
+# same-origin to the browser, no CORS needed.
+
+name: quorum
+
+services:
+  dashboard:
+    profiles: ["dashboard"]
+    image: node:24-alpine
+    working_dir: /app
+    command: >
+      sh -c "npm ci --prefer-offline --no-audit &&
+             npm run dev -- --host"
+    volumes:
+      - ../quorum-dash:/app
+      - /app/node_modules
+    ports:
+      - "3002:3002"
+    environment:
+      - VITE_GATEWAY_URL=http://gateway:3001
+    depends_on:
+      gateway:
+        condition: service_healthy

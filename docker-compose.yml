@@ -153,9 +153,31 @@ services:
       start_period: 30s
       retries: 3
 
-  # Quorum Dashboard — the React/Vite app now lives in its own repo (quorum-dash)
-  # and is deployed separately. The gateway serves its BFF API; set DASHBOARD_URL
-  # (above) to wherever the dashboard is hosted for OAuth redirects.
+  # Quorum Dashboard — opt-in local service (profile: dashboard).
+  # Build context is the sibling quorum-dash repo. nginx proxies /api/* → gateway:3001
+  # so the browser stays same-origin and no CORS is needed.
+  #
+  # Start:   npm run docker:start:dash   (or: docker compose --profile dashboard up -d)
+  # Rebuild: npm run docker:rebuild:dash
+  #
+  # Requires: quorum-dash repo checked out as a sibling of this repo.
+  #   Layout: qc/quorum/ (this repo) + qc/quorum-dash/ (dashboard repo)
+  dashboard:
+    profiles: ["dashboard"]
+    build:
+      context: ../quorum-dash
+      dockerfile: Dockerfile
+    ports:
+      - "3002:8080"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   # Quorum MCP — runs on engineer machines via Claude Code MCP config, not Docker.
   # Opt-in only: docker compose --profile mcp up

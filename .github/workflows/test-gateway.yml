@@ -5,8 +5,11 @@
 ## Uses the root vitest installation — gateway tests live in tests/gateway/.
 ##
 ## Jobs:
-##   gateway-tests   <- unit tests for all gateway routes + middleware
-##   gateway-build   <- Docker image build check (no push)
+##   gateway-tests   <- unit tests for all gateway routes + middleware (Alpine container)
+##   gateway-build   <- Docker image build check, no push (ubuntu-latest — needs buildx)
+##
+## Runner strategy: gateway-tests runs inside node:24-alpine (no setup-node overhead).
+## gateway-build stays on ubuntu-latest because docker/build-push-action needs the Docker daemon.
 ##
 
 name: Gateway CI
@@ -34,14 +37,20 @@ jobs:
   gateway-tests:
     name: Gateway Tests
     runs-on: ubuntu-latest
-
+    container:
+      image: node:24-alpine
     steps:
+      - name: Install git
+        run: apk add --no-cache git
+
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Cache npm
+        uses: actions/cache@v4
         with:
-          node-version: "24"
-          cache: "npm"
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: npm-
 
       - name: Install dependencies
         run: npm install --prefer-offline
@@ -63,7 +72,8 @@ jobs:
   gateway-build:
     name: Gateway Docker Build
     runs-on: ubuntu-latest
-
+    # Intentionally NOT using container: here — docker/build-push-action requires
+    # access to the Docker daemon, which is only available on the bare ubuntu runner.
     steps:
       - uses: actions/checkout@v4
 
