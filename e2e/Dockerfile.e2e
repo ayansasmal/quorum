@@ -1,0 +1,79 @@
+# =============================================================================
+# Dockerfile.e2e — Unified Quorum E2E test runner
+#
+# PURPOSE
+#   Runs the shared API + UI Playwright suite from quorum/e2e/ inside an
+#   isolated Alpine container. Source code is bind-mounted at /workspace at
+#   runtime — nothing is baked in except the Node.js runtime and
+#   pre-compiled node_modules.
+#
+# WHY ALPINE (not Debian/Ubuntu)
+#   Lightweight: ~50MB base vs ~200MB.
+#
+# NODE_MODULES STRATEGY
+#   1. npm ci runs during build → /workspace/node_modules exists in image layer
+#   2. At runtime, source code is bind-mounted at /workspace (host files overlay)
+#   3. docker-compose.e2e.yml adds an anonymous volume at /workspace/node_modules
+#   4. Docker applies the anonymous volume ON TOP of the bind mount, shadowing
+#      the host macOS binaries with the Alpine-compiled ones from the image layer
+#   This prevents "Exec format error" from mixing macOS and Linux native modules.
+#
+# BROWSER SUPPORT
+#   System Chromium is installed via apk — lighter than Playwright's ~200MB
+#   bundled download. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 prevents npm ci from
+#   downloading the bundled binary. PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH points
+#   Playwright at the system binary instead.
+#
+#   playwright.config.js sets launchOptions.args=['--no-sandbox',
+#   '--disable-dev-shm-usage'] — required in Docker containers where kernel
+#   namespace privileges and /dev/shm size are restricted.
+#
+# USAGE (via npm scripts)
+#   npm run test:e2e:docker         # full isolated run (build + start + test)
+#   npm run test:e2e:docker:up      # start infrastructure only
+#   npm run test:e2e:docker:run     # run tests against running infrastructure
+#   npm run test:e2e:docker:down    # stop all containers
+#   npm run test:e2e:docker:clean   # stop + wipe volumes (fresh LocalStack state)
+# =============================================================================
+
+FROM node:24-alpine
+
+# Skip Playwright's bundled Chromium download — we use the system binary below.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Install system Chromium and required shared libraries.
+# These are the packages needed for headless Chromium on Alpine Linux:
+#   chromium       — the browser itself
+#   nss            — NSS crypto (TLS certificate validation)
+#   freetype       — font rendering
+#   harfbuzz       — text shaping
+#   ca-certificates — root CAs for HTTPS
+#   ttf-freefont   — basic font set (prevents font-not-found crashes)
+#   font-liberation — metrically-compatible Liberation fonts
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-liberation
+
+# Point Playwright at the system Chromium installed above.
+# Without this, Playwright looks for its bundled binary which was never downloaded.
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Force test environment inside the container.
+ENV NODE_ENV=test
+
+WORKDIR /workspace
+
+# Install node_modules into the image layer.
+# Only package manifests are copied — application source is bind-mounted.
+# This layer is cached and only rebuilt when package.json / package-lock.json changes.
+COPY package.json package-lock.json ./
+RUN npm ci --prefer-offline
+
+# Default command: run the unified suite through quorum/e2e/playwright.config.js.
+# Override at runtime: docker compose run test-runner npx playwright test --config e2e/playwright.config.js --grep S-01
+CMD ["npx", "playwright", "test", "--config", "e2e/playwright.config.js"]

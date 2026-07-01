@@ -380,9 +380,12 @@ git push --follow-tags
 
 ---
 
-## Task 7 — Create 7 `quorum-local-*` Claude skills (3 h)
+## Task 7 — Create 7 `quorum-local-*` Claude skills (3 h) ✅ Complete
 
 **Why:** Production operations are driven by the `/quorum-resume`, `/quorum-suspend`, `/quorum-restart`, `/quorum-update` skills. Local dev has no equivalent — engineers type docker compose commands manually. These 7 skills bring the same single-command UX to local development.
+
+**Implementation note:** tracked skill source now lives in `quorum/skill/`, with `prod-ops/` and `local-dev/`
+subdirectories, and the workspace-local `.claude/skills/quorum-*` paths are symlinked to those directories.
 
 **Skills location:** `.claude/skills/` in the workspace root (`/Users/ayan/Desktop/Work/vscode/qc/.claude/skills/`). Each skill is a **directory** containing a `SKILL.md` file. This matches the existing prod skill structure exactly:
 
@@ -701,6 +704,241 @@ State what will be seeded and that it is additive (will not wipe existing data).
 
 ---
 
+## Task 9 — Merge all E2E into `quorum/e2e/` (3–4 h) ✅ Complete
+
+**Why:** API-level E2E lives in `quorum/tests/e2e/` and browser E2E lives in `quorum-dash/tests/e2e/`. Both test the same integrated system (gateway + dashboard + graphiti). Collocating them under `quorum/e2e/` gives a single entry point: one command, one docker-compose, one playwright config that runs both suites against a fully containerised stack pulling GHCR images.
+
+---
+
+### Target structure
+
+```
+quorum/e2e/
+  playwright.config.js        ← unified config: two projects (api + ui)
+  Dockerfile.e2e              ← node:24-alpine + system Chromium (identical to quorum-dash/Dockerfile.e2e)
+  docker-compose.yml          ← full stack: all services from GHCR + localstack + test-runner
+  .env.example                ← GATEWAY_TAG, DASHBOARD_TAG, GRAPHITI_TAG
+  scripts/
+    run.sh                    ← full|up|run|down|clean|logs interface (mirrors e2e-docker.sh pattern)
+  scenarios/
+    api/                      ← moved from quorum/tests/e2e/scenarios/
+    ui/                       ← moved from quorum-dash/tests/e2e/scenarios/
+  helpers/
+    api.js                    ← merged from both repos (deduplicate; keep all functions)
+    jwt.js                    ← merged (likely identical)
+    seed.js                   ← merged (likely identical)
+    data.js                   ← from quorum/tests/e2e/helpers/data.js (unique to api)
+    graphiti.js               ← from quorum/tests/e2e/helpers/graphiti.js (unique to api)
+    browser.js                ← from quorum-dash/tests/e2e/helpers/browser.js (unique to ui)
+    setup.js                  ← merged (add T0.4 dashboard health probe — see below)
+    teardown.js               ← from either (both are no-ops)
+  fixtures/                   ← ONE canonical copy (currently duplicated in both repos)
+    quorum-test-project.quorum.json
+    quorum-test-catalog.quorum.json
+    quorum-test-peer-project.quorum.json
+    quorum-test-isolated-project.quorum.json
+    quorum-test-division-catalog.quorum.json
+    quorum-test-division-project.quorum.json
+    test-private-key.pem
+    test-public-key.pem
+  reporter/                   ← moved from quorum/tests/e2e/reporter/
+    graph-reporter.js
+    graph-schema.js
+  viewer/
+    index.html                ← moved from quorum/tests/e2e/viewer/
+```
+
+---
+
+### `playwright.config.js` — unified config
+
+Model on `quorum/playwright.config.js` with these changes:
+
+```js
+export default defineConfig({
+  testDir: 'scenarios',          // relative to quorum/e2e/
+  // ... same timeout/retries/workers as existing config ...
+
+  reporter: [
+    ['./reporter/graph-reporter.js'],
+    ['list'],
+    ['html', { outputFolder: '../playwright-report', open: 'never' }],
+  ],
+  outputDir: '../test-results',
+
+  globalSetup:    './helpers/setup.js',
+  globalTeardown: './helpers/teardown.js',
+
+  projects: [
+    {
+      name: 'api',
+      testMatch: 'scenarios/api/**/*.spec.js',
+      use: { browserName: 'chromium' },
+    },
+    {
+      name: 'ui',
+      testMatch: 'scenarios/ui/**/*.spec.js',
+      use: { browserName: 'chromium' },
+    },
+  ],
+})
+```
+
+No `webServer` block — the docker-compose stack provides both gateway and dashboard; this config is only ever run against running containers.
+
+---
+
+### `helpers/setup.js` — add T0.4 dashboard probe
+
+The existing `setup.js` in both repos is identical (T0.1 gateway health, fixture upload, T0.2 JWT round-trip, T0.3 config probe). The unified version adds one more probe:
+
+```js
+// T0.4: dashboard reachable (only when QUORUM_DASHBOARD_URL is set and non-local)
+const DASHBOARD_URL = process.env.QUORUM_DASHBOARD_URL
+if (DASHBOARD_URL && !DASHBOARD_URL.startsWith('http://localhost')) {
+  await waitFor(DASHBOARD_URL, 'dashboard', 60_000)
+  console.log('[setup] T0.4 dashboard reachable ✓')
+}
+```
+
+Implement `waitFor` as a generic URL-polling function and reuse it for both gateway and dashboard.
+
+---
+
+### `docker-compose.yml` — full stack
+
+Model on `quorum/docker-compose.e2e.yml` (copy all service definitions and env vars from it). Then:
+
+1. **Add dashboard service** — pulling from GHCR, with healthcheck:
+   ```yaml
+   dashboard:
+     image: ghcr.io/ayansasmal/quorum-dashboard:${DASHBOARD_TAG:-latest}
+     networks: [e2e]
+     healthcheck:
+       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/"]
+       interval: 10s
+       timeout: 5s
+       start_period: 20s
+       retries: 5
+     depends_on:
+       gateway:
+         condition: service_healthy
+   ```
+
+2. **Replace graphiti `build:` with GHCR image** (same as Task 5):
+   ```yaml
+   graphiti:
+     image: ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}
+   ```
+
+3. **Replace gateway `build:` with GHCR image**:
+   ```yaml
+   gateway:
+     image: ghcr.io/ayansasmal/quorum-gateway:${GATEWAY_TAG:-latest}
+   ```
+
+4. **Add test-runner service** (browser-capable, runs both api + ui projects):
+   ```yaml
+   test-runner:
+     build:
+       context: .
+       dockerfile: Dockerfile.e2e
+     networks: [e2e]
+     environment:
+       - QUORUM_GATEWAY_URL=http://gateway:3001
+       - QUORUM_DASHBOARD_URL=http://dashboard:8080
+       - NODE_ENV=test
+       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+     volumes:
+       - .:/workspace
+       - /workspace/node_modules
+     depends_on:
+       gateway:
+         condition: service_healthy
+       dashboard:
+         condition: service_healthy
+     command: ["npx", "playwright", "test", "--config", "playwright.config.js"]
+   ```
+
+5. Name the compose project: `name: quorum-e2e` (single compose project — no external network needed).
+
+---
+
+### `scripts/run.sh`
+
+Same `full|up|run|down|clean|logs` interface as the existing `quorum/scripts/e2e-docker.sh`. Model on it directly. Key change: reference `quorum/e2e/docker-compose.yml` (not the old path) and resolve `GRAPHITI_TAG` + `GATEWAY_TAG` + `DASHBOARD_TAG` via env or `latest`.
+
+---
+
+### npm scripts — `quorum/package.json`
+
+Update all `test:e2e:*` scripts to point at `quorum/e2e/`:
+
+| Old | New |
+|-----|-----|
+| `test:e2e` | `npx playwright test --config e2e/playwright.config.js` |
+| `test:e2e:headed` | `npx playwright test --config e2e/playwright.config.js --headed` |
+| `test:e2e:ui` | `npx playwright test --config e2e/playwright.config.js --ui` |
+| `test:e2e:report` | `npx playwright show-report playwright-report` |
+| `test:e2e:graph` | `open test-results/suite-graph.html` |
+| `test:e2e:env:setup` | `sh e2e/scripts/run.sh up` |
+| `test:e2e:env:up` | `sh e2e/scripts/run.sh up` |
+| `test:e2e:env:down` | `sh e2e/scripts/run.sh down` |
+| `test:e2e:env:clean` | `sh e2e/scripts/run.sh clean` |
+| `test:e2e:full` | `sh e2e/scripts/run.sh full` |
+| `test:e2e:docker` | `sh e2e/scripts/run.sh full` |
+| `test:e2e:docker:up` | `sh e2e/scripts/run.sh up` |
+| `test:e2e:docker:run` | `sh e2e/scripts/run.sh run` |
+| `test:e2e:docker:down` | `sh e2e/scripts/run.sh down` |
+| `test:e2e:docker:clean` | `sh e2e/scripts/run.sh clean` |
+| `test:e2e:docker:logs` | `sh e2e/scripts/run.sh logs` |
+
+Remove: `test:e2e:env:init` (absorbed into `run.sh up`).
+
+---
+
+### npm scripts — `quorum-dash/package.json`
+
+Remove these (all E2E now lives in quorum/):
+- `test:e2e`, `test:e2e:headed`, `test:e2e:ui`
+- `test:e2e:docker`, `test:e2e:docker:up`, `test:e2e:docker:run`, `test:e2e:docker:down`, `test:e2e:docker:clean`
+
+---
+
+### Files to DELETE after moving
+
+```
+quorum/tests/e2e/               (entire directory — scenarios, helpers, fixtures, reporter, viewer all moved)
+quorum/playwright.config.js     (moved to quorum/e2e/playwright.config.js)
+quorum/Dockerfile.e2e           (moved to quorum/e2e/Dockerfile.e2e)
+quorum/docker-compose.e2e.yml   (replaced by quorum/e2e/docker-compose.yml)
+quorum/scripts/e2e-docker.sh    (replaced by quorum/e2e/scripts/run.sh)
+
+quorum-dash/tests/e2e/          (entire directory — all scenarios/helpers/fixtures moved)
+quorum-dash/playwright.config.js
+quorum-dash/Dockerfile.e2e
+quorum-dash/docker-compose.e2e.yml
+quorum-dash/scripts/e2e-docker.sh
+```
+
+---
+
+### CLAUDE.md updates
+
+- `quorum/CLAUDE.md` — update all E2E commands in the commands table to point to the new scripts
+- `quorum-dash/CLAUDE.md` — remove the E2E section entirely (or replace with one line pointing to quorum/e2e/)
+- Root `CLAUDE.md` (this file) — update the `quorum-dash` commands table to remove Docker E2E entries
+
+---
+
+### Commit message
+
+```
+feat(e2e): merge api and ui E2E into quorum/e2e/ unified suite
+```
+
+---
+
 ## Task 8 — Add `dashboardTag` to `prod.yaml` (optional, ~30 min)
 
 **Status: Future option** — only needed if the live production dashboard is ever moved from Vercel to the Docker/GHCR delivery path. The current production dashboard is the Vercel deployment at `quorum-dashboard.ayansasmal.work`. The dashboard GHCR image is used for local dev and Docker E2E only.
@@ -727,6 +965,7 @@ feat(deploy): add docker-compose.pull.yml GHCR pull-mode overlay
 feat(deploy): unify local graphiti delivery to GHCR pull
 feat(ci): add quorum-mcp npm release workflow
 feat(skills): add quorum-local-* Claude skills for local dev ops
+feat(e2e): merge api and ui E2E into quorum/e2e/ unified suite
 ```
 
 ---
@@ -750,5 +989,16 @@ After completing all tasks:
 - [x] `quorum-mcp/.github/workflows/release.yml` exists
 - [ ] `quorum-mcp/.npmrc` exists with `NODE_AUTH_TOKEN` reference
 - [ ] `quorum-mcp/package.json` has correct `publishConfig`
-- [ ] 7 skill directories exist: `.claude/skills/quorum-local-{start,stop,reset,update,status,logs,seed}/SKILL.md`
-- [ ] Each skill's frontmatter `name:` matches its directory name exactly
+- [x] 7 skill directories exist: `.claude/skills/quorum-local-{start,stop,reset,update,status,logs,seed}/SKILL.md`
+- [x] Each skill's frontmatter `name:` matches its directory name exactly
+- [x] `quorum/e2e/` directory exists with `playwright.config.js`, `Dockerfile.e2e`, `docker-compose.yml`, `scripts/run.sh`
+- [x] `quorum/e2e/scenarios/api/` contains all API spec files moved from `quorum/tests/e2e/scenarios/`
+- [x] `quorum/e2e/scenarios/ui/` contains all 9 browser spec files moved from `quorum-dash/tests/e2e/scenarios/`
+- [x] `quorum/e2e/helpers/browser.js` exists (moved from quorum-dash)
+- [x] Fixtures deduplicated — ONE copy in `quorum/e2e/fixtures/`
+- [x] `quorum/playwright.config.js`, `quorum/Dockerfile.e2e`, `quorum/docker-compose.e2e.yml`, `quorum/scripts/e2e-docker.sh` deleted
+- [x] `quorum-dash/playwright.config.js`, `quorum-dash/Dockerfile.e2e`, `quorum-dash/docker-compose.e2e.yml`, `quorum-dash/scripts/e2e-docker.sh` deleted
+- [x] All `test:e2e:*` scripts in `quorum/package.json` updated to point at `quorum/e2e/`
+- [x] `test:e2e:docker:*` scripts removed from `quorum-dash/package.json`
+- [ ] `npx playwright test --config e2e/playwright.config.js --project=api` runs API scenarios against a live stack
+- [ ] `npx playwright test --config e2e/playwright.config.js --project=ui` runs browser scenarios against a live stack

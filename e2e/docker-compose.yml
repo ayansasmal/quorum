@@ -1,0 +1,201 @@
+##
+# docker-compose.yml — Unified Quorum E2E runtime.
+#
+# This stack owns the shared API + UI Playwright surface under quorum/e2e/.
+# Host Playwright uses the published gateway/dashboard ports, while the Docker
+# test runner uses the internal service DNS on the same compose network.
+##
+
+name: quorum-e2e
+
+networks:
+  e2e:
+    driver: bridge
+
+services:
+  localstack:
+    image: localstack/localstack:3
+    networks: [e2e]
+    environment:
+      - SERVICES=s3,dynamodb
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - QUORUM_CONFIG_BUCKET=quorum-configs-test
+      - QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects-test
+    volumes:
+      - ../scripts/init-localstack-e2e.sh:/etc/localstack/init/ready.d/01-init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    networks: [e2e]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgresql:
+    image: postgres:16-alpine
+    networks: [e2e]
+    environment:
+      POSTGRES_DB: quorum_audit
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: quorum_local
+    volumes:
+      - ../scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quorum -d quorum_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    networks: [e2e]
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mock-openai:
+    build:
+      context: ../mock-openai
+    networks: [e2e]
+    ports:
+      - "${QUORUM_E2E_MOCK_OPENAI_PORT:-3003}:3003"
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://127.0.0.1:3003/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  graphiti:
+    image: ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}
+    networks: [e2e]
+    environment:
+      - FALKORDB_URI=redis://falkordb:6379
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+      - LLM_MODEL_NAME=gpt-4o-mini
+      - EMBEDDER_MODEL_NAME=text-embedding-3-small
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      mock-openai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  gateway:
+    image: ghcr.io/ayansasmal/quorum-gateway:${GATEWAY_TAG:-latest}
+    networks: [e2e]
+    ports:
+      - "${QUORUM_E2E_GATEWAY_PORT:-3001}:3001"
+    environment:
+      - GRAPHITI_URL=http://graphiti:8000
+      - POSTGRES_HOST=postgresql
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=quorum
+      - POSTGRES_PASSWORD=quorum_local
+      - POSTGRES_DB=quorum_audit
+      - QUORUM_CONFIG_BUCKET=quorum-configs-test
+      - AWS_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - QUORUM_DDB_USER_PROJECTS_TABLE=quorum-user-projects-test
+      - REDIS_URL=redis://redis:6379
+      - QUORUM_GATEWAY_PORT=3001
+      - QUORUM_SYNC_SECRET=
+      - GITHUB_USER_API_URL=http://mock-openai:3003/github/user
+      - NODE_ENV=test
+      - OPENAI_API_KEY=test-key-e2e
+      - OPENAI_BASE_URL=http://mock-openai:3003
+      - LLM_MODEL_NAME=gpt-4o-mini
+      - QUORUM_JWT_PRIVATE_KEY=LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZzlNbVZzVUpyMHZURjZldTEKc2VrdVh3RlJ0MzNkQTZJNWd0eGJOM0oxNGxDaFJBTkNBQVM5dmRZZWZZbEJwOWRMUFRxQVdxbzBlbmFGd2V4VAowMGFEK1NtSisvOFFxcmQ2cURmYm1ZT080bmhoNW5NOVhpbkhmUm9JcmU1TDlVNm1KbkVkQm54NgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg==
+      - QUORUM_JWT_PUBLIC_KEY=LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFdmIzV0huMkpRYWZYU3owNmdGcXFOSHAyaGNIcwpVOU5HZy9rcGlmdi9FS3EzZXFnMzI1bURqdUo0WWVaelBWNHB4MzBhQ0szdVMvVk9waVp4SFFaOGVnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      graphiti:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      mock-openai:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/health | grep -qE '^(200|503)$'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  dashboard:
+    image: ghcr.io/ayansasmal/quorum-dashboard:${DASHBOARD_TAG:-latest}
+    networks: [e2e]
+    ports:
+      - "${QUORUM_E2E_DASHBOARD_PORT:-3002}:8080"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  test-runner:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.e2e
+    networks: [e2e]
+    environment:
+      - QUORUM_GATEWAY_URL=http://gateway:3001
+      - QUORUM_DASHBOARD_URL=http://dashboard:8080
+      - NODE_ENV=test
+      - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    volumes:
+      - ..:/workspace
+      - /workspace/node_modules
+    depends_on:
+      gateway:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+    command: ["npx", "playwright", "test", "--config", "e2e/playwright.config.js"]
+
+  mcp-test-runner:
+    build:
+      context: ../../quorum-mcp
+      dockerfile: Dockerfile.mcp-test
+    networks: [e2e]
+    working_dir: /workspace/quorum-mcp
+    environment:
+      - QUORUM_GATEWAY_URL=http://gateway:3001
+      - NODE_ENV=test
+    volumes:
+      - ../..:/workspace
+      - /workspace/quorum-mcp/node_modules
+    depends_on:
+      gateway:
+        condition: service_healthy

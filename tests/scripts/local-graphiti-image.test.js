@@ -43,8 +43,8 @@ describe('local Graphiti image contract', () => {
     expect(graphiti.build).toBeUndefined()
   })
 
-  it('uses the published GHCR image for isolated E2E Docker Compose', () => {
-    const compose = readYaml('docker-compose.e2e.yml')
+  it('uses the published GHCR image for unified E2E Docker Compose', () => {
+    const compose = readYaml('e2e/docker-compose.yml')
     const graphiti = compose.services.graphiti
 
     expect(graphiti.image).toContain('ghcr.io/ayansasmal/graphiti-mcp')

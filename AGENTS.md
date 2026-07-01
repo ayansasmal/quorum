@@ -63,6 +63,7 @@ graph TD
 - Config: `group_id` required (canonical ID); `owner` required (project owner GitHub username); `project` optional (display name only)
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
 - Local dev: Docker Compose + LocalStack (S3 + DynamoDB) + Redis (:6380 on host); `setup.sh docker clean --volumes` reliably wipes all data
+- Unified E2E ownership: the shared Playwright suite now lives in `e2e/` with API specs in `e2e/scenarios/api/`, browser specs in `e2e/scenarios/ui/`, shared helpers in `e2e/helpers/`, and the Docker lifecycle in `e2e/scripts/run.sh`
 - OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
 - Ops audit CLI: `scripts/audit-cli.js` — verify/lineage/export/stats via gateway HTTP (no direct pg)
 - `GET /pg/audit/lineage/:topic/:key` — audit lineage endpoint for compliance queries
@@ -599,3 +600,12 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 - `quorum/Dockerfile.graphiti` has been removed after the live runtime paths were switched to the GHCR Graphiti image.
 - `docker-compose.yml`, `docker-compose.e2e.yml`, `scripts/setup.sh`, `scripts/e2e-docker.sh`,
   `scripts/k8s-setup.sh`, and `helm/quorum/values.yaml` now share the GHCR pull contract via `GRAPHITI_TAG`.
+
+## Local Development Skills Added (2026-07-01)
+
+- Quorum-specific Claude skill source now lives under `quorum/skill/`, with `prod-ops/` for production operator skills
+  and `local-dev/` for local development skills.
+- `quorum/skill/README.md` explains that these skills are for developing and operating the Quorum codebase and
+  environments, not for using Quorum as a product through MCP or the dashboard.
+- Workspace-local `.claude/skills/quorum-*` entries are symlinks to those tracked directories so local Claude usage
+  matches the expected skill paths without forcing the source of truth to live outside the repo.
