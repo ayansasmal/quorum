@@ -19,6 +19,7 @@
     "seed:catalogs": "node scripts/seed-global-catalogs.js",
     "seed:catalogs:dry": "QUORUM_DRY_RUN=1 QUORUM_OWNER=ayansasmal node scripts/seed-global-catalogs.js",
     "docker:start": "./scripts/setup.sh docker",
+    "docker:start:pull": "docker compose -f docker-compose.yml -f docker-compose.pull.yml up -d",
     "docker:rebuild": "./scripts/setup.sh docker rebuild",
     "docker:clean": "./scripts/setup.sh docker clean",
     "docker:clean:all": "./scripts/setup.sh docker clean --volumes",

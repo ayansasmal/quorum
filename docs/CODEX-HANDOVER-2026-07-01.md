@@ -94,7 +94,7 @@ Add a new section after the `v0.3 — Admin bootstrap` section and before the `v
 
 ---
 
-## Task 4 — Add `docker-compose.pull.yml` overlay — GHCR pull mode (1 h)
+## Task 4 — Add `docker-compose.pull.yml` overlay — GHCR pull mode (1 h) ✅ Complete
 
 **Why:** `docker compose up` currently always builds gateway and graphiti from source. Engineers who haven't changed gateway or graphiti source should be able to pull pre-built GHCR images instead of waiting for a local build.
 
@@ -743,8 +743,8 @@ After completing all tasks:
 - [ ] `quorum/Dockerfile.graphiti` deleted; blocked until live compose/script references are removed in the GHCR pull unification change
 - [x] `prod.yaml` `gatewayTag` is `sha-ea2f792`
 - [x] `.env.example` documents `GRAPHITI_TAG` and `GATEWAY_TAG` with examples
-- [ ] `docker-compose.pull.yml` exists; `docker compose -f docker-compose.yml -f docker-compose.pull.yml config` validates without error
-- [ ] `npm run docker:start:pull` script exists in `quorum/package.json`
+- [x] `docker-compose.pull.yml` exists; `docker compose -f docker-compose.yml -f docker-compose.pull.yml config` validates without error
+- [x] `npm run docker:start:pull` script exists in `quorum/package.json`
 - [ ] `docker-compose.yml` graphiti service: no `build:` block; image is `ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}`
 - [ ] `docker-compose.e2e.yml` graphiti service: no `build:` block; same GHCR image reference
 - [ ] `setup.sh` exports `GRAPHITI_TAG` resolved via the three-step fallback chain before compose up

@@ -63,6 +63,7 @@ graph TD
 - Config: `group_id` required (canonical ID); `owner` required (project owner GitHub username); `project` optional (display name only)
 - Config file naming: `<group_id>.quorum.json`; S3 key: `<group_id>.quorum.json` (flat bucket, no subdirectories)
 - Local dev: Docker Compose + LocalStack (S3 + DynamoDB) + Redis (:6380 on host); `setup.sh docker clean --volumes` reliably wipes all data
+- GHCR pull mode: `npm run docker:start:pull` starts the stack with published gateway + graphiti images via `docker-compose.pull.yml` instead of local builds
 - OpenAPI 3.1 spec for the gateway: `gateway/openapi.yaml`
 - Ops audit CLI: `scripts/audit-cli.js` — verify/lineage/export/stats via gateway HTTP (no direct pg)
 - `GET /pg/audit/lineage/:topic/:key` — audit lineage endpoint for compliance queries

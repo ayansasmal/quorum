@@ -499,7 +499,7 @@ The `quorum-local-start prod` skill uses the pull overlay. `quorum-local-start d
 | 9 (partial) | `build-graphiti` + `build-mcp` CI jobs removed from `quorum/build.yml`; `Dockerfile.graphiti` still present (safe to delete once GHCR pull unified) | ✅ CI jobs gone | — | — |
 | 10 | Add `dashboardTag` to `prod.yaml`, update EC2 compose to consume dashboard image from GHCR | ⬜ Todo | Codex | 30m |
 | 11 | Add `quorum-mcp/.github/workflows/release.yml`, set `NPM_TOKEN` secret | ⬜ Todo | Codex | 1h |
-| 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ⬜ Todo | Codex | 1h |
+| 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ✅ Done | Codex | 1h |
 | 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ⏸ Blocked by live compose/script references | Codex | 5m |
 | 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | Codex | 15m |
 | 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ⬜ Todo | Codex | 3h |

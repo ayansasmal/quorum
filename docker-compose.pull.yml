@@ -1,0 +1,22 @@
+# docker-compose.pull.yml — GHCR pull-mode overlay
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.pull.yml up -d
+#
+# Replaces local builds for gateway and graphiti with GHCR images.
+# Requires: docker login ghcr.io (GitHub PAT with read:packages scope — one-time per machine)
+#
+# Optional pins (add to .env or export before running):
+#   GATEWAY_TAG=sha-ea2f792
+#   GRAPHITI_TAG=sha-d99abda38b1181d1f56198f1565510de9564f79b
+
+services:
+  gateway:
+    image: ghcr.io/ayansasmal/quorum-gateway:${GATEWAY_TAG:-latest}
+    pull_policy: always
+    build: !reset null
+
+  graphiti:
+    image: ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}
+    pull_policy: always
+    build: !reset null

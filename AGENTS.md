@@ -294,6 +294,13 @@ graph TD
   admin bootstrap and S3 project-config sections.
 - `GRAPHITI_TAG` is described as a GHCR pin with sibling-checkout derivation and a prod-tag fallback; `GATEWAY_TAG`
   is documented for the future `docker-compose.pull.yml` gateway image override path.
+
+## GHCR Pull Overlay Added (2026-07-01)
+
+- `quorum/docker-compose.pull.yml` now overrides `gateway` and `graphiti` to pull `ghcr.io/ayansasmal/*` images with
+  `pull_policy: always` and `build: !reset null`.
+- `quorum/package.json` now exposes `npm run docker:start:pull` for the overlay path.
+- `quorum/CLAUDE.md` now documents the pull-mode start command as the published-image alternative to local builds.
 - Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
   dedicated machine-user or classic token with `read:packages` only. Scope the EC2 role to that secret
   ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
