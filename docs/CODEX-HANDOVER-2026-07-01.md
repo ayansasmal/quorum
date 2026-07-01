@@ -293,7 +293,7 @@ docker login ghcr.io
 
 ---
 
-## Task 6 — `quorum-mcp` release workflow for npm auto-publish (1 h)
+## Task 6 — `quorum-mcp` release workflow for npm auto-publish (1 h) ✅ Complete
 
 **Why:** `@as-quorum/mcp` is installed by engineers via `npm install -g @as-quorum/mcp`. Currently `npm publish` is run manually. A CI workflow should publish automatically when a git tag is pushed.
 
@@ -747,7 +747,7 @@ After completing all tasks:
 - [x] `k8s-setup.sh` passes `ghcr.io/ayansasmal/graphiti-mcp` image to helm; no graphiti `docker build` call
 - [x] `helm/quorum/values.yaml` graphiti `image.repository` is `ghcr.io/ayansasmal/graphiti-mcp`
 - [x] `tests/scripts/local-graphiti-image.test.js` passes
-- [ ] `quorum-mcp/.github/workflows/release.yml` exists
+- [x] `quorum-mcp/.github/workflows/release.yml` exists
 - [ ] `quorum-mcp/.npmrc` exists with `NODE_AUTH_TOKEN` reference
 - [ ] `quorum-mcp/package.json` has correct `publishConfig`
 - [ ] 7 skill directories exist: `.claude/skills/quorum-local-{start,stop,reset,update,status,logs,seed}/SKILL.md`

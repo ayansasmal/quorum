@@ -72,7 +72,7 @@ gantt
 | 3 | `Dockerfile.quorum` → Python 3.12 + uv | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
 | 4 | `quorum-dash` GitHub Actions build + push to GHCR | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#dashboard-cicd-ownership) |
 | 5 | Optional: add `dashboardTag` to `prod.yaml`, update EC2 compose | ⬜ Future option | 30m | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
-| 6 | `quorum-mcp` release workflow for npm + Docker | ⬜ Todo | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#mcp-npm-publish-automation-plan) |
+| 6 | `quorum-mcp` release workflow for npm + Docker | ✅ Done | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#mcp-npm-publish-automation-plan) |
 | 7 | `docker-compose.pull.yml` overlay (GHCR pull mode) | ✅ Done | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#docker-compose-simplification-plan) |
 | 8 | Unify local Graphiti to GHCR pull (remove `Dockerfile.graphiti`) | ✅ Done | 2h | [local-graphiti-image-analysis-2026-06-29.md](local-graphiti-image-analysis-2026-06-29.md) |
 | 9 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | 15m | — |
