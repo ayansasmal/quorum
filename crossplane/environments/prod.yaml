@@ -58,6 +58,6 @@ spec:
     hostedZoneId: ""
   images:
     registry: ghcr.io/ayansasmal
-    gatewayTag: "0.4.12"
+    gatewayTag: "sha-ea2f792"
     graphitiTag: "sha-d99abda38b1181d1f56198f1565510de9564f79b"
     applySchema: true

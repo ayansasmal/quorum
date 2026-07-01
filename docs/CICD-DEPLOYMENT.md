@@ -194,11 +194,11 @@ No `latest` in production. `latest` is acceptable on the `prod`/`main` branch in
 
 | Image | Current prod tag | Tag source repo |
 |-------|-----------------|----------------|
-| quorum-gateway | `0.4.12` (semver — legacy) | quorum repo |
+| quorum-gateway | `sha-ea2f792` | quorum repo |
 | graphiti-mcp | `sha-d99abda...` | quorum-graphiti fork |
 | quorum-dashboard | Vercel remains the live production path; GHCR image supports local/E2E/container flows | quorum-dash repo |
 
-> **Action:** migrate the runtime `GATEWAY_TAG` flow from `0.4.12` to `sha-<commit>` to be consistent with graphiti. If `prod.yaml` keeps a matching declarative value, treat that as documentation/config hygiene rather than a live rollout path.
+> `prod.yaml` now uses the current production gateway short-SHA pin `sha-ea2f792`, matching the repo's `type=sha,prefix=sha-` workflow output.
 
 ---
 
@@ -501,7 +501,7 @@ The `quorum-local-start prod` skill uses the pull overlay. `quorum-local-start d
 | 11 | Add `quorum-mcp/.github/workflows/release.yml`, set `NPM_TOKEN` secret | ⬜ Todo | Codex | 1h |
 | 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ⬜ Todo | Codex | 1h |
 | 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ⏸ Blocked by live compose/script references | Codex | 5m |
-| 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ⬜ Todo | Codex | 15m |
+| 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | Codex | 15m |
 | 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ⬜ Todo | Codex | 3h |
 | 16 | Document `GRAPHITI_TAG` / `GATEWAY_TAG` in `.env.example` | ⬜ Todo | Codex | 30m |
 

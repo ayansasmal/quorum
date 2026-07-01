@@ -41,7 +41,7 @@ unification change.
 
 ---
 
-## Task 2 — Migrate `gatewayTag` from semver to `sha-*` in `prod.yaml` (15 min)
+## Task 2 — Migrate `gatewayTag` from semver to `sha-*` in `prod.yaml` (15 min) ✅ Complete
 
 **Why:** `quorum/crossplane/environments/prod.yaml` has `gatewayTag: "0.4.12"` (a semver value). The graphiti tag in the same file uses `sha-*` format. The gateway GHA workflow (`type=sha,prefix=sha-`) produces short-SHA tags. Convention should be consistent across both tags in prod.yaml.
 
@@ -741,7 +741,7 @@ feat(skills): add quorum-local-* Claude skills for local dev ops
 After completing all tasks:
 
 - [ ] `quorum/Dockerfile.graphiti` deleted; blocked until live compose/script references are removed in the GHCR pull unification change
-- [ ] `prod.yaml` `gatewayTag` is `sha-ea2f792`
+- [x] `prod.yaml` `gatewayTag` is `sha-ea2f792`
 - [ ] `.env.example` documents `GRAPHITI_TAG` and `GATEWAY_TAG` with examples
 - [ ] `docker-compose.pull.yml` exists; `docker compose -f docker-compose.yml -f docker-compose.pull.yml config` validates without error
 - [ ] `npm run docker:start:pull` script exists in `quorum/package.json`

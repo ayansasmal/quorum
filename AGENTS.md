@@ -275,11 +275,18 @@ graph TD
 - Crossplane v2 namespaced managed resources use `aws.m.upbound.io/v1beta1` ProviderConfig
   `quorum-system/aws-prod`; generate `quorum-system/aws-creds-prod` key `creds` from the
   `quorum-prod` AWS CLI profile through stdin. Never store production access keys in repository YAML.
-- Runtime images currently use a mixed production state: gateway is still the legacy semver tag
-  `ghcr.io/ayansasmal/quorum-gateway:0.4.12`, while Graphiti is already pinned to an immutable
-  `ghcr.io/ayansasmal/graphiti-mcp:sha-...` tag. Both are public Linux ARM64 packages; EC2 must pull them
+- Runtime images currently use immutable production pins: gateway is
+  `ghcr.io/ayansasmal/quorum-gateway:sha-ea2f792`, and Graphiti is pinned to
+  `ghcr.io/ayansasmal/graphiti-mcp:sha-...`. Both are public Linux ARM64 packages; EC2 must pull them
   anonymously rather than storing a GitHub token. Upload bootstrap assets to
   `s3://quorum-prod-deploy/bootstrap/current/` with `*.example` excluded.
+
+## Production Gateway Tag Pin Update (2026-07-01)
+
+- `quorum/crossplane/environments/prod.yaml` now pins `images.gatewayTag` to `sha-ea2f792` instead of the legacy
+  `0.4.12` semver value.
+- Gateway tags in this repo use the short `sha-<7 hex>` format from the quorum workflow, while Graphiti tags remain
+  full-length commit SHAs from the fork workflow.
 - Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
   dedicated machine-user or classic token with `read:packages` only. Scope the EC2 role to that secret
   ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
