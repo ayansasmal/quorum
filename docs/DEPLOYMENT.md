@@ -76,7 +76,7 @@ gantt
 | 7 | `docker-compose.pull.yml` overlay (GHCR pull mode) | ✅ Done | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#docker-compose-simplification-plan) |
 | 8 | Unify local Graphiti to GHCR pull (remove `Dockerfile.graphiti`) | ✅ Done | 2h | [local-graphiti-image-analysis-2026-06-29.md](local-graphiti-image-analysis-2026-06-29.md) |
 | 9 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | 15m | — |
-| 10 | Create 7 `quorum-local-*` Claude skills | ⬜ Todo | 3h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#local-deployment--proposed-skills) |
+| 10 | Create 7 `quorum-local-*` Claude skills | ✅ Done | 3h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#local-deployment--proposed-skills) |
 
 ---
 

@@ -502,7 +502,7 @@ The `quorum-local-start prod` skill uses the pull overlay. `quorum-local-start d
 | 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ✅ Done | Codex | 1h |
 | 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ✅ Done | Codex | 5m |
 | 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | Codex | 15m |
-| 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ⬜ Todo | Codex | 3h |
+| 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ✅ Done | Codex | 3h |
 | 16 | Document `GRAPHITI_TAG` / `GATEWAY_TAG` in `.env.example` | ✅ Done | Codex | 30m |
 
 > **SHA tag format note:** Both `quorum/build.yml` and `quorum-dash/build.yml` use `type=sha,prefix=sha-` without `format=long`, producing 8-char short SHAs (e.g. `sha-a1b2c3d4`). The graphiti workflow in the fork produces full 40-char SHAs. When gatewayTag and dashboardTag are migrated to sha format (items 14/10), use the short SHA produced by the respective repo's workflow — don't mix formats between pinned values for the same image.
