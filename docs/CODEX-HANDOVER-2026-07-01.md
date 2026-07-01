@@ -66,7 +66,7 @@ unification change.
 
 ---
 
-## Task 3 — Document `GRAPHITI_TAG` and `GATEWAY_TAG` in `.env.example` (15 min)
+## Task 3 — Document `GRAPHITI_TAG` and `GATEWAY_TAG` in `.env.example` (15 min) ✅ Complete
 
 **Why:** When the Graphiti GHCR unification (Task 5) lands, `setup.sh` and `e2e-docker.sh` will read `GRAPHITI_TAG` to know which GHCR image to pull. Engineers need the escape hatch documented. `GATEWAY_TAG` is used by the docker-compose.pull.yml overlay (Task 4).
 
@@ -742,7 +742,7 @@ After completing all tasks:
 
 - [ ] `quorum/Dockerfile.graphiti` deleted; blocked until live compose/script references are removed in the GHCR pull unification change
 - [x] `prod.yaml` `gatewayTag` is `sha-ea2f792`
-- [ ] `.env.example` documents `GRAPHITI_TAG` and `GATEWAY_TAG` with examples
+- [x] `.env.example` documents `GRAPHITI_TAG` and `GATEWAY_TAG` with examples
 - [ ] `docker-compose.pull.yml` exists; `docker compose -f docker-compose.yml -f docker-compose.pull.yml config` validates without error
 - [ ] `npm run docker:start:pull` script exists in `quorum/package.json`
 - [ ] `docker-compose.yml` graphiti service: no `build:` block; image is `ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}`

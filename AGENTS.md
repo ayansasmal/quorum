@@ -287,6 +287,13 @@ graph TD
   `0.4.12` semver value.
 - Gateway tags in this repo use the short `sha-<7 hex>` format from the quorum workflow, while Graphiti tags remain
   full-length commit SHAs from the fork workflow.
+
+## Local Image Pin Overrides Documented (2026-07-01)
+
+- `quorum/.env.example` now documents optional local-only `GRAPHITI_TAG` and `GATEWAY_TAG` overrides between the
+  admin bootstrap and S3 project-config sections.
+- `GRAPHITI_TAG` is described as a GHCR pin with sibling-checkout derivation and a prod-tag fallback; `GATEWAY_TAG`
+  is documented for the future `docker-compose.pull.yml` gateway image override path.
 - Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
   dedicated machine-user or classic token with `read:packages` only. Scope the EC2 role to that secret
   ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
