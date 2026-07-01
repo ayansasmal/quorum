@@ -570,3 +570,10 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 - `POST /api/review/:conflictId` now prefers the exact draft linked by `incoming_version_id` and falls
   back to `getLatestDraftVersion()` only for older rows. This prevents a review action from accidentally
   approving or rejecting the wrong DRAFT when multiple drafts exist for the same key.
+
+## Local Graphiti Dockerfile Cleanup (2026-07-01)
+
+- `quorum/Dockerfile.graphiti` cannot be deleted safely yet because `docker-compose.yml`,
+  `docker-compose.e2e.yml`, and `scripts/k8s-setup.sh` still reference it directly.
+- Treat the file removal as blocked on the GHCR pull unification work. Update those live runtime paths first, then
+  delete the Dockerfile in the same change.

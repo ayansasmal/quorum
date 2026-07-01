@@ -495,15 +495,17 @@ The `quorum-local-start prod` skill uses the pull overlay. `quorum-local-start d
 | 5 | GHA test jobs use `node:24-alpine` container (removed `setup-node`) | ✅ Done | — | — |
 | 6 | `Dockerfile.quorum` → Python 3.12 + `uv` replaces `pip` | ✅ Done | — | — |
 | 7 | `quorum-dash/Dockerfile.e2e` + `docker-compose.e2e.yml` + `scripts/e2e-docker.sh` — fully isolated browser E2E Docker run (joins `quorum-e2e_e2e` external network) | ✅ Done | — | — |
-| 8 | `quorum-dash/.github/workflows/build.yml` publishes the dashboard image to GHCR | ✅ Done | — | — |
-| 9 | Optional: add `dashboardTag` to `prod.yaml`, update EC2 compose to consume the dashboard image | ⬜ Future option | Codex | 30m |
-| 10 | Add `quorum-mcp/.github/workflows/release.yml`, set `NPM_TOKEN` secret | ⬜ Todo | Codex | 1h |
-| 11 | If the Docker delivery path returns, add its release workflow in `quorum-mcp` rather than `quorum/.github/workflows/build.yml` | ⬜ Future option | Codex | 15m |
-| 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode) | ⬜ Todo | Codex | 1h |
-| 13 | Remove `Dockerfile.graphiti` + `build-graphiti` CI job (post GHCR unification) | ⬜ Todo | Codex | 30m |
+| 8 | `quorum-dash/.github/workflows/build.yml` — builds + pushes dashboard image to GHCR on main push; PRs validate build only | ✅ Done | — | — |
+| 9 (partial) | `build-graphiti` + `build-mcp` CI jobs removed from `quorum/build.yml`; `Dockerfile.graphiti` still present (safe to delete once GHCR pull unified) | ✅ CI jobs gone | — | — |
+| 10 | Add `dashboardTag` to `prod.yaml`, update EC2 compose to consume dashboard image from GHCR | ⬜ Todo | Codex | 30m |
+| 11 | Add `quorum-mcp/.github/workflows/release.yml`, set `NPM_TOKEN` secret | ⬜ Todo | Codex | 1h |
+| 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ⬜ Todo | Codex | 1h |
+| 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ⏸ Blocked by live compose/script references | Codex | 5m |
 | 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ⬜ Todo | Codex | 15m |
 | 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ⬜ Todo | Codex | 3h |
 | 16 | Document `GRAPHITI_TAG` / `GATEWAY_TAG` in `.env.example` | ⬜ Todo | Codex | 30m |
+
+> **SHA tag format note:** Both `quorum/build.yml` and `quorum-dash/build.yml` use `type=sha,prefix=sha-` without `format=long`, producing 8-char short SHAs (e.g. `sha-a1b2c3d4`). The graphiti workflow in the fork produces full 40-char SHAs. When gatewayTag and dashboardTag are migrated to sha format (items 14/10), use the short SHA produced by the respective repo's workflow — don't mix formats between pinned values for the same image.
 
 ---
 
