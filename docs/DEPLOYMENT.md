@@ -21,7 +21,7 @@
 
 **Declarative image tag inputs** (tracked in `crossplane/environments/prod.yaml`; operators may keep them aligned with the live production secret/env values `GATEWAY_TAG` and `GRAPHITI_TAG`, but they are not wired into the host runtime path today):
 ```
-gatewayTag:  0.4.12   ← semver (migrate to sha-* — see roadmap)
+gatewayTag:  sha-ea2f792
 graphitiTag: sha-d99abda38b1181d1f56198f1565510de9564f79b
 ```
 
@@ -73,9 +73,9 @@ gantt
 | 4 | `quorum-dash` GitHub Actions build + push to GHCR | ✅ Done | — | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#dashboard-cicd-ownership) |
 | 5 | Optional: add `dashboardTag` to `prod.yaml`, update EC2 compose | ⬜ Future option | 30m | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md) |
 | 6 | `quorum-mcp` release workflow for npm + Docker | ⬜ Todo | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#mcp-npm-publish-automation-plan) |
-| 7 | `docker-compose.pull.yml` overlay (GHCR pull mode) | ⬜ Todo | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#docker-compose-simplification-plan) |
-| 8 | Unify local Graphiti to GHCR pull (remove `Dockerfile.graphiti`) | ⬜ Todo | 2h | [local-graphiti-image-analysis-2026-06-29.md](local-graphiti-image-analysis-2026-06-29.md) |
-| 9 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ⬜ Todo | 15m | — |
+| 7 | `docker-compose.pull.yml` overlay (GHCR pull mode) | ✅ Done | 1h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#docker-compose-simplification-plan) |
+| 8 | Unify local Graphiti to GHCR pull (remove `Dockerfile.graphiti`) | ✅ Done | 2h | [local-graphiti-image-analysis-2026-06-29.md](local-graphiti-image-analysis-2026-06-29.md) |
+| 9 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | 15m | — |
 | 10 | Create 7 `quorum-local-*` Claude skills | ⬜ Todo | 3h | [CICD-DEPLOYMENT.md](CICD-DEPLOYMENT.md#local-deployment--proposed-skills) |
 
 ---
@@ -188,6 +188,9 @@ node --version   # v20.x.x
 
 # awscli-local (for LocalStack S3 setup)
 pip install awscli-local
+
+# One-time GHCR auth for published gateway/graphiti pulls
+docker login ghcr.io
 ```
 
 ### Setup (Platform Team)

@@ -496,11 +496,11 @@ The `quorum-local-start prod` skill uses the pull overlay. `quorum-local-start d
 | 6 | `Dockerfile.quorum` → Python 3.12 + `uv` replaces `pip` | ✅ Done | — | — |
 | 7 | `quorum-dash/Dockerfile.e2e` + `docker-compose.e2e.yml` + `scripts/e2e-docker.sh` — fully isolated browser E2E Docker run (joins `quorum-e2e_e2e` external network) | ✅ Done | — | — |
 | 8 | `quorum-dash/.github/workflows/build.yml` — builds + pushes dashboard image to GHCR on main push; PRs validate build only | ✅ Done | — | — |
-| 9 (partial) | `build-graphiti` + `build-mcp` CI jobs removed from `quorum/build.yml`; `Dockerfile.graphiti` still present (safe to delete once GHCR pull unified) | ✅ CI jobs gone | — | — |
+| 9 | `build-graphiti` + `build-mcp` CI jobs removed from `quorum/build.yml`; `Dockerfile.graphiti` retired with GHCR pull unification | ✅ Done | — | — |
 | 10 | Add `dashboardTag` to `prod.yaml`, update EC2 compose to consume dashboard image from GHCR | ⬜ Todo | Codex | 30m |
 | 11 | Add `quorum-mcp/.github/workflows/release.yml`, set `NPM_TOKEN` secret | ⬜ Todo | Codex | 1h |
 | 12 | Add `docker-compose.pull.yml` overlay (GHCR pull mode for local dev) | ✅ Done | Codex | 1h |
-| 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ⏸ Blocked by live compose/script references | Codex | 5m |
+| 13 | Remove `Dockerfile.graphiti` file (CI job already gone) | ✅ Done | Codex | 5m |
 | 14 | Migrate `gatewayTag` from `0.4.12` to `sha-*` in `prod.yaml` | ✅ Done | Codex | 15m |
 | 15 | Create 7 `quorum-local-*` skills in `.claude/skills/` | ⬜ Todo | Codex | 3h |
 | 16 | Document `GRAPHITI_TAG` / `GATEWAY_TAG` in `.env.example` | ✅ Done | Codex | 30m |

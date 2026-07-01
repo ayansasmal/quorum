@@ -33,8 +33,6 @@ HELM_RELEASE="quorum"
 HELM_CHART="$PROJECT_ROOT/helm/quorum"
 CROSSPLANE_SCRIPT="$PROJECT_ROOT/crossplane/crossplane.sh"
 GATEWAY_IMAGE_NAME="quorum-gateway"
-GRAPHITI_IMAGE_NAME="graphiti-mcp"
-GRAPHITI_IMAGE="graphiti-mcp:local"
 
 # ── Load .env ───────────────────────────────────────────────────
 if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -49,6 +47,18 @@ fi
 
 GIT_SHA="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'dev')"
 GATEWAY_IMAGE="${GATEWAY_IMAGE_NAME}:${GIT_SHA}"
+
+resolve_graphiti_tag() {
+  local fork_dir="$PROJECT_ROOT/../graphiti/quorum-graphiti"
+
+  if [ -n "${GRAPHITI_TAG:-}" ]; then
+    echo "$GRAPHITI_TAG"
+  elif [ -d "$fork_dir/.git" ]; then
+    echo "sha-$(git -C "$fork_dir" rev-parse HEAD)"
+  else
+    echo "sha-d99abda38b1181d1f56198f1565510de9564f79b"
+  fi
+}
 
 # ── Helpers ─────────────────────────────────────────────────────
 
@@ -120,7 +130,7 @@ check_openai_key() {
   echo "✓ OPENAI_API_KEY set (${#OPENAI_API_KEY} chars)"
 }
 
-# Build gateway and graphiti Docker images.
+# Build the gateway Docker image.
 # Docker Desktop K8s shares the local Docker daemon — no registry push needed.
 cmd_build() {
   echo ""
@@ -131,14 +141,6 @@ cmd_build() {
     -t "${GATEWAY_IMAGE_NAME}:latest" \
     "$PROJECT_ROOT"
   echo "✓ Built $GATEWAY_IMAGE"
-
-  echo ""
-  echo "▶ Building graphiti image: $GRAPHITI_IMAGE"
-  docker build \
-    -f "$PROJECT_ROOT/Dockerfile.graphiti" \
-    -t "$GRAPHITI_IMAGE" \
-    "$PROJECT_ROOT"
-  echo "✓ Built $GRAPHITI_IMAGE"
 }
 
 # ── setup ────────────────────────────────────────────────────────
@@ -148,7 +150,11 @@ cmd_setup() {
   check_localstack
   check_openai_key
 
-  # ── 1. Build gateway + graphiti images ────────────────────────
+  export GRAPHITI_TAG
+  GRAPHITI_TAG=$(resolve_graphiti_tag)
+  echo "✓ Graphiti GHCR tag: $GRAPHITI_TAG"
+
+  # ── 1. Build gateway image ────────────────────────────────────
   cmd_build
 
   # ── 2. Create namespace ────────────────────────────────────────
@@ -169,6 +175,9 @@ cmd_setup() {
     --values "$HELM_CHART/values-local.yaml" \
     --set "gateway.image.tag=${GIT_SHA}" \
     --set "gateway.image.pullPolicy=IfNotPresent" \
+    --set "graphiti.image.repository=ghcr.io/ayansasmal/graphiti-mcp" \
+    --set "graphiti.image.tag=${GRAPHITI_TAG}" \
+    --set "graphiti.image.pullPolicy=Always" \
     --set "graphiti.openaiSecret.apiKey=${OPENAI_API_KEY}" \
     --set "postgresql.password=${POSTGRES_PASS}" \
     --wait \
@@ -230,7 +239,7 @@ cmd_status() {
   echo ""
   echo "Images:"
   echo "  $GATEWAY_IMAGE (git SHA: $GIT_SHA)"
-  echo "  $GRAPHITI_IMAGE"
+  echo "  ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-$(resolve_graphiti_tag)}"
 
   echo ""
   echo "Quorum pods ($NAMESPACE):"
@@ -270,7 +279,7 @@ cmd_help() {
   echo "  setup     Build gateway + deploy full stack (Helm + Crossplane S3)"
   echo "  teardown  Remove everything (Helm release + Crossplane + namespace)"
   echo "  status    Show pod states, services, gateway health, and S3 contents"
-  echo "  build     Build gateway (git SHA tagged) + graphiti (local) images"
+  echo "  build     Build gateway image only"
   echo "  help      Show this message"
   echo ""
   echo "Requires:"

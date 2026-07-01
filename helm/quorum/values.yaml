@@ -151,9 +151,9 @@ postgresql:
 graphiti:
   enabled: true
   image:
-    repository: graphiti-mcp
-    tag: local
-    pullPolicy: IfNotPresent
+    repository: ghcr.io/ayansasmal/graphiti-mcp
+    tag: latest
+    pullPolicy: Always
   port: 8000
   groupId: default
   transport: http   # http = POST /mcp (Quorum proxy); sse = SSE transport (MCP clients)

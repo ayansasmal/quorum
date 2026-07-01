@@ -25,6 +25,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE="docker compose -f $PROJECT_ROOT/docker-compose.e2e.yml"
 
+resolve_graphiti_tag() {
+  local fork_dir="$PROJECT_ROOT/../graphiti/quorum-graphiti"
+
+  if [[ -n "${GRAPHITI_TAG:-}" ]]; then
+    echo "$GRAPHITI_TAG"
+  elif [[ -d "$fork_dir/.git" ]]; then
+    echo "sha-$(git -C "$fork_dir" rev-parse HEAD)"
+  else
+    echo "sha-d99abda38b1181d1f56198f1565510de9564f79b"
+  fi
+}
+
 # Start gateway and its entire dependency tree (localstack, postgresql, redis,
 # falkordb, graphiti, mock-openai). gateway depends on all of them transitively,
 # so starting gateway alone is sufficient to bring everything up.
@@ -34,6 +46,9 @@ COMPOSE="docker compose -f $PROJECT_ROOT/docker-compose.e2e.yml"
 # We build ALL services first so test-runner picks up any CMD/Dockerfile changes,
 # then bring infrastructure up (gateway + deps) and wait for healthy.
 _up() {
+  export GRAPHITI_TAG
+  GRAPHITI_TAG=$(resolve_graphiti_tag)
+  echo "▶ [E2E] Graphiti image tag: $GRAPHITI_TAG"
   echo "▶ [E2E] Building all images (gateway + test-runner)..."
   $COMPOSE build
   echo "▶ [E2E] Starting infrastructure..."

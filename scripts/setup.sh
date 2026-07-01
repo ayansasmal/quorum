@@ -65,6 +65,18 @@ check_docker() {
   ok "docker $(docker --version | awk '{print $3}' | tr -d ',')"
 }
 
+resolve_graphiti_tag() {
+  local fork_dir="$PROJECT_ROOT/../graphiti/quorum-graphiti"
+
+  if [[ -n "${GRAPHITI_TAG:-}" ]]; then
+    echo "$GRAPHITI_TAG"
+  elif [[ -d "$fork_dir/.git" ]]; then
+    echo "sha-$(git -C "$fork_dir" rev-parse HEAD)"
+  else
+    echo "sha-d99abda38b1181d1f56198f1565510de9564f79b"
+  fi
+}
+
 # Check for a container already using port 4566 (LocalStack).
 #
 # Cases handled:
@@ -154,6 +166,9 @@ cmd_docker() {
   export IMAGE_TAG
   IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
   info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
+  export GRAPHITI_TAG
+  GRAPHITI_TAG=$(resolve_graphiti_tag)
+  info "Graphiti image tag: $GRAPHITI_TAG"
 
   check_node
   check_docker
@@ -266,8 +281,8 @@ cmd_docker() {
 }
 
 # ── docker rebuild ────────────────────────────────────────────────────────────
-# Rebuild all custom images (gateway, graphiti) from scratch,
-# then restart the stack. Skips LocalStack — existing data is preserved.
+# Rebuild the gateway image from scratch,
+# then restart the stack. Graphiti is pulled from GHCR. Skips LocalStack — existing data is preserved.
 # Use after Dockerfile or source code changes that don't hot-reload.
 # The quorum MCP service is opt-in (profile: mcp) and excluded from default builds.
 
@@ -281,6 +296,9 @@ cmd_docker_rebuild() {
   export IMAGE_TAG
   IMAGE_TAG=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "$APP_VERSION")
   info "Image tag: $IMAGE_TAG  (app version: $APP_VERSION)"
+  export GRAPHITI_TAG
+  GRAPHITI_TAG=$(resolve_graphiti_tag)
+  info "Graphiti image tag: $GRAPHITI_TAG"
 
   EXTERNAL_LOCALSTACK=""
   check_localstack_conflict
@@ -288,8 +306,8 @@ cmd_docker_rebuild() {
   info "Stopping stack (keeping volumes)..."
   docker compose down --remove-orphans 2>/dev/null || true
 
-  info "Rebuilding images without cache..."
-  docker compose build --no-cache --parallel gateway graphiti
+  info "Rebuilding gateway image without cache..."
+  docker compose build --no-cache --parallel gateway
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
@@ -353,7 +371,7 @@ cmd_docker_clean() {
     | xargs docker rmi -f 2>/dev/null \
     || true
   # Also remove by name in case labels aren't set
-  for img in quorum-quorum quorum-gateway quorum-graphiti; do
+  for img in quorum-quorum quorum-gateway; do
     docker rmi -f "$img" 2>/dev/null || true
   done
 

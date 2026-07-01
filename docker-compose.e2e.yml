@@ -125,10 +125,7 @@ services:
 
   # ── Graphiti MCP (semantic memory) ──────────────────────────────────────────
   graphiti:
-    image: graphiti-mcp:e2e
-    build:
-      context: .
-      dockerfile: Dockerfile.graphiti
+    image: ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}
     networks: [e2e]
     environment:
       - FALKORDB_URI=redis://falkordb:6379

@@ -301,6 +301,8 @@ graph TD
   `pull_policy: always` and `build: !reset null`.
 - `quorum/package.json` now exposes `npm run docker:start:pull` for the overlay path.
 - `quorum/CLAUDE.md` now documents the pull-mode start command as the published-image alternative to local builds.
+- One-time per developer machine: run `docker login ghcr.io` with a GitHub token that has `read:packages` before using
+  the pull-mode or unified local Graphiti flows.
 - Future private-GHCR hardening must use a separate `quorum/prod/ghcr` Secrets Manager secret and a
   dedicated machine-user or classic token with `read:packages` only. Scope the EC2 role to that secret
   ARN, authenticate with password-stdin, and logout after pulling; never reuse a broad developer token.
@@ -594,7 +596,6 @@ node scripts/audit-cli.js stats  # ops audit CLI (requires QUORUM_GATEWAY_URL + 
 
 ## Local Graphiti Dockerfile Cleanup (2026-07-01)
 
-- `quorum/Dockerfile.graphiti` cannot be deleted safely yet because `docker-compose.yml`,
-  `docker-compose.e2e.yml`, and `scripts/k8s-setup.sh` still reference it directly.
-- Treat the file removal as blocked on the GHCR pull unification work. Update those live runtime paths first, then
-  delete the Dockerfile in the same change.
+- `quorum/Dockerfile.graphiti` has been removed after the live runtime paths were switched to the GHCR Graphiti image.
+- `docker-compose.yml`, `docker-compose.e2e.yml`, `scripts/setup.sh`, `scripts/e2e-docker.sh`,
+  `scripts/k8s-setup.sh`, and `helm/quorum/values.yaml` now share the GHCR pull contract via `GRAPHITI_TAG`.

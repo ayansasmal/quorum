@@ -22,7 +22,7 @@ The items below are ordered by priority: quick cleanups first, then the biggest 
 
 ---
 
-## Task 1 — Delete `Dockerfile.graphiti` (5 min) ⏸ Blocked
+## Task 1 — Delete `Dockerfile.graphiti` (5 min) ✅ Complete
 
 **Why:** `quorum/Dockerfile.graphiti` sparse-clones upstream `getzep/graphiti` (not the Quorum fork). It was the source for all local Graphiti builds. The `build-graphiti` CI job that verified it was already removed from `quorum/.github/workflows/build.yml` by a prior session. The file is now dead and misleading — keeping it implies it still matters.
 
@@ -32,12 +32,7 @@ The items below are ordered by priority: quick cleanups first, then the biggest 
 DELETE  quorum/Dockerfile.graphiti
 ```
 
-**Blocker discovered:** `quorum/docker-compose.yml`, `quorum/docker-compose.e2e.yml`, and
-`quorum/scripts/k8s-setup.sh` still reference `Dockerfile.graphiti` directly. Deleting the file before Task 5 would
-break local stack flows.
-
-**Safe outcome for now:** keep the file in place, record the blocker, and delete it only as part of the GHCR pull
-unification change.
+**Outcome:** completed as part of Task 5, once the live compose and script paths no longer depended on the file.
 
 ---
 
@@ -141,7 +136,7 @@ npm run docker:start:pull        # start stack pulling gateway + graphiti from G
 
 ---
 
-## Task 5 — Unify local Graphiti to GHCR pull (2 h)
+## Task 5 — Unify local Graphiti to GHCR pull (2 h) ✅ Complete
 
 **Why (the short version):** All four local Graphiti delivery paths currently build from `quorum/Dockerfile.graphiti`, which sparse-clones upstream `getzep/graphiti` and installs `graphiti-core` from PyPI. This is **semantically wrong**: the Quorum fork (`graphiti/quorum-graphiti`) installs `graphiti_core/` from local source, which contains all Quorum-specific prompt changes (entity extraction, deduplication, temporal invalidation, summary). Local dev silently runs different code from production.
 
@@ -740,18 +735,18 @@ feat(skills): add quorum-local-* Claude skills for local dev ops
 
 After completing all tasks:
 
-- [ ] `quorum/Dockerfile.graphiti` deleted; blocked until live compose/script references are removed in the GHCR pull unification change
+- [x] `quorum/Dockerfile.graphiti` deleted after the live compose/script references were removed in the GHCR pull unification change
 - [x] `prod.yaml` `gatewayTag` is `sha-ea2f792`
 - [x] `.env.example` documents `GRAPHITI_TAG` and `GATEWAY_TAG` with examples
 - [x] `docker-compose.pull.yml` exists; `docker compose -f docker-compose.yml -f docker-compose.pull.yml config` validates without error
 - [x] `npm run docker:start:pull` script exists in `quorum/package.json`
-- [ ] `docker-compose.yml` graphiti service: no `build:` block; image is `ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}`
-- [ ] `docker-compose.e2e.yml` graphiti service: no `build:` block; same GHCR image reference
-- [ ] `setup.sh` exports `GRAPHITI_TAG` resolved via the three-step fallback chain before compose up
-- [ ] `e2e-docker.sh` exports `GRAPHITI_TAG` before compose up
-- [ ] `k8s-setup.sh` passes `ghcr.io/ayansasmal/graphiti-mcp` image to helm; no graphiti `docker build` call
-- [ ] `helm/quorum/values.yaml` graphiti `image.repository` is `ghcr.io/ayansasmal/graphiti-mcp`
-- [ ] `tests/scripts/local-graphiti-image.test.js` passes
+- [x] `docker-compose.yml` graphiti service: no `build:` block; image is `ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}`
+- [x] `docker-compose.e2e.yml` graphiti service: no `build:` block; same GHCR image reference
+- [x] `setup.sh` exports `GRAPHITI_TAG` resolved via the three-step fallback chain before compose up
+- [x] `e2e-docker.sh` exports `GRAPHITI_TAG` before compose up
+- [x] `k8s-setup.sh` passes `ghcr.io/ayansasmal/graphiti-mcp` image to helm; no graphiti `docker build` call
+- [x] `helm/quorum/values.yaml` graphiti `image.repository` is `ghcr.io/ayansasmal/graphiti-mcp`
+- [x] `tests/scripts/local-graphiti-image.test.js` passes
 - [ ] `quorum-mcp/.github/workflows/release.yml` exists
 - [ ] `quorum-mcp/.npmrc` exists with `NODE_AUTH_TOKEN` reference
 - [ ] `quorum-mcp/package.json` has correct `publishConfig`

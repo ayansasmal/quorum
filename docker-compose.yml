@@ -55,10 +55,7 @@ services:
   # Graphiti runs as a Python sidecar — Quorum (Node.js) calls it via HTTP.
   # Graphiti has no npm package — do NOT try to import it into Node.js.
   graphiti:
-    image: graphiti-mcp:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile.graphiti
+    image: ghcr.io/ayansasmal/graphiti-mcp:${GRAPHITI_TAG:-latest}
     ports:
       - "8001:8000"  # host:container — inside Docker network use http://graphiti:8000
     environment:
