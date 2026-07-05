@@ -140,15 +140,22 @@ export async function syncOneProject(bucket, projectId) {
 
     // Invalidate Redis config cache — next load will re-fetch from S3 fresh.
     await invalidateProject(projectId)
-    /** @type {{ added: number, removed: number, error?: string } | undefined} */
-    const membershipResult = await syncProjectMembers(
-      projectId,
-      config.project ?? config.group_id ?? projectId,
-      config.group_id ?? projectId,
-      members,
-    )
-    if (membershipResult?.error) {
-      return { project_id: projectId, ok: false, error: membershipResult.error }
+
+    // Hierarchy anchor nodes (org/group/division/department tree scaffolding) are not
+    // addressable projects — skip DDB membership sync so they never surface in a user's
+    // GET /user/profile/:username project list or dashboard project switcher. They still
+    // resolve correctly for /api/portfolio, which walks hierarchy.parent directly.
+    if (!config.is_hierarchy_anchor) {
+      /** @type {{ added: number, removed: number, error?: string } | undefined} */
+      const membershipResult = await syncProjectMembers(
+        projectId,
+        config.project ?? config.group_id ?? projectId,
+        config.group_id ?? projectId,
+        members,
+      )
+      if (membershipResult?.error) {
+        return { project_id: projectId, ok: false, error: membershipResult.error }
+      }
     }
 
     return { project_id: projectId, ok: true, config }

@@ -149,6 +149,16 @@ export const QuorumConfigSchema = z.object({
   hierarchy: HierarchySchema.optional(),
 
   /**
+   * Marks this config as a structural org-hierarchy anchor node (org/group/division/
+   * department levels created only so real projects can point hierarchy.parent at them).
+   * Anchor nodes still live in S3 + q_projects for hierarchy/portfolio resolution, but
+   * POST /config/upload skips DynamoDB membership sync for them — they must never appear
+   * in a user's GET /user/profile/:username project list or dashboard project switcher.
+   * Defaults to false — ordinary projects and global catalogs are unaffected.
+   */
+  is_hierarchy_anchor: z.boolean().default(false),
+
+  /**
    * Marks this project as a global knowledge catalog.
    *
    * When true:

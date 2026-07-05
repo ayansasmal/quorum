@@ -62,6 +62,7 @@ function nodeConfig(groupId, displayName, level, parentGroupId = null) {
   return {
     group_id: groupId,
     owner:    OWNER,
+    is_hierarchy_anchor: true,
     members:  [{ name: OWNER, github_username: OWNER, role: 'principal_architect', team: 'platform' }],
     roles:    { principal_architect: { base_confidence: 0.95 } },
     hierarchy: {

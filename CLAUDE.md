@@ -233,6 +233,8 @@ graph TD
 - S-01 `afterAll` cleanup: archives timestamp-suffixed j01 configs after each run to prevent project selector accumulation for test-pe
 - Config page Global Catalogs card: linked catalog details and entry counts shown inline in Config.jsx
 
+**Hierarchy-anchor DDB pollution fix (2026-07-06):** Local dev surfaced org-hierarchy scaffolding nodes (`ayan-org`, `group-a/b/c`, `div-a/b/c`, `dep-a/b/c`) in a user's `GET /user/profile/:username` project list and dashboard project switcher — every hierarchy anchor's config carries a `members` entry (needed so `owner`/`principal_architect` validation passes), and `POST /config/upload` → `syncOneProject()` synced that member into DynamoDB exactly like a real project. Fix: `is_hierarchy_anchor: z.boolean().default(false)` added to `QuorumConfigSchema` (`quorum-mcp/src/config/schema.js` canonical + `gateway/src/shared/config/schema.js` vendored copy, synced same commit); `syncOneProject()` in `gateway/src/routes/sync.js` now skips the `syncProjectMembers()` DDB write when `config.is_hierarchy_anchor === true`. Anchor nodes still resolve correctly for `/api/portfolio`, which walks `hierarchy.parent` directly against Postgres/S3 and never touches DDB. `scripts/seed-global-catalogs.js`'s `nodeConfig()` updated to set the flag on all 10 anchor configs it generates; existing local S3 objects and DDB rows patched by hand to reflect the fix immediately rather than waiting for a full `docker:clean:all` re-seed. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#organisational-hierarchy).
+
 **Not yet built (v0.5+):** PR ingestion, Atlassian integration, self-evolving graph (PACE framework, decision quality feedback loop), config diff view (GAP-033)
 
 > [ROADMAP.md](docs/ROADMAP.md)

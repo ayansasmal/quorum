@@ -236,7 +236,7 @@ Hierarchy is config-driven — no hierarchy logic is hardcoded. Each project's c
 
 `criticality` (1–5, max 5) weights the project in rollup calculations. A payments service at criticality 4 contributes more to a department's portfolio score than an internal tooling service at criticality 1.
 
-**Hierarchy nodes** — org/group/division/department entries that exist purely as structural containers (no knowledge of their own) are uploaded with `is_global: false` and an empty `members` array. They appear in the Portfolio page's cascading filters but not in knowledge queries. See `scripts/seed-global-catalogs.js` for the pattern.
+**Hierarchy anchor nodes** — org/group/division/department entries that exist purely as structural containers (no knowledge of their own, but still carrying a `members` entry so `owner`/`principal_architect` validation passes) set `is_hierarchy_anchor: true` in their config. `POST /sync/configs` (`syncOneProject()` in `gateway/src/routes/sync.js`) checks this flag and skips the DynamoDB membership-index write for anchor nodes — they still live in S3 + `q_projects` for hierarchy/portfolio resolution (which walks `hierarchy.parent` directly against Postgres/S3, not DDB), but they never surface in a user's `GET /user/profile/:username` project list or the dashboard's project switcher. Without this flag, every anchor node's `members` entry gets synced like a real project and pollutes every member's project list with org-structure scaffolding. See `scripts/seed-global-catalogs.js`'s `nodeConfig()` for the seeding pattern.
 
 ### Deviation Data Model
 
