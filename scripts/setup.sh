@@ -67,9 +67,15 @@ check_docker() {
 
 resolve_graphiti_tag() {
   local fork_dir="$PROJECT_ROOT/../graphiti/quorum-graphiti"
+  local env_file="$PROJECT_ROOT/.env"
+  local env_tag
 
   if [[ -n "${GRAPHITI_TAG:-}" ]]; then
     echo "$GRAPHITI_TAG"
+  elif [[ -f "$env_file" ]] && env_tag=$(grep -E '^GRAPHITI_TAG=' "$env_file" | tail -1 | cut -d= -f2-) && [[ -n "$env_tag" ]]; then
+    # .env pin takes precedence over the fork's git HEAD — the local fork checkout
+    # may be ahead of origin/main (unpushed) with no published GHCR image yet.
+    echo "$env_tag"
   elif [[ -d "$fork_dir/.git" ]]; then
     echo "sha-$(git -C "$fork_dir" rev-parse HEAD)"
   else
