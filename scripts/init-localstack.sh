@@ -213,6 +213,10 @@ owner        = config.get('owner', '')
 roles_map    = config.get('roles', {})
 updated_at   = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
+if config.get('is_hierarchy_anchor'):
+    print(f'  - {project_id} is a hierarchy anchor — skipping DDB membership sync')
+    sys.exit(0)
+
 for m in config.get('members', []):
     username = m.get('github_username', '')
     if not username:
