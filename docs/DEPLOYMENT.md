@@ -294,6 +294,26 @@ Two ways to seed it:
 
    > `github_username` must be the user's **GitHub login** (the value in their OAuth identity), not their display name — a mismatch silently grants no admin rights.
 
+### Seeding global catalogs (recommended for a fresh deploy)
+
+`scripts/seed-global-catalogs.js` creates 12 `is_global: true` catalog projects (`security-knowledge`, `best-practices`, `frontend-standards`, `backend-standards`, `infra-standards`, `architecture-principles`, `owasp-standards`, `performance-standards`, `testing-standards`, `observability-standards`, `documentation-standards`, `ai-systems-standards`) plus their 10 org-hierarchy anchor nodes, and seeds 120 curated ACTIVE knowledge entries (10 per catalog). All 12 catalogs are `is_public: true`, so any authenticated user can read them without being a project member.
+
+Like `seed:admin`, this is a **run-once step against the real gateway**, not part of the gateway boot sequence — run it after the first admin is seeded and the gateway is healthy:
+
+```bash
+# mint an admin JWT against the target gateway, then seed in one step —
+# never persist a live JWT to disk or print it in full
+GH_TOKEN=$(gh auth token)
+JWT=$(curl -s -X POST https://<prod-gateway-url>/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{\"github_token\": \"$GH_TOKEN\"}" | jq -r .token)
+QUORUM_GATEWAY_URL=https://<prod-gateway-url> QUORUM_JWT="$JWT" npm run seed:catalogs
+```
+
+It's idempotent per-project-config (`POST /config/upload` 409s on an existing config and the script falls back to `PUT /config/:groupId`), but **not** idempotent for knowledge entries — re-running against a target that's already seeded inserts duplicate ACTIVE versions per key (`POST /pg/versions` doesn't supersede). If you only need to push a config-only change (e.g. flipping `is_public`) to an already-seeded target, set `QUORUM_CONFIG_ONLY=1` to skip entry re-seeding.
+
+For **LocalStack/dev**, this is still a manual step (`npm run seed:catalogs` or `npm run seed:catalogs:dry` to preview) — `init-localstack.sh` only seeds the per-project configs under `configs/*.quorum.json`, not the global catalogs.
+
 ### Engineer Onboarding (one-time)
 
 ```bash
