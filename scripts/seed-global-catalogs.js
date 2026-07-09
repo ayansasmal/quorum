@@ -28,12 +28,17 @@
  *   QUORUM_GATEWAY_URL=http://localhost:3001   (default)
  *   QUORUM_OWNER=ayansasmal                    (default)
  *   QUORUM_DRY_RUN=1                           (print catalog list without writing)
+ *   QUORUM_CONFIG_ONLY=1                       (re-upload catalog configs only — skips
+ *                                                seedEntries; use after changing a config
+ *                                                field like is_public so re-runs don't
+ *                                                insert duplicate ACTIVE versions)
  */
 
-const GATEWAY = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
-const JWT     = process.env.QUORUM_JWT
-const OWNER   = process.env.QUORUM_OWNER ?? 'ayansasmal'
-const DRY_RUN = process.env.QUORUM_DRY_RUN === '1'
+const GATEWAY     = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
+const JWT         = process.env.QUORUM_JWT
+const OWNER       = process.env.QUORUM_OWNER ?? 'ayansasmal'
+const DRY_RUN     = process.env.QUORUM_DRY_RUN === '1'
+const CONFIG_ONLY = process.env.QUORUM_CONFIG_ONLY === '1'
 
 if (!DRY_RUN && !JWT) {
   console.error('[seed] QUORUM_JWT is required (must carry is_admin: true)')
@@ -59,6 +64,17 @@ async function post(path, projectId, body) {
   })
   const text = await res.text()
   if (!res.ok) throw new Error(`POST ${path} → HTTP ${res.status}: ${text}`)
+  return JSON.parse(text)
+}
+
+async function put(path, projectId, body) {
+  const res = await fetch(`${GATEWAY}${path}`, {
+    method:  'PUT',
+    headers: hdrs(projectId),
+    body:    JSON.stringify(body),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`PUT ${path} → HTTP ${res.status}: ${text}`)
   return JSON.parse(text)
 }
 
@@ -92,6 +108,7 @@ function config(groupId, displayName, nodeId, parentGroupId = null) {
     owner:        OWNER,
     is_global:    true,
     global_scope: 'org',
+    is_public:    true,
     hierarchy: {
       level:        'service',
       node_id:      nodeId,
@@ -943,9 +960,18 @@ const CATALOGS = [
 async function uploadConfig(catalog) {
   const { group_id } = catalog.config
   process.stdout.write(`[${group_id}] uploading config... `)
-  const res = await post('/config/upload', group_id, catalog.config)
-  console.log(`${res.status ?? 'ok'} (q_project_id=${res.q_project_id ?? 'unknown'})`)
-  return res.q_project_id
+  try {
+    const res = await post('/config/upload', group_id, catalog.config)
+    console.log(`created (q_project_id=${res.q_project_id ?? 'unknown'})`)
+    return res.q_project_id
+  } catch (err) {
+    if (!/HTTP 409/.test(err.message)) throw err
+    // Already onboarded — bootstrap POST is create-only, existing projects update via PUT.
+    process.stdout.write('already onboarded, updating via PUT... ')
+    const res = await put(`/config/${group_id}`, group_id, catalog.config)
+    console.log(`updated (q_project_id=${res.q_project_id ?? 'unknown'})`)
+    return res.q_project_id
+  }
 }
 
 async function seedEntries(catalog) {
@@ -1007,6 +1033,7 @@ async function main() {
     try {
       console.log('')
       await uploadConfig(catalog)
+      if (CONFIG_ONLY) continue
       const { ok, fail } = await seedEntries(catalog)
       totalOk   += ok
       totalFail += fail
