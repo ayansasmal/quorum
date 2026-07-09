@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
- * Seeds five global catalog projects with standard knowledge entries:
- *   security-knowledge   — security constraints and baseline controls
- *   best-practices       — cross-team engineering standards
- *   frontend-standards   — React / Next.js standards
- *   backend-standards    — Node.js API and service standards
- *   infra-standards      — CI/CD, deployment, and operations standards
+ * Seeds twelve global catalog projects with standard knowledge entries:
+ *   security-knowledge     — security constraints and baseline controls
+ *   best-practices         — cross-team engineering standards
+ *   frontend-standards     — React / Next.js standards
+ *   backend-standards      — Node.js API and service standards
+ *   infra-standards        — CI/CD, deployment, and operations standards
+ *   architecture-principles — SOA, KISS, DRY, SLAP, SRP, and other design principles
+ *   owasp-standards        — OWASP Top 10 (2021) compliance mapping
+ *   performance-standards  — latency, throughput, and resource-efficiency standards
+ *   testing-standards      — test pyramid, isolation, and quality-gate standards
+ *   observability-standards — tracing, metrics, alerting, and incident-response standards
+ *   documentation-standards — ADRs, API docs, runbooks, and doc-freshness standards
+ *   ai-systems-standards   — AI agent, MCP server, skill, and LLM-application standards
  *
  * Each catalog gets 10 ACTIVE entries (the minimum for UNCERTIFIED → CERTIFIED).
  * Entries are seeded via POST /pg/versions with an admin JWT, which bypasses the
@@ -457,6 +464,475 @@ const CATALOGS = [
         entity_type: 'Constraint', confidence: 0.90,
         tags: ['infra', 'database', 'reliability'],
         summary: 'All stateful services must have automated daily backups with tested restore procedures. Restore drill required quarterly. RTO: 4 hours. RPO: 24 hours.',
+      },
+    ],
+  },
+
+  // ── 6. Architecture Principles ───────────────────────────────────────────────
+  {
+    config: config('architecture-principles', 'Architecture & Design Principles', 'standards/architecture', 'dep-a'),
+    entries: [
+      {
+        topic: 'architecture', key: 'soa-service-boundaries',
+        entity_type: 'Standard', confidence: 0.90,
+        tags: ['architecture', 'soa', 'boundaries'],
+        summary: 'Services own their data exclusively — no other service may read or write another service\'s database directly. Cross-service communication happens only through a versioned API contract (REST, gRPC, or event) or a published schema.',
+      },
+      {
+        topic: 'architecture', key: 'kiss-simplicity-over-cleverness',
+        entity_type: 'Guideline', confidence: 0.85,
+        tags: ['architecture', 'kiss', 'maintainability'],
+        summary: 'Choose the simplest design that satisfies the current requirement. Cleverness, premature abstraction, and speculative flexibility are review concerns unless a concrete, cited need justifies the added complexity.',
+      },
+      {
+        topic: 'architecture', key: 'dry-rule-of-three',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['architecture', 'dry', 'duplication'],
+        summary: 'Duplicate logic is tolerated twice; extract a shared abstraction on the third occurrence (rule of three). Do not extract on the first duplication — premature abstraction is a worse failure mode than temporary duplication.',
+      },
+      {
+        topic: 'architecture', key: 'slap-single-level-of-abstraction',
+        entity_type: 'Guideline', confidence: 0.83,
+        tags: ['architecture', 'slap', 'readability'],
+        summary: 'Each function body must operate at one level of abstraction. A function that mixes high-level orchestration (e.g. "process order") with low-level detail (e.g. string parsing) must extract the low-level steps into named helpers.',
+      },
+      {
+        topic: 'architecture', key: 'srp-single-responsibility',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['architecture', 'srp', 'maintainability'],
+        summary: 'A module, class, or function must have exactly one reason to change. If a code review requires "and" to describe what a unit does, it is a candidate for splitting.',
+      },
+      {
+        topic: 'architecture', key: 'yagni-no-speculative-generality',
+        entity_type: 'Guideline', confidence: 0.82,
+        tags: ['architecture', 'yagni', 'simplicity'],
+        summary: 'Do not build configuration options, extension points, or abstraction layers for requirements that do not yet exist. Generalise only after a second concrete use case appears.',
+      },
+      {
+        topic: 'architecture', key: 'law-of-demeter',
+        entity_type: 'Guideline', confidence: 0.80,
+        tags: ['architecture', 'coupling', 'encapsulation'],
+        summary: 'A method should only call methods on itself, its parameters, objects it creates, or its direct fields — not on objects returned by those calls. Chains like a.getB().getC().doThing() indicate a boundary violation.',
+      },
+      {
+        topic: 'architecture', key: 'composition-over-inheritance',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['architecture', 'composition', 'oop'],
+        summary: 'Prefer composing small, single-purpose objects over deep inheritance hierarchies. Inheritance is reserved for genuine is-a relationships with stable, shared behaviour — not for code reuse alone.',
+      },
+      {
+        topic: 'architecture', key: 'dependency-inversion',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['architecture', 'dip', 'testability'],
+        summary: 'High-level modules must depend on abstractions (interfaces, injected clients), not on concrete low-level implementations. This is required wherever a module talks to a database, external API, or filesystem, to keep it unit-testable.',
+      },
+      {
+        topic: 'architecture', key: 'fail-fast-explicit-contracts',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['architecture', 'reliability', 'contracts'],
+        summary: 'Validate preconditions at the start of a function and throw immediately on violation. Do not let invalid state silently propagate deeper into the call stack where the failure becomes harder to attribute.',
+      },
+    ],
+  },
+
+  // ── 7. OWASP Top 10 (2021) ───────────────────────────────────────────────────
+  {
+    config: config('owasp-standards', 'OWASP Top 10 (2021) Compliance', 'standards/owasp', 'dep-a'),
+    entries: [
+      {
+        topic: 'owasp', key: 'a01-broken-access-control',
+        entity_type: 'Constraint', confidence: 0.93,
+        tags: ['owasp', 'a01', 'access-control'],
+        summary: 'OWASP A01:2021. Enforce access control server-side on every request — never trust a client-supplied role or ID. Deny by default; require explicit authorization checks for object-level access (IDOR prevention) on every resource fetch.',
+      },
+      {
+        topic: 'owasp', key: 'a02-cryptographic-failures',
+        entity_type: 'Constraint', confidence: 0.93,
+        tags: ['owasp', 'a02', 'cryptography'],
+        summary: 'OWASP A02:2021. Encrypt sensitive data at rest (AES-256) and in transit (TLS 1.2+). Never use deprecated algorithms (MD5, SHA1, DES). Passwords must be hashed with bcrypt/argon2 — never encrypted or stored in plaintext.',
+      },
+      {
+        topic: 'owasp', key: 'a03-injection',
+        entity_type: 'Constraint', confidence: 0.95,
+        tags: ['owasp', 'a03', 'injection'],
+        summary: 'OWASP A03:2021. All queries (SQL, NoSQL, LDAP, OS command) must use parameterised interfaces or an ORM — never string concatenation with user input. Applies equally to template engines and shell command construction.',
+      },
+      {
+        topic: 'owasp', key: 'a04-insecure-design',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['owasp', 'a04', 'threat-modeling'],
+        summary: 'OWASP A04:2021. New features touching auth, payments, or PII require a lightweight threat model (abuse cases + mitigations) before implementation begins, not retrofitted after a security review finds gaps.',
+      },
+      {
+        topic: 'owasp', key: 'a05-security-misconfiguration',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['owasp', 'a05', 'configuration'],
+        summary: 'OWASP A05:2021. Disable directory listing, verbose error pages, and default credentials in every environment. Security headers (CSP, X-Content-Type-Options, X-Frame-Options) required on all HTTP responses.',
+      },
+      {
+        topic: 'owasp', key: 'a06-vulnerable-outdated-components',
+        entity_type: 'Standard', confidence: 0.90,
+        tags: ['owasp', 'a06', 'dependencies'],
+        summary: 'OWASP A06:2021. Maintain an inventory of dependencies and their versions (SBOM). Remove unused dependencies. No component past end-of-life may run in production; patch known-CVE components within the severity-based SLA.',
+      },
+      {
+        topic: 'owasp', key: 'a07-identification-authentication-failures',
+        entity_type: 'Constraint', confidence: 0.92,
+        tags: ['owasp', 'a07', 'authentication'],
+        summary: 'OWASP A07:2021. Enforce credential strength, lock out after repeated failed attempts (progressive backoff), and invalidate session tokens on logout and password change. No credential stuffing protection means no production launch.',
+      },
+      {
+        topic: 'owasp', key: 'a08-software-data-integrity-failures',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['owasp', 'a08', 'integrity'],
+        summary: 'OWASP A08:2021. CI/CD pipelines and auto-update mechanisms must verify signatures or checksums before applying code or dependencies. Never deserialize untrusted data without a strict, allow-listed schema.',
+      },
+      {
+        topic: 'owasp', key: 'a09-logging-monitoring-failures',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['owasp', 'a09', 'logging'],
+        summary: 'OWASP A09:2021. Log authentication, access-control, and input-validation failures with enough context to investigate (actor, timestamp, source IP) — but never log credentials or full tokens. Alert on repeated failures.',
+      },
+      {
+        topic: 'owasp', key: 'a10-server-side-request-forgery',
+        entity_type: 'Constraint', confidence: 0.87,
+        tags: ['owasp', 'a10', 'ssrf'],
+        summary: 'OWASP A10:2021. Any server-side feature that fetches a URL supplied by a user (webhooks, image proxies, link previews) must validate against an allow-list and block requests to internal/private IP ranges and cloud metadata endpoints.',
+      },
+    ],
+  },
+
+  // ── 8. Performance ────────────────────────────────────────────────────────────
+  {
+    config: config('performance-standards', 'Performance Standards', 'standards/performance', 'dep-b'),
+    entries: [
+      {
+        topic: 'performance', key: 'n-plus-one-query-prevention',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['performance', 'database', 'orm'],
+        summary: 'List endpoints and ORM relations must use eager loading, joins, or batched dataloaders. A query issued once per row in a loop (N+1) is a merge-blocking review finding, not a later optimisation.',
+      },
+      {
+        topic: 'performance', key: 'caching-strategy-required',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['performance', 'caching'],
+        summary: 'Expensive or frequently-read computations must define an explicit caching layer (in-memory, Redis, or CDN) with a stated TTL and invalidation trigger. Caches without an invalidation strategy are not approved.',
+      },
+      {
+        topic: 'performance', key: 'database-indexing-required',
+        entity_type: 'Standard', confidence: 0.90,
+        tags: ['performance', 'database', 'indexing'],
+        summary: 'Any column used in a WHERE, JOIN, or ORDER BY on a table expected to exceed 10k rows must be indexed. New query patterns require an EXPLAIN plan review before merge.',
+      },
+      {
+        topic: 'performance', key: 'algorithmic-complexity-review',
+        entity_type: 'Guideline', confidence: 0.82,
+        tags: ['performance', 'algorithms'],
+        summary: 'Code on a hot path (request handlers, per-item loop bodies) exceeding O(n log n) requires an explicit justification comment. Nested loops over unbounded collections are a review-blocking concern.',
+      },
+      {
+        topic: 'performance', key: 'async-non-blocking-io',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['performance', 'nodejs', 'io'],
+        summary: 'All I/O (network, disk, database) must be non-blocking. Synchronous filesystem calls (readFileSync, etc.) are prohibited on any request-handling path in production code.',
+      },
+      {
+        topic: 'performance', key: 'load-testing-before-launch',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['performance', 'testing', 'capacity'],
+        summary: 'New public-facing endpoints must be load tested to at least 2x projected peak traffic before launch. Capture p50/p95/p99 latency and error rate at target load; document the result in the launch checklist.',
+      },
+      {
+        topic: 'performance', key: 'bundle-size-budget',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['performance', 'frontend', 'bundle'],
+        summary: 'Initial JS bundle for any client-rendered route must not exceed 250KB gzipped. CI fails the build on regression past budget; new heavy dependencies require dynamic import or an explicit budget exception.',
+      },
+      {
+        topic: 'performance', key: 'cdn-static-assets',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['performance', 'cdn', 'assets'],
+        summary: 'Static assets (images, fonts, compiled JS/CSS) must be served through a CDN with long-lived cache headers and content-hashed filenames for safe cache-busting on deploy.',
+      },
+      {
+        topic: 'performance', key: 'lazy-loading-non-critical-assets',
+        entity_type: 'Guideline', confidence: 0.83,
+        tags: ['performance', 'frontend', 'loading'],
+        summary: 'Below-the-fold images, non-critical scripts, and rarely-visited route chunks must be lazy-loaded. Only content required for first paint should block the initial render.',
+      },
+      {
+        topic: 'performance', key: 'memory-leak-prevention',
+        entity_type: 'Guideline', confidence: 0.85,
+        tags: ['performance', 'reliability', 'memory'],
+        summary: 'Event listeners, timers, and subscriptions must be explicitly removed on component unmount or connection close. Long-running processes must be profiled for memory growth before being marked production-ready.',
+      },
+    ],
+  },
+
+  // ── 9. Testing ────────────────────────────────────────────────────────────────
+  {
+    config: config('testing-standards', 'Testing & Quality Standards', 'standards/testing', 'dep-b'),
+    entries: [
+      {
+        topic: 'testing', key: 'test-pyramid-shape',
+        entity_type: 'Guideline', confidence: 0.85,
+        tags: ['testing', 'strategy'],
+        summary: 'Maintain a test pyramid: the majority of tests are fast unit tests, a smaller layer is integration tests against real dependencies, and the fewest are end-to-end browser tests. Inverting this shape is a quality risk.',
+      },
+      {
+        topic: 'testing', key: 'no-live-network-in-unit-tests',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['testing', 'unit', 'isolation'],
+        summary: 'Unit tests must not make real network calls or hit a live database. External dependencies are mocked or faked at the boundary. Tests requiring real infrastructure belong in the integration or E2E layer.',
+      },
+      {
+        topic: 'testing', key: 'flaky-test-quarantine-policy',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['testing', 'ci', 'reliability'],
+        summary: 'A test that fails intermittently without a code change is quarantined (skip + linked issue) within one CI run of being identified as flaky — it is never left failing silently or ignored via blind retries.',
+      },
+      {
+        topic: 'testing', key: 'contract-testing-cross-service',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['testing', 'contracts', 'integration'],
+        summary: 'Services that consume another team\'s API must maintain a contract test (e.g. Pact, or a shared schema fixture) that fails when the provider changes its response shape in a breaking way.',
+      },
+      {
+        topic: 'testing', key: 'regression-test-on-bugfix',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['testing', 'bugfix', 'quality'],
+        summary: 'Every bug fix must include a test that fails before the fix and passes after. A fix without a reproducing test is not mergeable, since it gives no protection against the same defect returning.',
+      },
+      {
+        topic: 'testing', key: 'test-data-isolation',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['testing', 'fixtures', 'e2e'],
+        summary: 'Test fixtures must be uniquely keyed per run (e.g. a uid() prefix) rather than relying on shared, hand-seeded records. Tests must never depend on execution order or leftover state from a prior run.',
+      },
+      {
+        topic: 'testing', key: 'ci-test-parallelization',
+        entity_type: 'Guideline', confidence: 0.80,
+        tags: ['testing', 'ci', 'performance'],
+        summary: 'Test suites exceeding 5 minutes sequential runtime must be split across parallel CI workers or sharded by file. Test isolation (no shared mutable state) is a prerequisite for safe parallelization.',
+      },
+      {
+        topic: 'testing', key: 'mocking-boundary-external-only',
+        entity_type: 'Guideline', confidence: 0.85,
+        tags: ['testing', 'mocking', 'design'],
+        summary: 'Mock only true external boundaries (network, filesystem, clock, third-party SDKs). Mocking internal collaborators within the same module under test is a sign the test is coupled to implementation, not behaviour.',
+      },
+      {
+        topic: 'testing', key: 'mutation-testing-critical-paths',
+        entity_type: 'Guideline', confidence: 0.75,
+        tags: ['testing', 'quality', 'coverage'],
+        summary: 'Core business-logic modules (billing, auth, governance rules) should be periodically checked with mutation testing to confirm coverage percentage reflects real assertion strength, not just line execution.',
+      },
+      {
+        topic: 'testing', key: 'test-naming-behavior-driven',
+        entity_type: 'Guideline', confidence: 0.82,
+        tags: ['testing', 'readability', 'naming'],
+        summary: 'Test names describe observable behaviour and the scenario under test (e.g. "rejects login after 5 failed attempts"), not implementation details (e.g. "calls checkAttempts"). A failing test name should explain the break without opening the file.',
+      },
+    ],
+  },
+
+  // ── 10. Observability ─────────────────────────────────────────────────────────
+  {
+    config: config('observability-standards', 'Observability Standards', 'standards/observability', 'dep-c'),
+    entries: [
+      {
+        topic: 'observability', key: 'correlation-id-propagation',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['observability', 'tracing', 'logging'],
+        summary: 'Every inbound request is assigned a correlation/request ID at the edge and propagated through every downstream service call and log line. Without it, a single user-facing error cannot be traced across services.',
+      },
+      {
+        topic: 'observability', key: 'distributed-tracing-required',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['observability', 'tracing', 'opentelemetry'],
+        summary: 'Services making calls to other services or external APIs must be instrumented with OpenTelemetry (or equivalent) so a single request can be traced end-to-end across service boundaries with span-level timing.',
+      },
+      {
+        topic: 'observability', key: 'red-use-metrics',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['observability', 'metrics'],
+        summary: 'Services expose RED metrics (Rate, Errors, Duration) per endpoint; infrastructure resources expose USE metrics (Utilization, Saturation, Errors). Dashboards without these baseline metrics are considered incomplete.',
+      },
+      {
+        topic: 'observability', key: 'slo-error-budget-defined',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['observability', 'slo', 'reliability'],
+        summary: 'Every production service defines an explicit SLO (e.g. 99.9% availability, p99 latency under 500ms) and tracks an error budget. Budget exhaustion triggers a review before further feature releases to that service.',
+      },
+      {
+        topic: 'observability', key: 'alert-on-symptoms-not-causes',
+        entity_type: 'Guideline', confidence: 0.83,
+        tags: ['observability', 'alerting'],
+        summary: 'Page on user-facing symptoms (elevated error rate, latency breach, availability drop), not on every internal cause (a single pod restart, a transient retry). Cause-level signals belong in dashboards, not pages.',
+      },
+      {
+        topic: 'observability', key: 'dashboards-per-service',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['observability', 'dashboards'],
+        summary: 'Each production service has one canonical dashboard covering RED metrics, dependency health, and recent deploys. On-call must be able to assess service health from this single view without querying raw logs first.',
+      },
+      {
+        topic: 'observability', key: 'log-retention-policy',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['observability', 'logging', 'compliance'],
+        summary: 'Application logs are retained 30 days in hot storage and 1 year in cold/archive storage for compliance-relevant services. Retention periods must be documented per service and enforced by the logging pipeline, not manual cleanup.',
+      },
+      {
+        topic: 'observability', key: 'runbook-per-alert',
+        entity_type: 'Constraint', confidence: 0.87,
+        tags: ['observability', 'alerting', 'runbook'],
+        summary: 'Every paging alert links to a runbook describing likely causes, first diagnostic steps, and escalation path. An alert with no runbook is not approved for production paging.',
+      },
+      {
+        topic: 'observability', key: 'blameless-postmortem-required',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['observability', 'incident', 'postmortem'],
+        summary: 'Every Sev1/Sev2 incident gets a blameless postmortem within 5 business days: timeline, root cause, contributing factors, and follow-up actions with owners. The focus is systemic gaps, not individual blame.',
+      },
+      {
+        topic: 'observability', key: 'synthetic-monitoring-critical-paths',
+        entity_type: 'Guideline', confidence: 0.80,
+        tags: ['observability', 'monitoring', 'availability'],
+        summary: 'Critical user journeys (login, checkout, core write path) are covered by synthetic monitoring that runs continuously from outside the infrastructure, so an outage is detected before a user reports it.',
+      },
+    ],
+  },
+
+  // ── 11. Documentation ─────────────────────────────────────────────────────────
+  {
+    config: config('documentation-standards', 'Documentation Standards', 'standards/documentation', 'dep-c'),
+    entries: [
+      {
+        topic: 'documentation', key: 'adr-for-significant-decisions',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['documentation', 'adr', 'architecture'],
+        summary: 'Decisions that are expensive to reverse (data model, cross-service contracts, major dependency choices) are recorded as an Architecture Decision Record: context, decision, alternatives considered, and consequences.',
+      },
+      {
+        topic: 'documentation', key: 'readme-minimum-sections',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['documentation', 'readme'],
+        summary: 'Every repository README must include: purpose/overview, setup instructions, how to run tests, and how to run the project locally. A repo without these four sections is considered undocumented, not partially documented.',
+      },
+      {
+        topic: 'documentation', key: 'api-docs-openapi-required',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['documentation', 'api', 'openapi'],
+        summary: 'All HTTP APIs are documented with an OpenAPI 3.1 spec kept in the same repo as the code and updated in the same PR that changes a route. A route not reflected in the spec is treated as undocumented.',
+      },
+      {
+        topic: 'documentation', key: 'comments-explain-why-not-what',
+        entity_type: 'Guideline', confidence: 0.83,
+        tags: ['documentation', 'comments', 'readability'],
+        summary: 'Code comments explain non-obvious rationale — a hidden constraint, a workaround for a specific bug, a subtle invariant — not what well-named code already shows. A comment restating the next line is noise, not documentation.',
+      },
+      {
+        topic: 'documentation', key: 'changelog-per-release',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['documentation', 'changelog', 'release'],
+        summary: 'Every versioned release updates a CHANGELOG following Keep a Changelog conventions (Added/Changed/Fixed/Removed), so consumers can assess impact without reading commit history.',
+      },
+      {
+        topic: 'documentation', key: 'diagrams-as-code',
+        entity_type: 'Guideline', confidence: 0.80,
+        tags: ['documentation', 'diagrams'],
+        summary: 'Architecture and flow diagrams are authored as code (Mermaid, PlantUML) and committed alongside the docs they support, so they can be diffed and kept current in the same PR as the change they describe.',
+      },
+      {
+        topic: 'documentation', key: 'doc-freshness-review',
+        entity_type: 'Guideline', confidence: 0.78,
+        tags: ['documentation', 'maintenance'],
+        summary: 'Key reference documents (architecture overview, onboarding guide, runbooks) are reviewed for accuracy at least quarterly. A doc found to describe removed or renamed functionality is corrected or deleted, not left stale.',
+      },
+      {
+        topic: 'documentation', key: 'deprecation-notice-required',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['documentation', 'deprecation', 'api'],
+        summary: 'A deprecated API, config field, or feature must be documented with the deprecation date, the replacement, and a sunset date before removal. Silent removal without a documented notice period is prohibited.',
+      },
+      {
+        topic: 'documentation', key: 'onboarding-doc-required',
+        entity_type: 'Standard', confidence: 0.82,
+        tags: ['documentation', 'onboarding'],
+        summary: 'Each package/service maintains an onboarding doc sufficient for a new engineer to get a local environment running and make a first small change without needing to ask a teammate for undocumented setup steps.',
+      },
+      {
+        topic: 'documentation', key: 'runbook-required-for-oncall',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['documentation', 'runbook', 'oncall'],
+        summary: 'Every production service has an on-call runbook covering common failure modes, escalation contacts, and rollback steps. A service without a runbook is not eligible to be added to the paging rotation.',
+      },
+    ],
+  },
+
+  // ── 12. AI Systems — Agents, MCPs, Skills ────────────────────────────────────
+  {
+    config: config('ai-systems-standards', 'AI Systems & Agent Standards', 'standards/ai-systems', 'dep-c'),
+    entries: [
+      {
+        topic: 'ai-systems', key: 'mcp-server-least-privilege',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['ai-systems', 'mcp', 'security'],
+        summary: 'An MCP server exposes only the tools a client genuinely needs — no destructive or admin-scoped tool without an explicit, narrow permission grant. Broad "do anything" tools are a review-blocking design smell, not a convenience.',
+      },
+      {
+        topic: 'ai-systems', key: 'agent-destructive-action-confirmation',
+        entity_type: 'Constraint', confidence: 0.92,
+        tags: ['ai-systems', 'agents', 'safety'],
+        summary: 'An autonomous agent must not perform hard-to-reverse or high-blast-radius actions (force-push, delete, prod deploy, mass external communication) without an explicit human confirmation step for that specific action.',
+      },
+      {
+        topic: 'ai-systems', key: 'prompt-injection-defense',
+        entity_type: 'Standard', confidence: 0.90,
+        tags: ['ai-systems', 'security', 'prompt-injection'],
+        summary: 'Content fetched from external, untrusted sources (web pages, tool results, user uploads) is treated as data, never as instructions. Agents must not silently follow directives embedded in retrieved content — flag suspicious embedded instructions instead.',
+      },
+      {
+        topic: 'ai-systems', key: 'rag-grounding-and-citation',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['ai-systems', 'rag', 'hallucination'],
+        summary: 'RAG-based answers must be grounded in retrieved context and cite the specific source used. An answer with no supporting retrieved passage is either flagged as unsupported or withheld, not presented with the same confidence as a grounded one.',
+      },
+      {
+        topic: 'ai-systems', key: 'llm-output-schema-validation',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['ai-systems', 'llm', 'validation'],
+        summary: 'Structured output from an LLM (JSON, function-call arguments) must be validated against a strict schema before being used downstream. Malformed or schema-violating output is rejected and retried, never coerced or passed through silently.',
+      },
+      {
+        topic: 'ai-systems', key: 'agent-human-in-the-loop-for-ambiguity',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['ai-systems', 'agents', 'governance'],
+        summary: 'When an agent encounters genuine ambiguity — a decision only a human stakeholder can make, or conflicting instructions — it pauses and asks, rather than guessing and proceeding. Silent, confident guessing on ambiguous intent is a design defect.',
+      },
+      {
+        topic: 'ai-systems', key: 'skill-single-purpose-scoping',
+        entity_type: 'Guideline', confidence: 0.83,
+        tags: ['ai-systems', 'skills', 'agents', 'design'],
+        summary: 'A skill or subagent should have one clear responsibility and the minimal tool surface required for it. A skill that tries to handle several unrelated workflows should be split, mirroring single-responsibility for conventional modules.',
+      },
+      {
+        topic: 'ai-systems', key: 'model-selection-cost-latency-fit',
+        entity_type: 'Guideline', confidence: 0.80,
+        tags: ['ai-systems', 'llm', 'cost'],
+        summary: 'Select the smallest model capable of a task rather than defaulting to the largest available. Benchmark accuracy versus cost and latency for the specific task before committing to a model choice, and revisit the choice as new models ship.',
+      },
+      {
+        topic: 'ai-systems', key: 'eval-suite-before-prompt-change',
+        entity_type: 'Standard', confidence: 0.87,
+        tags: ['ai-systems', 'testing', 'prompts'],
+        summary: 'Changes to a production prompt, system instruction, or agent behavior must run against a regression eval suite (representative inputs + expected properties) before merge. A prompt change without an eval run is treated the same as an untested code change.',
+      },
+      {
+        topic: 'ai-systems', key: 'ai-action-audit-logging',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['ai-systems', 'agents', 'audit'],
+        summary: 'Every AI-initiated write, delete, or external call is logged with the triggering agent/session identity and a reference to the prompt or context that caused it. This is required before an agent is granted any write capability, not added retroactively after an incident.',
       },
     ],
   },
