@@ -5,7 +5,15 @@ services:
   # The gateway reads team config from S3; for local Docker Compose runs we point
   # it here instead of real AWS. Bucket is created by scripts/init-localstack.sh
   # (called automatically by setup.sh docker after the stack is healthy).
+  #
+  # Profile: internal-localstack — enabled by default via COMPOSE_PROFILES in
+  # .env.example. If you run an external LocalStack instance on the host (e.g.
+  # for Crossplane/k8s tooling) and want the gateway to reuse it instead, set
+  # in your own .env (not committed):
+  #   COMPOSE_PROFILES=            # disables this service, avoids port 4566 clash
+  #   AWS_ENDPOINT_URL=http://host.docker.internal:4566
   localstack:
+    profiles: ["internal-localstack"]
     image: localstack/localstack:latest
     ports:
       - "4566:4566"
@@ -105,8 +113,10 @@ services:
       - POSTGRES_DB=quorum_audit
       - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-quorum-configs}
       - AWS_REGION=${AWS_REGION:-us-east-1}
-      # LocalStack — S3 calls inside the Docker network go here (not real AWS)
-      - AWS_ENDPOINT_URL=http://localstack:4566
+      # LocalStack — defaults to the compose-managed `localstack` service above.
+      # Override in your own .env to point at an external, host-run instance
+      # instead (see profile note above).
+      - AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL:-http://localstack:4566}
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - QUORUM_DDB_CONFIGS_TABLE=${QUORUM_DDB_CONFIGS_TABLE:-quorum-configs}
