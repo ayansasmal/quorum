@@ -106,7 +106,9 @@ When either repo changes shared logic (queries, audit, constitutional rules), th
 | `governance/constitutional.js` | Constitutional enforcement (self-approval, reason checks) |
 | `graph/validate.js` | `validateKnowledgeInput(fields, opts)` + `ValidationError` — shared validation for all knowledge write routes; vendored copy in quorum-mcp |
 
-**`graph/client.js` stale-session fix (2026-07-14):** `callGraphiti()` caches the raw MCP `Mcp-Session-Id` in a module-level `_sessionId` singleton (one session per gateway process, reused across all tool calls). The reset guard only checked `response.status === 400`, but Graphiti's actual "Session not found" error (e.g. after `docker restart quorum-graphiti-1` drops its in-memory session store while the gateway process keeps running) comes back as **404** — so the dead session was resent forever until the gateway itself was restarted. Fixed by widening both the reset (`!response.ok` branch) and the retry-continue guard (`catch` block) to also match 404. Deploying this fix to a running local stack requires `docker compose build gateway && docker compose up -d gateway` (the dev container runs a baked image, not a bind-mounted `src/` — use `docker-compose.dev.yml`'s overlay for live-reload during active development instead). The identical bug was independently present in the canonical `quorum-mcp/src/graph/client.js` copy (its own direct-to-Graphiti session handshake, a separate code path from the gateway-proxy mode) — fixed there in the same pass.
+> Note: deploying a `shared/` fix to a running local stack requires `docker compose build gateway && docker compose up -d gateway` (the dev container runs a baked image, not a bind-mounted `src/` — use `docker-compose.dev.yml`'s overlay for live-reload during active development instead).
+>
+> Full dated history of fixes to these shared modules: [../docs/CHANGELOG.md](../docs/CHANGELOG.md)
 
 ---
 
