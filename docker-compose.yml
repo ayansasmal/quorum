@@ -111,6 +111,7 @@ services:
       - POSTGRES_USER=quorum
       - POSTGRES_PASSWORD=quorum_local
       - POSTGRES_DB=quorum_audit
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - QUORUM_CONFIG_BUCKET=${QUORUM_CONFIG_BUCKET:-quorum-configs}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       # LocalStack — defaults to the compose-managed `localstack` service above.

@@ -260,8 +260,10 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
-        // 400 usually means session expired — clear it so next attempt re-initializes
-        if (response.status === 400) _sessionId = null
+        // 400 usually means a malformed request; 404 is Graphiti's "Session not found"
+        // (e.g. after the Graphiti container restarts and drops its in-memory session
+        // store) — both invalidate our cached session so the next attempt re-initializes.
+        if (response.status === 400 || response.status === 404) _sessionId = null
         throw new GraphitiResponseError(
           `Graphiti responded ${response.status} for tool '${tool}'`,
           response.status,
@@ -272,8 +274,8 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       return await parseMcpResponse(response)
     } catch (err) {
       if (err instanceof GraphitiResponseError) {
-        // Retry on 400 (session re-init) but not on other 4xx errors
-        if (err.status === 400 && attempt < maxRetries) { lastError = err; continue }
+        // Retry on 400/404 (session re-init) but not on other 4xx errors
+        if ((err.status === 400 || err.status === 404) && attempt < maxRetries) { lastError = err; continue }
         throw err
       }
       lastError = new GraphitiConnectionError(
