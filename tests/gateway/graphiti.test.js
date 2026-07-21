@@ -72,6 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 // ── HTTP helpers ───────────────────────────────────────────────────────────────
@@ -385,6 +386,95 @@ describe('POST /graphiti/*path — Wave B: arguments-level group_ids injection',
 
     // should not fail — falls back gracefully to project-only
     expect(store.capturedBody.params.arguments.group_ids).toEqual(['test_project'])
+  })
+})
+
+describe('POST /graphiti/*path — migrated_to_shared_graph database override', () => {
+  it('injects database at both params and params.arguments for write ops when migrated_to_shared_graph is true', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockResolvedValueOnce({
+      group_id: 'test-project',
+      globals: [],
+      migrated_to_shared_graph: true,
+    })
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: {
+        name: 'add_memory',
+        arguments: { content: 'use jwt' },
+      },
+    })
+
+    expect(store.capturedBody.params.database).toBe('quorum_shared_globals')
+    expect(store.capturedBody.params.arguments.database).toBe('quorum_shared_globals')
+  })
+
+  it('honours QUORUM_SHARED_GRAPH_DATABASE override', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockResolvedValueOnce({
+      group_id: 'test-project',
+      globals: [],
+      migrated_to_shared_graph: true,
+    })
+    vi.stubEnv('QUORUM_SHARED_GRAPH_DATABASE', 'custom_shared_db')
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: { name: 'add_memory', arguments: { content: 'use jwt' } },
+    })
+
+    expect(store.capturedBody.params.database).toBe('custom_shared_db')
+    expect(store.capturedBody.params.arguments.database).toBe('custom_shared_db')
+  })
+
+  it('does not inject database for write ops when migrated_to_shared_graph is absent (default mock)', async () => {
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: { name: 'add_memory', arguments: { content: 'use jwt' } },
+    })
+
+    expect(store.capturedBody.params.database).toBeUndefined()
+    expect(store.capturedBody.params.arguments.database).toBeUndefined()
+  })
+
+  it('does not inject database for write ops when migrated_to_shared_graph is explicitly false', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockResolvedValueOnce({
+      group_id: 'test-project',
+      globals: [],
+      migrated_to_shared_graph: false,
+    })
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: { name: 'add_memory', arguments: { content: 'use jwt' } },
+    })
+
+    expect(store.capturedBody.params.database).toBeUndefined()
+    expect(store.capturedBody.params.arguments.database).toBeUndefined()
+  })
+
+  it('does not inject database for read ops even when migrated_to_shared_graph is true', async () => {
+    const { loadProjectConfig } = await import('../../gateway/src/config-cache.js')
+    vi.mocked(loadProjectConfig).mockResolvedValueOnce({
+      group_id: 'test-project',
+      globals: [],
+      migrated_to_shared_graph: true,
+    })
+
+    const store = mockGraphiti()
+
+    await post('/graphiti/mcp', {
+      params: { name: 'search_nodes', arguments: { query: 'tls certs' } },
+    })
+
+    expect(store.capturedBody.params.database).toBeUndefined()
+    expect(store.capturedBody.params.arguments?.database).toBeUndefined()
   })
 })
 

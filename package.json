@@ -43,6 +43,7 @@
     "job:decay": "node scripts/decay-confidence.js",
     "job:archive": "node scripts/archive-audit.js",
     "job:recheck": "node scripts/recheck-conflicts.js",
+    "job:reconcile-globals": "node scripts/reconcile-globals.js",
     "prepare": "husky || true",
     "test:e2e": "mkdir -p logs && bash -c 'set -o pipefail; ts=$(date +%Y%m%d-%H%M%S); npx playwright test --config e2e/playwright.config.js 2>&1 | tee \"logs/test-e2e-$ts.log\"; code=$?; echo \"\"; echo \"Log saved -> logs/test-e2e-$ts.log\"; echo \"Graph report -> test-results/suite-graph.html\"; exit $code'",
     "test:e2e:headed": "npx playwright test --config e2e/playwright.config.js --headed",

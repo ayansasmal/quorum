@@ -295,9 +295,12 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  * @param {string} content
  * @param {{ key: string, source: string, entityType?: string, tags?: string[] }} metadata
  * @param {string} groupId - project isolation namespace (required)
+ * @param {string} [database] - physical FalkorDB database override (see
+ *   migrated_to_shared_graph in QuorumConfigSchema); omitted preserves the default
+ *   per-group_id database, unchanged from prior behavior
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addEpisode(content, metadata, groupId) {
+export async function addEpisode(content, metadata, groupId, database) {
   if (!groupId) throw new Error('addEpisode: groupId is required')
   // NOTE: do NOT pass uuid to add_memory. In Graphiti 0.29+, providing uuid
   // means "retrieve existing episode with this UUID" — if the node doesn't
@@ -315,6 +318,7 @@ export async function addEpisode(content, metadata, groupId) {
     episode_body:       content,
     group_id:           normalizeGroupId(groupId),
     source_description: metadata.source,
+    ...(database !== undefined ? { database } : {}),
   })
   return { episode_id: uuid }
 }
@@ -327,9 +331,10 @@ export async function addEpisode(content, metadata, groupId) {
  * @param {string} oldEpisodeId
  * @param {{ key: string, source: string, entityType?: string, tags?: string[], reason?: string }} metadata
  * @param {string} groupId - project isolation namespace (required)
+ * @param {string} [database] - physical FalkorDB database override, see addEpisode
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId) {
+export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId, database) {
   if (!groupId) throw new Error('addSupersedingEpisode: groupId is required')
   // Same reason as addEpisode — do not pass uuid; normalize group_id.
   const uuid = randomUUID()
@@ -338,6 +343,7 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, 
     episode_body:       `${newContent}\n\n[supersedes:${oldEpisodeId}] ${metadata.reason ?? 'updated'}`,
     group_id:           normalizeGroupId(groupId),
     source_description: metadata.source,
+    ...(database !== undefined ? { database } : {}),
   })
 
   return { episode_id: uuid }

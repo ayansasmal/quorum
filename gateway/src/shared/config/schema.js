@@ -203,6 +203,22 @@ export const QuorumConfigSchema = z.object({
    * catalog inheritance (e.g. a division-level catalog inheriting from an org-level one).
    */
   globals: z.array(z.string().min(1)).optional(),
+
+  /**
+   * Marks this global catalog as migrated to a shared physical FalkorDB database.
+   * Only meaningful when is_global is true.
+   *
+   * When true, the gateway's Graphiti write path (routes/graphiti.js) routes writes
+   * to this project's group_id into a shared physical database (see the
+   * QUORUM_SHARED_GRAPH_DATABASE env var) instead of Graphiti's default per-group_id
+   * database, via the `database` override added to graphiti_core.Graphiti.add_episode
+   * (quorum-graphiti Task 1, commit 27d320c) and threaded through the add_memory MCP
+   * tool (quorum-graphiti Task 2, commit bcebf6a). group_id itself is unchanged — this
+   * only affects which physical database the write is stored in.
+   *
+   * Defaults to false/unset: no behavior change for projects that don't set this flag.
+   */
+  migrated_to_shared_graph: z.boolean().optional(),
 })
 
 /** @typedef {import('zod').infer<typeof QuorumConfigSchema>} QuorumConfig */

@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { searchNodes, searchFacts } from '../../gateway/src/shared/graph/client.js'
+import { searchNodes, searchFacts, addEpisode, addSupersedingEpisode } from '../../gateway/src/shared/graph/client.js'
 
 /**
  * Stub fetch to satisfy the MCP streamable-http session handshake and capture
@@ -89,6 +89,62 @@ describe('searchNodes — group_ids scoping', () => {
 
     const args = getToolArgs()
     expect(args.group_ids).toEqual(['amethyst_munchkin'])
+  })
+})
+
+describe('addEpisode — database override', () => {
+  it('sends database in the add_memory payload when provided', async () => {
+    const { getToolArgs } = stubGraphitiFetch()
+
+    await addEpisode('use jwt', { key: 'auth:jwt', source: 'test' }, 'amethyst-munchkin', 'quorum_shared_globals')
+
+    const args = getToolArgs()
+    expect(args).not.toBeNull()
+    expect(args.database).toBe('quorum_shared_globals')
+    expect(args.group_id).toBe('amethyst_munchkin')
+  })
+
+  it('omits database when not provided', async () => {
+    const { getToolArgs } = stubGraphitiFetch()
+
+    await addEpisode('use jwt', { key: 'auth:jwt', source: 'test' }, 'amethyst-munchkin')
+
+    const args = getToolArgs()
+    expect(args).not.toBeNull()
+    expect(args.database).toBeUndefined()
+  })
+})
+
+describe('addSupersedingEpisode — database override', () => {
+  it('sends database in the add_memory payload when provided', async () => {
+    const { getToolArgs } = stubGraphitiFetch()
+
+    await addSupersedingEpisode(
+      'use jwt v2',
+      'old-episode-id',
+      { key: 'auth:jwt', source: 'test', reason: 'updated' },
+      'amethyst-munchkin',
+      'quorum_shared_globals',
+    )
+
+    const args = getToolArgs()
+    expect(args).not.toBeNull()
+    expect(args.database).toBe('quorum_shared_globals')
+  })
+
+  it('omits database when not provided', async () => {
+    const { getToolArgs } = stubGraphitiFetch()
+
+    await addSupersedingEpisode(
+      'use jwt v2',
+      'old-episode-id',
+      { key: 'auth:jwt', source: 'test', reason: 'updated' },
+      'amethyst-munchkin',
+    )
+
+    const args = getToolArgs()
+    expect(args).not.toBeNull()
+    expect(args.database).toBeUndefined()
   })
 })
 

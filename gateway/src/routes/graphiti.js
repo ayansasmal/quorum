@@ -72,6 +72,19 @@ router.post('/*path', verifyJwt, async (req, res) => {
   body.params.group_ids = injectedGroupIds
   body.params.arguments.group_ids = injectedGroupIds
 
+  // Write ops on a global catalog migrated to a shared physical database (see
+  // migrated_to_shared_graph in QuorumConfigSchema): override which physical FalkorDB
+  // database the write lands in, independent of group_id. Uses the `database` param
+  // added to graphiti_core.Graphiti.add_episode (quorum-graphiti Task 1, commit
+  // 27d320c) and threaded through add_memory (quorum-graphiti Task 2, commit bcebf6a).
+  // Read ops are unaffected — global catalogs are still read via group_ids scoping
+  // regardless of physical database placement.
+  if (!isReadOp && projectConfig?.migrated_to_shared_graph === true) {
+    const sharedDatabase = process.env.QUORUM_SHARED_GRAPH_DATABASE ?? 'quorum_shared_globals'
+    body.params.database = sharedDatabase
+    body.params.arguments.database = sharedDatabase
+  }
+
   // Forward MCP protocol headers from the caller to Graphiti.
   // Accept is required: Graphiti's streamable-http transport returns 406 without it.
   // Mcp-Session-Id is required for session reuse on all calls after initialize.
