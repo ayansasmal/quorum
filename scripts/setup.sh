@@ -119,6 +119,15 @@ check_localstack_conflict() {
   warn "If 'docker compose up' fails, stop it first: docker stop $conflict"
 }
 
+# True when the `internal-localstack` Compose profile is active, i.e. the
+# `localstack` service actually exists in the resolved compose config.
+# When COMPOSE_PROFILES is empty (external-LocalStack setups — see
+# CLAUDE.md), the service is never instantiated and `--scale localstack=0`
+# fails with "no such service: localstack: disabled".
+localstack_profile_active() {
+  docker compose config --services 2>/dev/null | grep -qx "localstack"
+}
+
 # Detect whether a LocalStack container is running with persistence enabled.
 # Persistence requires either PERSISTENCE=1 env var or a volume mounted at
 # /var/lib/localstack. Without it, S3 data (project configs) is lost on restart.
@@ -219,7 +228,11 @@ cmd_docker() {
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
-    docker compose up -d --scale localstack=0
+    if localstack_profile_active; then
+      docker compose up -d --scale localstack=0
+    else
+      docker compose up -d
+    fi
     # Connect the external container to the quorum network so the gateway can
     # resolve it by service name (http://localstack:4566 inside the network).
     info "Connecting $EXTERNAL_LOCALSTACK to Docker network quorum_default..."
@@ -317,7 +330,11 @@ cmd_docker_rebuild() {
 
   if [[ -n "$EXTERNAL_LOCALSTACK" ]]; then
     info "Starting stack (skipping LocalStack — reusing $EXTERNAL_LOCALSTACK)..."
-    docker compose up -d --scale localstack=0
+    if localstack_profile_active; then
+      docker compose up -d --scale localstack=0
+    else
+      docker compose up -d
+    fi
     info "Connecting $EXTERNAL_LOCALSTACK to Docker network quorum_default..."
     docker network connect --alias localstack quorum_default "$EXTERNAL_LOCALSTACK" 2>/dev/null \
       && ok "$EXTERNAL_LOCALSTACK connected to quorum_default" \
