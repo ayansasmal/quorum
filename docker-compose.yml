@@ -72,6 +72,7 @@ services:
       - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o-mini}
       - EMBEDDER_MODEL_NAME=${EMBEDDER_MODEL_NAME:-text-embedding-3-small}
       - GROUP_ID=${QUORUM_GROUP_ID:-default}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
@@ -140,6 +141,7 @@ services:
       - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:3001/oauth/callback}
       - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3002}
       - NODE_ENV=${NODE_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ./quorum.config.example.json:/app/quorum.config.example.json:ro
     depends_on:
