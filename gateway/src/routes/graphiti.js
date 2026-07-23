@@ -161,12 +161,26 @@ router.post('/*path', verifyJwt, async (req, res) => {
     target,
     tool: entryToolName,
   });
+  // AbortSignal.timeout() schedules a timer that is NOT cancelled when the fetch it's
+  // attached to settles early — under bursty call volume (e.g. a conformance scan) this
+  // leaves piles of timers that fire ~100s later, detached from any in-flight request,
+  // producing spurious "Unhandled error: The operation was aborted due to timeout" logs.
+  // Use an explicit AbortController + clearTimeout so the timer never outlives the call.
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    dbg(traceId, 'graphiti_proxy_fetch_timeout_fired', {
+      elapsed_ms: Date.now() - fetchStartedAt,
+      target,
+      tool: entryToolName,
+    });
+    abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+  }, 100_000);
   try {
     response = await fetch(target, {
       method: 'POST',
       headers: upstreamHeaders,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(100_000),
+      signal: abortController.signal,
     });
     dbg(traceId, 'graphiti_proxy_fetch_complete', {
       fetch_ms: Date.now() - fetchStartedAt,
@@ -187,6 +201,8 @@ router.post('/*path', verifyJwt, async (req, res) => {
       error: 'graphiti_unavailable',
       message: `Cannot reach Graphiti at ${GRAPHITI_URL()}: ${err.message}`,
     });
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   const contentType =

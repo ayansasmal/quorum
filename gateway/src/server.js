@@ -236,8 +236,13 @@ app.use((_req, res) => {
 
 // ── Global error handler ───────────────────────────────────────────────────────
 
-// eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
+app.use((err, _req, res, next) => {
+  // Express's own recommended guard: if a response has already been sent (e.g. this
+  // error arrived from a stale/detached async callback after the request finished),
+  // delegate to the default handler instead of writing a second response.
+  if (res.headersSent) {
+    return next(err)
+  }
   // ConstitutionalViolation — a constitutional rule was broken; always 400 with rule name.
   // The rule field is required by assertConstitutionalViolation() in E2E tests.
   // E2E: tests/e2e/scenarios/05-rbac-boundary.spec.js — S-05.4/S-05.5 constitutional enforcement
@@ -245,7 +250,10 @@ app.use((err, _req, res, _next) => {
     return res.status(400).json({ rule: err.rule, message: err.message })
   }
   const status = err.status ?? 500
-  const code   = err.code   ?? 'INTERNAL_ERROR'
+  // err.code is not always a string — e.g. a native TimeoutError/AbortError is a
+  // DOMException whose .code is the legacy numeric constant (TIMEOUT_ERR = 23), not
+  // a string, which crashed this handler on code.toLowerCase() below.
+  const code   = typeof err.code === 'string' ? err.code : 'INTERNAL_ERROR'
   if (status >= 500) {
     // Include PostgreSQL-specific detail so callers can distinguish constraint names.
     const pgDetail = err.detail ? ` | pg.detail: ${err.detail}` : ''

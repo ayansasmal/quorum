@@ -26,6 +26,22 @@
 import { randomUUID } from 'crypto'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
+const DEBUG = process.env.LOG_LEVEL === 'debug'
+
+/**
+ * Emit a structured DEBUG-only log line for this module's outbound Graphiti calls.
+ * No-op unless LOG_LEVEL=debug. Mirrors the dbg() helper in routes/graphiti.js —
+ * kept as a local, dependency-free copy since this file has no logger import
+ * (see the vendoring note in the file header).
+ * @param {string} stage - checkpoint name (e.g. 'graphiti_client_fetch_timeout_fired')
+ * @param {object} data - extra structured fields merged into the log line
+ * @returns {void}
+ */
+function dbg(stage, data) {
+  if (DEBUG) {
+    console.error(JSON.stringify({ ts: new Date().toISOString(), stage, ...data }))
+  }
+}
 
 // NOTE: The gateway's shared Graphiti client calls Graphiti DIRECTLY (it does
 // not proxy through itself). RediSearch — used internally by FalkorDB for
@@ -141,25 +157,40 @@ let _sessionId = null
  * @returns {Promise<string>} the session ID
  */
 async function initSession(endpoint, authHeaders = {}) {
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept':        'application/json, text/event-stream',
-      ...authHeaders,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id:      1,
-      method:  'initialize',
-      params:  {
-        protocolVersion: '2024-11-05',
-        capabilities:    {},
-        clientInfo:      { name: 'quorum', version: '1.0' },
+  // AbortSignal.timeout()'s internal timer is not cancelled when the fetch settles
+  // early — under bursty call volume this leaves orphaned timers that fire later,
+  // detached from any in-flight request. Use an explicit AbortController + clearTimeout
+  // so the timer never outlives this call.
+  const initStartedAt = Date.now()
+  const abortController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    dbg('graphiti_client_init_timeout_fired', { elapsed_ms: Date.now() - initStartedAt, endpoint })
+    abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+  }, 30_000)
+  let res
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept':        'application/json, text/event-stream',
+        ...authHeaders,
       },
-    }),
-    signal: AbortSignal.timeout(30_000),
-  })
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id:      1,
+        method:  'initialize',
+        params:  {
+          protocolVersion: '2024-11-05',
+          capabilities:    {},
+          clientInfo:      { name: 'quorum', version: '1.0' },
+        },
+      }),
+      signal: abortController.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -240,6 +271,16 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
     }
 
+    // AbortSignal.timeout()'s internal timer is not cancelled when the fetch settles
+    // early — under bursty call volume this leaves orphaned timers that fire later,
+    // detached from any in-flight request. Use an explicit AbortController + clearTimeout
+    // so the timer never outlives this call.
+    const callStartedAt = Date.now()
+    const abortController = new AbortController()
+    const timeoutId = setTimeout(() => {
+      dbg('graphiti_client_call_timeout_fired', { elapsed_ms: Date.now() - callStartedAt, tool, attempt })
+      abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    }, 30_000)
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -255,7 +296,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
           method:  'tools/call',
           params:  { name: tool, arguments: params },
         }),
-        signal: AbortSignal.timeout(30_000),
+        signal: abortController.signal,
       })
 
       if (!response.ok) {
@@ -282,6 +323,14 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         `Could not reach Graphiti at ${GRAPHITI_URL}: ${err.message}`,
         err,
       )
+      dbg('graphiti_client_call_error', {
+        tool, attempt,
+        elapsed_ms: Date.now() - callStartedAt,
+        error_name: err?.name ?? 'Error',
+        error_message: err?.message ?? String(err),
+      })
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
