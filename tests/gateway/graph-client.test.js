@@ -16,20 +16,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { searchNodes, searchFacts, addEpisode, addSupersedingEpisode } from '../../gateway/src/shared/graph/client.js'
 
 /**
- * Stub fetch to satisfy the MCP streamable-http session handshake and capture
- * the arguments forwarded to a Graphiti tool call.
+ * Stub fetch for a single, stateless `tools/call` POST and capture the
+ * arguments forwarded to a Graphiti tool call.
  *
- * The graph client performs two POSTs per top-level call:
- *   1. initialize  — returns Mcp-Session-Id header
- *   2. tools/call  — the actual tool invocation (captured here)
+ * Graphiti's MCP server runs with `stateless_http=True`: every call is one
+ * self-contained POST with method="tools/call" — no initialize handshake,
+ * no Mcp-Session-Id header.
  *
- * @returns {{ getToolArgs: () => object | null }}
+ * @returns {{ getToolArgs: () => object | null, getAllCalls: () => Array<{ headers: object, body: object }> }}
  */
 function stubGraphitiFetch() {
   let toolArgs = null
+  const calls = []
 
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, opts) => {
     const body = JSON.parse(opts.body)
+    calls.push({ headers: opts.headers ?? {}, body })
     if (body.method === 'tools/call') {
       toolArgs = body.params?.arguments ?? null
     }
@@ -37,7 +39,7 @@ function stubGraphitiFetch() {
       ok:      true,
       status:  200,
       headers: {
-        get: (name) => (name.toLowerCase() === 'mcp-session-id' ? 'test-session' : null),
+        get: () => null,
       },
       text: async () => JSON.stringify({
         jsonrpc: '2.0',
@@ -47,7 +49,7 @@ function stubGraphitiFetch() {
     }
   }))
 
-  return { getToolArgs: () => toolArgs }
+  return { getToolArgs: () => toolArgs, getAllCalls: () => calls }
 }
 
 beforeEach(() => {
@@ -177,5 +179,32 @@ describe('searchFacts — group_ids scoping', () => {
 
     const args = getToolArgs()
     expect(args.group_ids).toEqual(['amethyst_munchkin'])
+  })
+})
+
+describe('callGraphiti — stateless concurrency', () => {
+  // Regression test for quorum/docs/RCA-search-concurrency-session-stall-2026-07-27.md:
+  // concurrent calls used to share one cached Mcp-Session-Id with no locking, so one
+  // caller could get no response until its own timeout fired. Each call is now a fully
+  // independent request — no session to race on.
+  it('fires one independent request per concurrent call, none carrying a session header', async () => {
+    const { getAllCalls } = stubGraphitiFetch()
+
+    const CONCURRENCY = 5
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, (_, i) =>
+        searchNodes(`query-${i}`, { groupId: 'amethyst_munchkin' })),
+    )
+
+    const calls = getAllCalls()
+    expect(calls).toHaveLength(CONCURRENCY)
+
+    const queries = calls.map((c) => c.body.params?.arguments?.query).sort()
+    expect(queries).toEqual(Array.from({ length: CONCURRENCY }, (_, i) => `query-${i}`).sort())
+
+    for (const call of calls) {
+      const headerNames = Object.keys(call.headers).map((h) => h.toLowerCase())
+      expect(headerNames).not.toContain('mcp-session-id')
+    }
   })
 })
