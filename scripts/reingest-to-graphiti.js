@@ -57,15 +57,19 @@ function buildFallbackBody(row) {
 
 async function main() {
   // Only re-ingest ACTIVE versions — latest state per entry
-  const projectFilter = PROJECT_ID ? 'AND project_id = $1' : ''
+  // project_id here is q_projects.group_id — the value Graphiti actually
+  // scopes episodes by (addEpisode's groupId param). q_project_id (e.g.
+  // "q_p1") is an internal PK and must never be passed to addEpisode.
+  const projectFilter = PROJECT_ID ? 'AND qp.group_id = $1' : ''
   const params        = PROJECT_ID ? [PROJECT_ID] : []
 
   const { rows } = await pool.query(
-    `SELECT id, project_id, topic, key, summary, confidence, author, tags, entity_type
-     FROM knowledge_versions
-     WHERE status = 'ACTIVE'
+    `SELECT kv.version_id AS id, qp.group_id AS project_id, kv.topic, kv.key, kv.summary, kv.confidence, kv.author, kv.tags, kv.entity_type
+     FROM knowledge_versions kv
+     JOIN q_projects qp ON qp.q_project_id = kv.q_project_id
+     WHERE kv.status = 'ACTIVE'
        ${projectFilter}
-     ORDER BY project_id, topic, key`,
+     ORDER BY qp.group_id, kv.topic, kv.key`,
     params,
   )
 

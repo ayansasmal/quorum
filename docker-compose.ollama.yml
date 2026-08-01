@@ -1,0 +1,44 @@
+# docker-compose.ollama.yml — local Ollama overlay for the Graphiti sidecar
+#
+# Dev-only opt-in profile (ADR-0011 "if revisited" plan) for use when OpenAI
+# credits/quota are unavailable. Redirects Graphiti's LLM + embedder traffic
+# to a native-host Ollama server instead of api.openai.com.
+#
+# Prerequisites (run on the host, not in Docker — Docker Desktop on macOS does
+# not pass Metal/GPU through to containers):
+#   brew install ollama && brew services start ollama
+#   ollama pull gpt-oss:20b
+#   ollama pull nomic-embed-text
+#
+# Usage (from quorum/ directory):
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d graphiti
+#
+# This mounts graphiti/quorum-graphiti's new config-docker-ollama.yaml over
+# the image's baked-in config.yaml (no image rebuild needed — the prebuilt
+# GHCR image's openai_generic_client.py already speaks Ollama's OpenAI-
+# compatible API; only the config file and env vars change).
+#
+# host.docker.internal resolves to the Mac host from inside the container,
+# reaching Ollama's port 11434 there.
+#
+# Embedding dimension (768, nomic-embed-text) is frozen at graph-creation
+# time by FalkorDB's vector index — only use this against a freshly wiped
+# FalkorDB volume, never one already indexed at OpenAI's 1536.
+
+name: quorum
+
+services:
+  graphiti:
+    volumes:
+      - ../graphiti/quorum-graphiti/mcp_server/config/config-docker-ollama.yaml:/app/mcp/config/config-docker-ollama.yaml:ro
+    environment:
+      - FALKORDB_URI=redis://falkordb:6379
+      - CONFIG_PATH=config/config-docker-ollama.yaml
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-ollama}
+      - OPENAI_API_URL=${OLLAMA_API_URL:-http://host.docker.internal:11434/v1}
+      - MODEL_NAME=${OLLAMA_LLM_MODEL:-gpt-oss:20b}
+      - EMBEDDER_MODEL=${OLLAMA_EMBEDDER_MODEL:-nomic-embed-text}
+      - GROUP_ID=${QUORUM_GROUP_ID:-default}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

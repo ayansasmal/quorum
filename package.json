@@ -28,6 +28,7 @@
     "docker:rebuild:dash": "docker compose --profile dashboard build --no-cache dashboard && docker compose --profile dashboard up -d dashboard",
     "docker:stop:dash": "docker compose stop dashboard",
     "docker:start:dash:dev": "docker compose -f docker-compose.yml -f docker-compose.dash-dev.yml --profile dashboard up -d dashboard",
+    "docker:start:ollama": "docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d graphiti",
     "dev:gateway": "npm run dev --workspace=gateway",
     "start:gateway": "npm run start --workspace=gateway",
     "test": "vitest run",

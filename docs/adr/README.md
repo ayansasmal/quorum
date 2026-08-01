@@ -20,6 +20,7 @@ but never deleted, mirroring the constitutional rule they often describe.
 | [0008](0008-dual-store-audit-pipeline.md) | Dual-store Audit Pipeline | Accepted |
 | [0009](0009-slim-jwt-and-profile-cache.md) | Slim JWT + Profile Cache (v0.3) | Accepted |
 | [0010](0010-redis-two-tier-config-cache.md) | Redis Two-tier Config and Profile Cache | Accepted |
+| [0011](0011-llm-provider-strategy-openai-vs-local.md) | LLM Provider Strategy — Stay on OpenAI, Defer Local Models | Accepted |
 
 ## Format
 

@@ -6,7 +6,7 @@
  *   frontend-standards     — React / Next.js standards
  *   backend-standards      — Node.js API and service standards
  *   infra-standards        — CI/CD, deployment, and operations standards
- *   architecture-principles — SOA, KISS, DRY, SLAP, SRP, and other design principles
+ *   architecture-principles — SOA, KISS, DRY, SLAP, and full SOLID (SRP/OCP/LSP/ISP/DIP)
  *   owasp-standards        — OWASP Top 10 (2021) compliance mapping
  *   performance-standards  — latency, throughput, and resource-efficiency standards
  *   testing-standards      — test pyramid, isolation, and quality-gate standards
@@ -14,31 +14,59 @@
  *   documentation-standards — ADRs, API docs, runbooks, and doc-freshness standards
  *   ai-systems-standards   — AI agent, MCP server, skill, and LLM-application standards
  *
- * Each catalog gets 10 ACTIVE entries (the minimum for UNCERTIFIED → CERTIFIED).
+ * Each catalog gets at least 10 ACTIVE entries (the minimum for UNCERTIFIED → CERTIFIED);
+ * every catalog now also carries extra enterprise-scale entries (Vault/SSO, multi-region
+ * DR, CAB change approval, Confluence/JIRA process, follow-the-sun on-call, multi-tenant
+ * isolation, design-system governance, model-governance boards, and more) that a small
+ * single-service project would legitimately deviate from — useful for exercising
+ * conformance scoring against standards that are deliberately overkill for the project
+ * under scan. owasp-standards additionally goes beyond the 10 Top-10-2021 categories with
+ * OWASP API Security Top 10 items and adjacent vulnerability classes (XXE, clickjacking,
+ * open redirect, insecure deserialization, supply-chain provenance).
  * Entries are seeded via POST /pg/versions with an admin JWT, which bypasses the
  * global-catalog self-approval guard (S-11.1) and writes directly as ACTIVE.
  *
+ * A final step then ingests every seeded entry into Graphiti/FalkorDB, into each
+ * catalog's own group_id database — closing the gap where entries seeded straight
+ * to PostgreSQL (bypassing the MCP remember() tool, which does this client-side)
+ * were otherwise invisible to search()'s semantic graph lookups. Reuses the same
+ * addEpisode() helper reconcile-globals.js already calls directly, which requires
+ * GRAPHITI_URL (direct Graphiti access) — the gateway's /graphiti proxy is
+ * JWT-gated and this client sends no Authorization header.
+ *
  * Usage:
- *   QUORUM_JWT=<admin-jwt> node scripts/seed-global-catalogs.js
+ *   QUORUM_JWT=<admin-jwt> GRAPHITI_URL=http://localhost:8001 node scripts/seed-global-catalogs.js
  *
  * QUORUM_JWT must carry is_admin: true.
  * Get it from the dashboard: DevTools → Network → any /api/* request → Authorization header.
  *
  * Optional env vars:
  *   QUORUM_GATEWAY_URL=http://localhost:3001   (default)
+ *   GRAPHITI_URL=http://graphiti:8000          (default; use http://localhost:8001 from host)
  *   QUORUM_OWNER=ayansasmal                    (default)
  *   QUORUM_DRY_RUN=1                           (print catalog list without writing)
  *   QUORUM_CONFIG_ONLY=1                       (re-upload catalog configs only — skips
- *                                                seedEntries; use after changing a config
- *                                                field like is_public so re-runs don't
- *                                                insert duplicate ACTIVE versions)
+ *                                                seedEntries and Graphiti population; use
+ *                                                after changing a config field like
+ *                                                is_public so re-runs don't insert
+ *                                                duplicate ACTIVE versions)
+ *   QUORUM_GRAPHITI_ONLY=1                     (skip hierarchy/config upload and
+ *                                                seedEntries — PostgreSQL already has the
+ *                                                ACTIVE entries; just replay Step 3 against
+ *                                                the in-memory CATALOGS entries. Use after
+ *                                                FalkorDB loses data — e.g. a restart before
+ *                                                its RDB save thresholds were crossed —
+ *                                                without re-versioning PostgreSQL)
  */
 
-const GATEWAY     = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
-const JWT         = process.env.QUORUM_JWT
-const OWNER       = process.env.QUORUM_OWNER ?? 'ayansasmal'
-const DRY_RUN     = process.env.QUORUM_DRY_RUN === '1'
-const CONFIG_ONLY = process.env.QUORUM_CONFIG_ONLY === '1'
+import { addEpisode } from '../gateway/src/shared/graph/client.js'
+
+const GATEWAY        = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
+const JWT            = process.env.QUORUM_JWT
+const OWNER          = process.env.QUORUM_OWNER ?? 'ayansasmal'
+const DRY_RUN        = process.env.QUORUM_DRY_RUN === '1'
+const CONFIG_ONLY    = process.env.QUORUM_CONFIG_ONLY === '1'
+const GRAPHITI_ONLY  = process.env.QUORUM_GRAPHITI_ONLY === '1'
 
 if (!DRY_RUN && !JWT) {
   console.error('[seed] QUORUM_JWT is required (must carry is_admin: true)')
@@ -214,6 +242,24 @@ const CATALOGS = [
         tags: ['security', 'auth', 'admin'],
         summary: 'MFA is required for all admin and production system access. SSH access to production hosts requires an approved bastion host with audit logging enabled.',
       },
+      {
+        topic: 'security', key: 'enterprise-secrets-vault-dynamic-rotation',
+        entity_type: 'Standard', confidence: 0.88,
+        tags: ['security', 'secrets', 'vault', 'enterprise'],
+        summary: 'Services handling PII or payments must source credentials as short-lived, dynamically-issued secrets from an enterprise secrets manager (HashiCorp Vault, AWS Secrets Manager) with automatic rotation and a per-lease audit trail. Static, hand-rotated API keys are prohibited for this tier.',
+      },
+      {
+        topic: 'security', key: 'sso-saml-enterprise-idp-federation',
+        entity_type: 'Constraint', confidence: 0.87,
+        tags: ['security', 'auth', 'sso', 'enterprise'],
+        summary: 'All internal tooling must federate authentication through the corporate identity provider (Okta, Entra ID) via SAML 2.0 or OIDC. Service-specific username/password logins for employees are prohibited once SSO federation is available for that tool.',
+      },
+      {
+        topic: 'security', key: 'hardware-key-privileged-access',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['security', 'auth', 'fido2', 'enterprise'],
+        summary: 'Privileged or production-data access requires a FIDO2/WebAuthn hardware security key as a phishing-resistant second factor. TOTP-only MFA is not sufficient for this access tier.',
+      },
     ],
   },
 
@@ -280,6 +326,18 @@ const CATALOGS = [
         entity_type: 'Guideline', confidence: 0.85,
         tags: ['practices', 'git', 'convention'],
         summary: 'Branches must follow: feat/slug, fix/slug, chore/slug, refactor/slug, or hotfix/slug. Slugs use hyphens, lowercase only. Generic names like dev, test, or my-branch are prohibited.',
+      },
+      {
+        topic: 'practices', key: 'atlassian-suite-workflow-integration',
+        entity_type: 'Guideline', confidence: 0.75,
+        tags: ['practices', 'jira', 'enterprise', 'workflow'],
+        summary: 'Git commits and PRs integrate with JIRA via smart commits or an equivalent bot (ticket key in the branch/commit, automatic status transitions) so work status is visible in the tracker without an engineer manually updating both systems.',
+      },
+      {
+        topic: 'practices', key: 'enterprise-vendor-oss-license-review',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['practices', 'dependencies', 'legal', 'enterprise'],
+        summary: 'New third-party dependencies with a copyleft license (GPL/AGPL) or no active maintenance in 18+ months require a legal/vendor-security review before adoption. This gate exists for organisations with license-compliance exposure, not for every codebase.',
       },
     ],
   },
@@ -348,6 +406,24 @@ const CATALOGS = [
         tags: ['frontend', 'react', 'styling'],
         summary: 'Use Tailwind utility classes or CSS modules for all styling. No inline style attributes except for dynamic values (e.g. widths derived from data). Inline styles defeat purging and theming.',
       },
+      {
+        topic: 'frontend', key: 'enterprise-design-system-governance',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['frontend', 'design-system', 'enterprise'],
+        summary: "Enterprise product surfaces consume components and tokens exclusively from the org's shared design-system package (Storybook-documented, versioned) rather than one-off styled components, so visual and interaction patterns stay consistent across dozens of product teams. Not a meaningful constraint until multiple teams ship overlapping UI.",
+      },
+      {
+        topic: 'frontend', key: 'i18n-l10n-required',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['frontend', 'i18n', 'enterprise'],
+        summary: 'User-facing strings are extracted through an i18n framework (no hardcoded copy in components) and locale/currency/date formatting is resolved from user locale, so the product can be localized for a new market without a code change. Overkill for a single-locale internal tool.',
+      },
+      {
+        topic: 'frontend', key: 'feature-flag-progressive-rollout',
+        entity_type: 'Standard', confidence: 0.77,
+        tags: ['frontend', 'feature-flags', 'enterprise'],
+        summary: 'New user-facing features ship behind a feature-flag service (LaunchDarkly or equivalent) with staged percentage rollout and an instant kill switch, rather than a binary deploy. Justified once a bad release affects enough users that instant rollback-without-redeploy matters.',
+      },
     ],
   },
 
@@ -414,6 +490,24 @@ const CATALOGS = [
         entity_type: 'Constraint', confidence: 0.93,
         tags: ['backend', 'nodejs', 'config'],
         summary: 'All configuration must come from environment variables. No hardcoded URLs, ports, credentials, or thresholds in source code. Config module validates required vars at startup and fails fast.',
+      },
+      {
+        topic: 'backend', key: 'api-gateway-registration',
+        entity_type: 'Standard', confidence: 0.80,
+        tags: ['backend', 'api-gateway', 'enterprise'],
+        summary: 'Backend services register with the central API gateway for auth, rate limiting, and service discovery rather than being reached directly by consumers. Meaningful once an org has enough services that ad hoc point-to-point calls become unmanageable.',
+      },
+      {
+        topic: 'backend', key: 'multi-tenant-data-isolation',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['backend', 'multi-tenancy', 'enterprise'],
+        summary: 'Services serving multiple enterprise tenants must enforce tenant_id scoping at the query layer (row-level security or an equivalent guard) on every table, verified by an automated cross-tenant data-leak test in CI. Only applicable once a service is genuinely multi-tenant.',
+      },
+      {
+        topic: 'backend', key: 'enterprise-api-versioning-policy',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['backend', 'api', 'versioning', 'enterprise'],
+        summary: 'Breaking API changes require a new major version with a published deprecation window (minimum 6 months) coordinated through an API governance process, so external and internal consumers have time to migrate. Excessive process for an API with a single internal consumer.',
       },
     ],
   },
@@ -482,6 +576,24 @@ const CATALOGS = [
         tags: ['infra', 'database', 'reliability'],
         summary: 'All stateful services must have automated daily backups with tested restore procedures. Restore drill required quarterly. RTO: 4 hours. RPO: 24 hours.',
       },
+      {
+        topic: 'infra', key: 'multi-region-active-active',
+        entity_type: 'Standard', confidence: 0.82,
+        tags: ['infra', 'multi-region', 'reliability', 'enterprise'],
+        summary: 'Tier-1 services must run active-active across at least two geographic regions with automated traffic failover, tested quarterly under simulated regional outage. Single-region deployment is not acceptable for this tier.',
+      },
+      {
+        topic: 'infra', key: 'change-advisory-board-approval',
+        entity_type: 'Standard', confidence: 0.80,
+        tags: ['infra', 'change-management', 'enterprise'],
+        summary: 'Production changes to Tier-1 systems during business-critical windows require Change Advisory Board (CAB) sign-off, logged in the enterprise change management system with a documented rollback plan, before deployment is scheduled.',
+      },
+      {
+        topic: 'infra', key: 'disaster-recovery-cross-region-drill',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['infra', 'disaster-recovery', 'enterprise'],
+        summary: 'Full disaster-recovery failover to a secondary region must be drilled at least twice per year, with RTO/RPO results documented and reviewed by engineering leadership. Backups alone do not satisfy this requirement — a real failover exercise is required.',
+      },
     ],
   },
 
@@ -548,6 +660,24 @@ const CATALOGS = [
         entity_type: 'Standard', confidence: 0.88,
         tags: ['architecture', 'reliability', 'contracts'],
         summary: 'Validate preconditions at the start of a function and throw immediately on violation. Do not let invalid state silently propagate deeper into the call stack where the failure becomes harder to attribute.',
+      },
+      {
+        topic: 'architecture', key: 'ocp-open-closed-principle',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['architecture', 'solid', 'ocp', 'extensibility'],
+        summary: 'Modules should be open for extension but closed for modification. Add new behaviour via a new implementation of an existing interface/strategy, not by editing a chain of if/else or switch branches inside code that already works and is already tested.',
+      },
+      {
+        topic: 'architecture', key: 'lsp-liskov-substitution',
+        entity_type: 'Standard', confidence: 0.85,
+        tags: ['architecture', 'solid', 'lsp', 'inheritance'],
+        summary: 'A subtype must be usable anywhere its base type is expected without altering correctness — no strengthened preconditions, weakened postconditions, or surprise exceptions the base type never declared. If a subclass has to throw "not supported" from an inherited method, the hierarchy is wrong.',
+      },
+      {
+        topic: 'architecture', key: 'isp-interface-segregation',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['architecture', 'solid', 'isp', 'interfaces'],
+        summary: 'Clients should not be forced to depend on methods they do not use. Prefer several small, role-specific interfaces over one broad interface — a consumer needing only read access should not be coupled to write/admin methods it never calls.',
       },
     ],
   },
@@ -616,6 +746,54 @@ const CATALOGS = [
         tags: ['owasp', 'a10', 'ssrf'],
         summary: 'OWASP A10:2021. Any server-side feature that fetches a URL supplied by a user (webhooks, image proxies, link previews) must validate against an allow-list and block requests to internal/private IP ranges and cloud metadata endpoints.',
       },
+      {
+        topic: 'owasp', key: 'xxe-xml-external-entity',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['owasp', 'xxe', 'injection'],
+        summary: 'All XML parsers must have external entity and DTD processing disabled by default. Any service accepting XML or SOAP input is a candidate for XXE unless the parser is explicitly configured safe — do not rely on the parser library\'s default.',
+      },
+      {
+        topic: 'owasp', key: 'clickjacking-frame-protection',
+        entity_type: 'Standard', confidence: 0.82,
+        tags: ['owasp', 'clickjacking', 'headers'],
+        summary: 'Authenticated pages must send X-Frame-Options: DENY or an equivalent frame-ancestors \'none\' CSP directive. A session-bearing page that can be framed by an untrusted origin is vulnerable to UI-redress attacks regardless of other controls.',
+      },
+      {
+        topic: 'owasp', key: 'open-redirect-validation',
+        entity_type: 'Standard', confidence: 0.82,
+        tags: ['owasp', 'open-redirect', 'validation'],
+        summary: 'Redirect targets sourced from a query parameter or form field must be validated against an allow-list of internal paths or known domains before issuing the redirect. Unrestricted redirect-to-any-URL enables phishing that trades on the trusted domain.',
+      },
+      {
+        topic: 'owasp', key: 'insecure-deserialization',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['owasp', 'deserialization', 'injection'],
+        summary: 'Untrusted data must never be deserialized with a format capable of instantiating arbitrary types (Java ObjectInputStream, Python pickle, unsafe YAML.load). Use data-only formats (JSON) or an explicit allow-listed type registry for anything crossing a trust boundary.',
+      },
+      {
+        topic: 'owasp', key: 'api-broken-object-level-authorization',
+        entity_type: 'Constraint', confidence: 0.90,
+        tags: ['owasp', 'api-security', 'authorization'],
+        summary: 'OWASP API Security Top 10, API1. Every endpoint that returns or mutates a specific object must verify the caller is authorized for that exact object ID, not just authenticated — enumerable resource IDs must never leak another user\'s data.',
+      },
+      {
+        topic: 'owasp', key: 'api-unrestricted-resource-consumption',
+        entity_type: 'Standard', confidence: 0.83,
+        tags: ['owasp', 'api-security', 'rate-limit'],
+        summary: 'OWASP API Security Top 10, API4. Endpoints accepting a size or quantity parameter (batch size, file upload, page limit) must enforce a hard server-side maximum independent of any client-supplied value, to prevent resource-exhaustion abuse.',
+      },
+      {
+        topic: 'owasp', key: 'supply-chain-provenance-slsa',
+        entity_type: 'Guideline', confidence: 0.72,
+        tags: ['owasp', 'supply-chain', 'enterprise'],
+        summary: 'Enterprise-tier services attest build provenance (SLSA level 2+) and sign release artifacts (Sigstore/cosign) so a compromised build pipeline cannot silently inject malicious code into a shipped release. This tooling overhead is not justified for a project with no external distribution.',
+      },
+      {
+        topic: 'owasp', key: 'third-party-penetration-test-cadence',
+        entity_type: 'Standard', confidence: 0.75,
+        tags: ['owasp', 'pentest', 'enterprise'],
+        summary: 'Internet-facing enterprise services undergo an independent third-party penetration test at least annually, with critical/high findings remediated within 30 days and tracked to closure. A hobby or internal-only project would not carry this requirement.',
+      },
     ],
   },
 
@@ -682,6 +860,24 @@ const CATALOGS = [
         entity_type: 'Guideline', confidence: 0.85,
         tags: ['performance', 'reliability', 'memory'],
         summary: 'Event listeners, timers, and subscriptions must be explicitly removed on component unmount or connection close. Long-running processes must be profiled for memory growth before being marked production-ready.',
+      },
+      {
+        topic: 'performance', key: 'capacity-planning-autoscaling-governance',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['performance', 'capacity', 'enterprise'],
+        summary: 'Enterprise-tier services document auto-scaling policies validated under simulated peak-event traffic (e.g. Black Friday scale) and reviewed by a capacity planning board ahead of known high-traffic events. Not warranted for services with flat, predictable load.',
+      },
+      {
+        topic: 'performance', key: 'global-edge-caching-multi-region',
+        entity_type: 'Standard', confidence: 0.80,
+        tags: ['performance', 'cdn', 'multi-region', 'enterprise'],
+        summary: 'Enterprise consumer-facing products serve cached content from edge nodes in every major served region, with cache-hit-ratio SLOs tracked per region — not just a single-region CDN pull zone. Justified only once traffic actually spans distant geographies.',
+      },
+      {
+        topic: 'performance', key: 'org-wide-performance-budget-dashboard',
+        entity_type: 'Guideline', confidence: 0.75,
+        tags: ['performance', 'core-web-vitals', 'enterprise'],
+        summary: "Core Web Vitals and API latency budgets are tracked on an org-wide dashboard across every product surface, with regressions triaged by a cross-team performance guild. Overhead that only pays off once an org ships enough surfaces for cross-team comparison to matter.",
       },
     ],
   },
@@ -750,6 +946,24 @@ const CATALOGS = [
         tags: ['testing', 'readability', 'naming'],
         summary: 'Test names describe observable behaviour and the scenario under test (e.g. "rejects login after 5 failed attempts"), not implementation details (e.g. "calls checkAttempts"). A failing test name should explain the break without opening the file.',
       },
+      {
+        topic: 'testing', key: 'dedicated-qa-environment-production-parity',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['testing', 'qa', 'enterprise'],
+        summary: "Enterprise release processes maintain a dedicated QA environment provisioned at production scale and configuration parity, used for pre-release sign-off distinct from CI's ephemeral test environment. Unnecessary overhead for a team that ships directly from CI.",
+      },
+      {
+        topic: 'testing', key: 'cross-team-contract-broker',
+        entity_type: 'Standard', confidence: 0.77,
+        tags: ['testing', 'contracts', 'enterprise'],
+        summary: "Contract tests publish to a shared broker (e.g. Pact Broker) so any team can verify compatibility against every consumer's expectations before deploying, rather than coordinating pairwise. Only pays off once enough services consume each other's APIs to make pairwise coordination impractical.",
+      },
+      {
+        topic: 'testing', key: 'compliance-control-verification-suite',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['testing', 'compliance', 'enterprise'],
+        summary: 'Enterprise services under SOC2/HIPAA/ISO27001 scope maintain an automated test suite that verifies specific compliance controls (access logging, encryption at rest, retention enforcement) map to passing tests, evidenced for audit. Not relevant until a compliance framework is actually in scope.',
+      },
     ],
   },
 
@@ -816,6 +1030,18 @@ const CATALOGS = [
         entity_type: 'Guideline', confidence: 0.80,
         tags: ['observability', 'monitoring', 'availability'],
         summary: 'Critical user journeys (login, checkout, core write path) are covered by synthetic monitoring that runs continuously from outside the infrastructure, so an outage is detected before a user reports it.',
+      },
+      {
+        topic: 'observability', key: 'follow-the-sun-oncall-rotation',
+        entity_type: 'Standard', confidence: 0.75,
+        tags: ['observability', 'oncall', 'enterprise'],
+        summary: 'Tier-1 services maintain a follow-the-sun on-call rotation across regional teams, with a formal handoff (open incidents, known issues, recent deploys) documented at each shift boundary. Only meaningful once an org has engineering teams in multiple timezones.',
+      },
+      {
+        topic: 'observability', key: 'enterprise-noc-escalation-tiers',
+        entity_type: 'Standard', confidence: 0.75,
+        tags: ['observability', 'noc', 'escalation', 'enterprise'],
+        summary: 'Alerts escalate through defined Network Operations Center tiers — L1 triage, L2 service owner, L3 engineering leadership — each with its own SLA timer before auto-escalating to the next tier. A single-person pager rotation does not need this structure.',
       },
     ],
   },
@@ -884,6 +1110,24 @@ const CATALOGS = [
         tags: ['documentation', 'runbook', 'oncall'],
         summary: 'Every production service has an on-call runbook covering common failure modes, escalation contacts, and rollback steps. A service without a runbook is not eligible to be added to the paging rotation.',
       },
+      {
+        topic: 'documentation', key: 'confluence-system-of-record',
+        entity_type: 'Standard', confidence: 0.78,
+        tags: ['documentation', 'confluence', 'enterprise'],
+        summary: 'Design docs, architecture decisions, and cross-team processes are published to the organisation\'s Confluence space as the canonical system of record. A decision that only exists in a private doc, chat thread, or a single README is not considered discoverable documentation at org scale.',
+      },
+      {
+        topic: 'documentation', key: 'jira-ticket-required-for-work',
+        entity_type: 'Standard', confidence: 0.80,
+        tags: ['documentation', 'jira', 'enterprise'],
+        summary: 'All engineering work (features, bugs, chores) must be tracked against a JIRA ticket linked in the PR description. Work without a ticket is not visible to portfolio-level planning, capacity reporting, or audit trails required at enterprise scale.',
+      },
+      {
+        topic: 'documentation', key: 'enterprise-doc-taxonomy-review',
+        entity_type: 'Guideline', confidence: 0.75,
+        tags: ['documentation', 'confluence', 'enterprise', 'maintenance'],
+        summary: 'Documentation space owners conduct a quarterly information-architecture review across Confluence spaces to catch duplicate, conflicting, or orphaned pages accumulating across teams — a governance overhead that only pays off once an org has enough teams writing docs to collide.',
+      },
     ],
   },
 
@@ -951,6 +1195,30 @@ const CATALOGS = [
         tags: ['ai-systems', 'agents', 'audit'],
         summary: 'Every AI-initiated write, delete, or external call is logged with the triggering agent/session identity and a reference to the prompt or context that caused it. This is required before an agent is granted any write capability, not added retroactively after an incident.',
       },
+      {
+        topic: 'ai-systems', key: 'enterprise-llm-data-governance',
+        entity_type: 'Constraint', confidence: 0.85,
+        tags: ['ai-systems', 'data-governance', 'enterprise'],
+        summary: 'Prompts and context sent to a third-party LLM provider must go through PII redaction and use only enterprise-approved providers under a signed data processing agreement with data-residency guarantees. Full enterprise data-governance overhead is not proportionate to a project with no sensitive data.',
+      },
+      {
+        topic: 'ai-systems', key: 'aws-bedrock-required-for-enterprise-llm-access',
+        entity_type: 'Standard', confidence: 0.82,
+        tags: ['ai-systems', 'llm', 'bedrock', 'aws', 'enterprise'],
+        summary: "Enterprise-tier services route LLM and embedding calls through AWS Bedrock (or an equivalent in-VPC enterprise model gateway) instead of calling a public provider API directly, so requests stay inside the org's AWS account boundary and inherit existing IAM, VPC endpoint, and CloudTrail controls rather than needing a separate vendor DPA per model. Direct calls to a public LLM API remain acceptable for internal tooling handling no sensitive data — this control is proportionate to services actually in enterprise/compliance scope.",
+      },
+      {
+        topic: 'ai-systems', key: 'model-governance-approval-board',
+        entity_type: 'Standard', confidence: 0.75,
+        tags: ['ai-systems', 'governance', 'enterprise'],
+        summary: 'Adopting a new production LLM/model version requires sign-off from a model governance board reviewing safety eval results, cost impact, and rollback plan before the swap ships. Justified once model choice affects many downstream teams and customer-facing behavior at once.',
+      },
+      {
+        topic: 'ai-systems', key: 'ai-usage-cost-chargeback',
+        entity_type: 'Guideline', confidence: 0.73,
+        tags: ['ai-systems', 'cost', 'enterprise'],
+        summary: 'LLM/embedding API spend is tagged per team or business unit and charged back through the enterprise cost-allocation system, with budget alerts per unit. Meaningful only once AI spend is large enough, and split across enough teams, to need allocation rather than a single shared bill.',
+      },
     ],
   },
 ]
@@ -996,6 +1264,37 @@ async function seedEntries(catalog) {
   return { ok, fail }
 }
 
+/**
+ * Ingest every entry of a catalog into Graphiti, into the catalog's own
+ * group_id database (no `database` override — these catalogs are not
+ * migrated_to_shared_graph). Runs after seedEntries() so PostgreSQL is the
+ * source of truth and this step only needs the in-memory entry list.
+ * @param {{ config: object, entries: object[] }} catalog
+ * @returns {Promise<{ ok: number, fail: number }>}
+ */
+async function populateGraphiti(catalog) {
+  const { group_id } = catalog.config
+  let ok = 0, fail = 0
+  for (const entry of catalog.entries) {
+    try {
+      await addEpisode(entry.summary, {
+        key:        `${entry.topic}:${entry.key}`,
+        source:     `quorum:seed:${OWNER}`,
+        entityType: entry.entity_type,
+        tags:       entry.tags,
+      }, group_id)
+      console.log(`  [${group_id}] ✓ graphiti ${entry.topic}:${entry.key}`)
+      ok++
+    } catch (err) {
+      console.error(`  [${group_id}] ✗ graphiti ${entry.topic}:${entry.key} — ${err.message}`)
+      fail++
+    }
+    // Brief pause to avoid overwhelming Graphiti's OpenAI embedding calls
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  return { ok, fail }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1014,38 +1313,70 @@ async function main() {
     return
   }
 
-  // Step 1 — upload hierarchy nodes (org → group → division → department)
-  console.log('\n── Hierarchy nodes ────────────────────────────────────')
-  for (const node of HIERARCHY_NODES) {
-    process.stdout.write(`[${node.group_id}] uploading... `)
-    try {
-      const res = await post('/config/upload', node.group_id, node)
-      console.log(`${res.status ?? 'ok'} (${node.hierarchy.level})`)
-    } catch (err) {
-      console.error(`FAILED — ${err.message}`)
+  let totalOk = 0, totalFail = 0
+
+  if (!GRAPHITI_ONLY) {
+    // Step 1 — upload hierarchy nodes (org → group → division → department)
+    console.log('\n── Hierarchy nodes ────────────────────────────────────')
+    for (const node of HIERARCHY_NODES) {
+      process.stdout.write(`[${node.group_id}] uploading... `)
+      try {
+        const res = await post('/config/upload', node.group_id, node)
+        console.log(`${res.status ?? 'ok'} (${node.hierarchy.level})`)
+      } catch (err) {
+        console.error(`FAILED — ${err.message}`)
+      }
     }
+
+    // Step 2 — upload catalog configs + seed entries
+    console.log('\n── Catalogs ───────────────────────────────────────────')
+    for (const catalog of CATALOGS) {
+      try {
+        console.log('')
+        await uploadConfig(catalog)
+        if (CONFIG_ONLY) continue
+        const { ok, fail } = await seedEntries(catalog)
+        totalOk   += ok
+        totalFail += fail
+      } catch (err) {
+        console.error(`[${catalog.config.group_id}] FAILED: ${err.message}`)
+        totalFail += catalog.entries.length
+      }
+    }
+  } else {
+    console.log('\n── QUORUM_GRAPHITI_ONLY=1 — skipping hierarchy/config upload and seedEntries ──')
   }
 
-  // Step 2 — upload catalog configs + seed entries
-  console.log('\n── Catalogs ───────────────────────────────────────────')
-  let totalOk = 0, totalFail = 0
-  for (const catalog of CATALOGS) {
-    try {
-      console.log('')
-      await uploadConfig(catalog)
-      if (CONFIG_ONLY) continue
-      const { ok, fail } = await seedEntries(catalog)
-      totalOk   += ok
-      totalFail += fail
-    } catch (err) {
-      console.error(`[${catalog.config.group_id}] FAILED: ${err.message}`)
-      totalFail += catalog.entries.length
+  // Step 3 — populate Graphiti (each catalog's own group_id database)
+  //
+  // KNOWN ISSUE: Graphiti's episode-processing queue has been observed to
+  // misroute episodes to the wrong physical FalkorDB database when
+  // addEpisode() calls targeting different group_ids land in quick
+  // succession (confirmed 2026-07-27: architecture_principles ended up with
+  // 0 of its own entries and 7 from other catalogs after a 200ms-per-entry,
+  // no-gap-between-catalogs run). Root cause not yet found — suspected
+  // shared/global "current database" state in Graphiti's episode worker,
+  // not scoped per async job. The settle pause below is an empirical
+  // mitigation (let one catalog's queue fully drain before starting the
+  // next), not a real fix. Verify per-catalog node counts after running
+  // this — do not assume clean routing.
+  let graphitiOk = 0, graphitiFail = 0
+  if (!CONFIG_ONLY) {
+    console.log('\n── Graphiti population ─────────────────────────────────')
+    for (const catalog of CATALOGS) {
+      const { ok, fail } = await populateGraphiti(catalog)
+      graphitiOk   += ok
+      graphitiFail += fail
+      await new Promise((r) => setTimeout(r, 5000))
     }
+    totalFail += graphitiFail
   }
 
   console.log('\n─── Summary ──────────────────────────────────────')
-  console.log(`Seeded:  ${totalOk} entries`)
-  console.log(`Failed:  ${totalFail} entries`)
+  console.log(`Seeded:            ${totalOk} entries (PostgreSQL)`)
+  console.log(`Failed:            ${totalFail - graphitiFail} entries (PostgreSQL)`)
+  console.log(`Graphiti ingested: ${graphitiOk} entries`)
+  console.log(`Graphiti failed:   ${graphitiFail} entries`)
   console.log('')
   console.log('Next steps:')
   console.log('  1. Link a project: add the catalog group_ids to its globals[] in the config')
