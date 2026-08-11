@@ -75,7 +75,7 @@
     "commit-and-tag-version": "^12.7.3",
     "husky": "^9.1.7",
     "jsonwebtoken": "^9.0.3",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "vitest": "4.1.9"
   },
   "overrides": {
